@@ -158,10 +158,14 @@ export function installBeats(stage, panels, caption) {
   // ------------------------------------------------ schema drift: a verified field mapping was learned
   on("change:schema_mappings", (doc, prev, m) => {
     if (!doc || !doc.source || prev?.version === doc.version) return;
+    if (doc.version === 1 || doc.source === doc.field) return;  // round reset rewound the live mapping to v1
     const sys = doc.system || "unix";
-    stage.stamp(sys, "MAPPING LEARNED", C.green, { sub: `${doc.previous ?? "?"} → ${doc.source} · v${doc.version}`, dur: 5, rot: -0.06 });
-    caption(`${sys} renamed ${doc.previous ?? "?"} → ${doc.source} · mapping learned v${doc.version}`,
-      "Guard verified by read-back · stored in swarm.schema_mappings for every agent", C.green);
+    const word = doc.reused ? "MAPPING REUSED" : "MAPPING LEARNED";
+    stage.stamp(sys, word, C.green, { sub: `${doc.previous ?? "?"} → ${doc.source} · v${doc.version}`, dur: 5, rot: -0.06 });
+    caption(`${sys} renamed ${doc.previous ?? "?"} → ${doc.source} · ` +
+      (doc.reused ? `seen before: mapping v${doc.version} reused` : `mapping learned v${doc.version}`),
+      doc.reused ? "Recalled from swarm.schema_mappings history (no Claude call) · Guard verified by read-back"
+                 : "Guard verified by read-back · stored in swarm.schema_mappings for every agent", C.green);
   });
 
   // ------------------------------------------------ thoughts (activity) + the Guard's rejection stamp

@@ -38,7 +38,7 @@ DECISIONS = {"approve": "approved", "approved": "approved", "deny": "denied", "d
 ALT_KEYS = {"ledger": ["action_id"], "checkpoints": ["checkpoint_id", "thread_id"],
             "incidents": ["steps.step_id"], "playbooks": ["incident"]}
 NEXT_ROUND_CLEAR = ["tasks", "messages",  # swarm runtime that must not leak into the next night
-                    "schema_samples", "schema_mappings"]  # the estate's feed schema is back at v1
+                    "schema_samples"]  # feed samples of the old night (the estate's feed is back at v1)
 
 
 def _chaos():
@@ -197,6 +197,12 @@ def reset(body: dict = Body(default_factory=dict)) -> dict:
                                 {"$set": {"status": "denied", "decided_by": "reset", "decided_at": t}})
         for c in NEXT_ROUND_CLEAR:
             s[c].delete_many({})
+        # learned field mappings are memory: the live mapping goes back to v1 (so the v1 feed doesn't look like
+        # drift), but every Guard-verified rename stays in `history`; only a full reset deletes them
+        out["schema_rewound"] = s.schema_mappings.update_many(
+            {"$expr": {"$ne": ["$source", "$field"]}},
+            [{"$set": {"previous": "$source", "source": "$field", "version": 1, "reused": False,
+                       "rewound_at": t}}]).modified_count
         s.agents.update_many({"status": {"$ne": "dead"}},
                              {"$set": {"target": None, "incident": None, "task": None, "phase": None}})
         w.runs.update_many({"ended_at": None}, {"$set": {"ended_at": t}})

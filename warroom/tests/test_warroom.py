@@ -156,14 +156,21 @@ def test_reset_next_round_keeps_memory_full_wipes(app_client):
     swarm().incidents.insert_one({"_id": "INC-1", "status": "fixing", "system": "portal", "opened_at": now(), "active": True})
     swarm().approvals.insert_one({"_id": "APR-1", "status": "pending", "ts": now()})
     swarm().tasks.insert_one({"_id": "INC-1-t1", "incident": "INC-1"})
+    hist = [{"version": 2, "from": "balance", "to": "acct_bal"}, {"version": 3, "from": "acct_bal", "to": "ledger_bal"}]
+    swarm().schema_mappings.insert_one({"_id": "unix.xfer_manifest.balance", "field": "balance", "source": "ledger_bal",
+                                        "previous": "acct_bal", "version": 3, "history": hist})
     r = app_client.post("/api/reset", json={"mode": "next_round"}).json()
     assert r["ok"] and r["closed_incidents"] == 1 and "unreachable" in str(r["systems"])
     assert swarm().playbooks.count_documents({}) == 1
     assert swarm().incidents.find_one({"_id": "INC-1"})["active"] is False
     assert swarm().approvals.find_one({"_id": "APR-1"})["status"] == "denied"
     assert swarm().tasks.count_documents({}) == 0
+    # the estate's feed is v1 again: live mapping rewound, verified history kept as memory
+    m = swarm().schema_mappings.find_one({"_id": "unix.xfer_manifest.balance"})
+    assert r["schema_rewound"] == 1 and m["source"] == "balance" and m["version"] == 1 and m["history"] == hist
     assert app_client.post("/api/reset", json={"mode": "full"}).json()["ok"]
     assert swarm().playbooks.count_documents({}) == 0 and swarm().incidents.count_documents({}) == 0
+    assert swarm().schema_mappings.count_documents({}) == 0
     assert app_client.post("/api/reset", json={"mode": "bogus"}).status_code == 400
 
 
