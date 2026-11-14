@@ -19,6 +19,7 @@ const P = {
   approval: '<path d="M3 14V2h8l-1.5 3L11 8H4.5" fill="none" stroke="currentColor" stroke-width="1.8"/>',
   upgrade: '<path d="M8 2l6 7h-4v5H6V9H2z"/>',
 };
+const XMARK = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" fill="none"/></svg>';
 const icon = (k) => `<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">${P[k] || P.thought}</svg>`;
 
 const STATUS_PILL = {
@@ -237,7 +238,7 @@ export class Panels {
     if (status === "thinking") { pill.textContent = "Claude is thinking…"; pill.className = "pill violet pulse"; }
     else if (status !== "done") { pill.textContent = "offline"; pill.className = "pill"; }
     else if (ai.agrees_with_policy) { pill.textContent = "agrees ✓"; pill.className = "pill green"; }
-    else { pill.textContent = `${ops.length - bad.length} ✓ · ${bad.length} ✗${missed.length ? ` · ${missed.length} added` : ""}`; pill.className = `pill ${bad.length ? "red" : "blue"}`; }
+    else { pill.textContent = bad.length ? `${bad.length} overruled` : `${missed.length} added by policy`; pill.className = `pill ${bad.length ? "red" : "blue"}`; }
     const flow = '<div class="ai-flow"><b>Claude proposes</b> → <i>policy + read-back check</i> → <i>Guard verifies</i> · nothing Claude says is executed</div>';
     if (status !== "done") {
       $("#ai-body").innerHTML = flow + `<div class="ai-off">${status === "thinking" ? "Asking Claude for an independent diagnosis from the evidence the Hive gathered…" : "No answer (timeout or error). The Hive carries on: policy decides every op anyway."}</div>`;
@@ -246,12 +247,12 @@ export class Panels {
     const pol = ai.policy || {};
     const root = ai.root_agrees
       ? `<span class="ok">✓</span><span>root cause ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">same as policy</span>`
-      : `<span class="bad">✗</span><span>Claude: ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">policy: ${esc(pol.root_system || "?")} · ${esc(pol.fault_class || "?")}</span>`;
+      : `<span class="bad">${XMARK}</span><span>Claude: ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">policy: ${esc(pol.root_system || "?")} · ${esc(pol.fault_class || "?")}</span>`;
     const label = (o) => `${esc(o.op)} <i>@ ${esc(o.system)}</i>`;
     // agreed + policy-added ops as one wrap of chips; each overruled op gets its own row with the reason
     const chips = ops.filter((o) => o.verdict === "agree").map((o) => `<span class="ai-chip ok" title="${esc(o.why || "")}">✓ ${label(o)}${o.gated ? '<b>approval first</b>' : ""}</span>`)
       .concat(missed.map((m) => `<span class="ai-chip add" title="Claude didn't propose it; the policy plan includes it">+ ${label(m)}<b>policy adds</b></span>`)).join("");
-    const rows = bad.map((o) => `<li class="ai-op overruled"><span class="mk">✗</span><span class="nm">${label(o)}</span><span class="tg">overruled</span><span class="why">${esc(o.reason || "refused by policy")}</span></li>`).join("");
+    const rows = bad.map((o) => `<li class="ai-op overruled"><span class="mk">${XMARK}</span><span class="nm">${label(o)}</span><span class="tg">overruled</span><span class="why">${esc(o.reason || "refused by policy")}</span></li>`).join("");
     $("#ai-body").innerHTML = `${flow}
       ${ai.hypothesis ? `<div class="ai-hyp" title="${esc(ai.hypothesis)}">“${esc(ai.hypothesis)}”</div>` : ""}
       <div class="ai-root">${root}</div>
