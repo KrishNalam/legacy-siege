@@ -326,3 +326,17 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   the existing false_log hook with `{prompt_injection:true}`; the system also checks the switch and writes a fixed
   instruction-like log line, changing no actual state. Poison preparation is NOT in the whitelist: no Memory Striker
   until visible Guard rejection is proved. Both reset routes remove any `red_planted:true` playbooks/lessons.
+
+- **Comms / Sentinel #2 (additive W17, `SWARM_COMMS=1`, default off).** `messages` retains its
+  existing fields; opt-in writes add `priority` (higher first), `severity`, `source`, `incident`,
+  `system`, `count`, `comms_processed`. Index `comms_priority_incident` orders priority/incident/time.
+  The existing Waggle batches at most 256 changes or 0.5 s, ranks severity then pending human
+  approval then system (portal/unix/mainframe), then duplicate count, and merges equivalent text with labelled counters/durations
+  removed within the same incident/system/kind/severity. Original raw messages remain for audit;
+  duplicates carry `merged_into` and their representative carries the total `count`. Consumers use
+  `comms_processed:true` with no `merged_into` for the prioritised feed. A `kind:comms`
+  thought says "Comms: N messages, M merged, top: …"; cumulative totals live in `stats:comms`.
+  The existing Sentinel separately scans incident signatures and non-stale failure lessons. At 3+
+  occurrences it upserts `gardener_notes {_id:signature, source, system, problem, count, evidence,
+  text, ts, updated_at}` and emits a `gardener_note` message/thought once per signature. These are
+  advisory notes, not upgrade requests; Gardener behavior is unchanged. Full reset clears notes.
