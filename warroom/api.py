@@ -307,6 +307,24 @@ def atlas() -> dict:
     return to_json({"collections": out, "uri_host": f"{host}:{port}" if port else host})
 
 
+@router.get("/memory")
+def memory() -> dict:
+    """The Hive's memory, read-only: playbooks (what worked), lessons (what failed verification; FAILURE_MEMORY=1)
+    and schema mappings, each with the system version it was learned on, the current version, stale, uses and
+    last used. Everything is in MongoDB, so a Nurse that takes over reads exactly this."""
+    from swarm import lessons  # noqa: PLC0415
+    versions = {d["_id"]: d.get("version") for d in world().systems.find({}, {"version": 1})}
+    rows = lessons.items(versions)
+    counts: dict[str, dict[str, int]] = {}
+    for r in rows:
+        c = counts.setdefault(r["kind"], {"total": 0, "stale": 0, "used": 0})
+        c["total"] += 1
+        c["stale"] += int(bool(r["stale"]))
+        c["used"] += int(bool(r.get("uses")))
+    return to_json({"failure_memory": lessons.enabled(), "current_versions": versions, "counts": counts,
+                    "items": rows})
+
+
 def _id_candidates(raw: str) -> list[Any]:
     cands: list[Any] = [raw]
     if ObjectId.is_valid(raw):

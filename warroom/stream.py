@@ -42,6 +42,7 @@ COUNT_ONLY = {"system_state", "checkpoint_writes"}
 # an update touching only these fields is a heartbeat / lease renewal: aggregate, don't animate
 QUIET_FIELDS = {"last_seen", "lease_until", "updated_at", "heartbeat_at", "pid"}
 TOKEN_DOC = "stream_tokens"
+WATCHED["swarm"].append("lessons")  # failure memory (swarm/lessons.py): empty unless FAILURE_MEMORY=1
 
 
 def db_names() -> dict[str, str]:
