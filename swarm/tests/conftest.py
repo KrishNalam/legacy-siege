@@ -10,8 +10,9 @@ import time
 from pathlib import Path
 
 FAKE_PORT = int(os.environ.get("SWARM_TEST_PORT", 18731))
+_SFX = os.environ.get("SWARM_TEST_DB_SUFFIX", "")  # e.g. "_w2" when several checkouts test on one MongoDB at once
 TEST_ENV = {
-    "WORLD_DB": "world_test_swarm", "SWARM_DB": "swarm_test_swarm",
+    "WORLD_DB": f"world_test_swarm{_SFX}", "SWARM_DB": f"swarm_test_swarm{_SFX}",
     "PACE": os.environ.get("SWARM_TEST_PACE", "0"),  # SWARM_TEST_PACE=1 for a demo-paced dry run
     "HEARTBEAT_S": "0.5", "LEASE_S": "3", "DEAD_AFTER_S": "2.5", "NURSE_RESPAWN_S": "2",
     "SENTINEL_POLL_S": "0.2", "SENTINEL_CONFIRM_POLLS": "2", "SWARM_POLL_S": "0.1", "NURSE_POLL_S": "0.2",
