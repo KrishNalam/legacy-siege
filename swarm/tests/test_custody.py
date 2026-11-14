@@ -76,3 +76,42 @@ def test_validators_reject_bad_lease_and_undecided_approval(spine):
         col("approvals").update_one({"_id": "APR-1"}, {"$set": {"status": "approved"}})
     col("approvals").update_one({"_id": "APR-1"}, {"$set": {"status": "approved", "decided_by": "beekeeper",
                                                              "decided_at": now()}})
+
+
+def test_takeover_then_quick_release_keeps_both(spine):
+    """RV1: the after-state must be the event's own (post-image / pre-image + updateDescription), not a later
+    lookup. Events are replayed from a token taken BEFORE the writes, so every lookup would see the release."""
+    from common.db import col, now, swarm
+    from swarm import custody, leases
+    col("tasks").insert_one({"_id": "INC-0002-t1", "incident": "INC-0002", "kind": "fix", "specialty": "unix",
+                             "step_ids": [], "status": "claimed", "owner": "worker-unix-1",
+                             "lease_until": now() - timedelta(seconds=5), "generation": 1, "ts": now()})
+    with swarm().watch(custody.PIPELINE, max_await_time_ms=100) as cs:
+        cs.try_next()
+        token = cs.resume_token
+    col("stats").update_one({"_id": custody.TOKEN_ID}, {"$set": {"token": token}}, upsert=True)
+    won = leases.takeover(col("tasks"), "INC-0002-t1", "worker-unix-1", 1, "nurse-1")
+    assert leases.release(col("tasks"), "INC-0002-t1", "nurse-1", won["generation"], {"status": "done"})
+    stop = threading.Event()
+    t = custody.start(stop)
+    try:
+        rows = wait_for(lambda: (r := list(col("custody").find({"doc_id": "INC-0002-t1"}).sort("seq", 1)))
+                        and len(r) >= 2 and r, 10, what="custody rows")
+    finally:
+        stop.set()
+        t.join(3)
+    assert [(r["kind"], r["from_owner"], r["to_owner"]) for r in rows] == [
+        ("takeover", "worker-unix-1", "nurse-1"), ("release", "nurse-1", None)]
+    assert rows[0]["gen_after"] == 2 and rows[0]["status_after"] == "claimed" and rows[1]["status_after"] == "done"
+    assert custody.verify_chain("INC-0002-t1")
+
+
+def test_event_states_without_post_image():
+    """Fallback path: no stored post-image -> pre-image + updateDescription (dotted array paths ignored)."""
+    from swarm import custody
+    ev = {"fullDocumentBeforeChange": {"_id": "t", "owner": "w", "generation": 1, "status": "claimed", "x": 1},
+          "updateDescription": {"updatedFields": {"owner": "n", "generation": 2, "steps.0.status": "sent"},
+                                "removedFields": ["x"]}}
+    before, after, had_pre = custody.event_states(ev)
+    assert had_pre and before["owner"] == "w" and after == {"_id": "t", "owner": "n", "generation": 2,
+                                                            "status": "claimed"}
