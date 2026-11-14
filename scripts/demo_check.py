@@ -496,15 +496,20 @@ class Demo:
         out = self.start("bank-night-3")
         run_id, t0 = out["run_id"], time.monotonic()
         max_active, worst = 0, {}
+        # With the Red fleet on, other attacks may open their own incidents on unix/portal this night; the beat is
+        # that the replayed batch_abort opens none: count only incidents that touch the mainframe or its fault.
+        mine = {"$or": [{"fault_class": "batch_abort"}, {"system": "mainframe"}, {"affected": "mainframe"},
+                        {"root_cause_system": "mainframe", "kind": {"$ne": "security"}}]} if self.red_kill else {}
         while time.monotonic() - t0 < watch_s:
-            max_active = max(max_active, self.s.incidents.count_documents({"active": True}))
+            max_active = max(max_active, self.s.incidents.count_documents({"active": True, **mine}))
             for d in self.w.systems.find():
-                if d["status"] != "up":
+                if d["status"] != "up" and (d["_id"] == "mainframe" or not self.red_kill):
                     worst[d["_id"]] = d["status"]
             time.sleep(0.5)
-        ev = self.w.chaos_events.find_one({"run_id": run_id, "fault": "batch_abort"}) or {}
+        ev = self.w.chaos_events.find_one({"run_id": run_id, "fault": "batch_abort",
+                                           "source": {"$ne": "red-fleet"}}) or {}
         st = self.mf_state()
-        n = self.s.incidents.count_documents({"run_id": run_id})
+        n = self.s.incidents.count_documents({"run_id": run_id, **mine})
         ok = (ev.get("status") == "ok" and n == 0 and max_active == 0 and not worst
               and st["batch"]["status"] == "OK")
         self.r.add("g. night 3: batch_abort shrugged off", ok,
