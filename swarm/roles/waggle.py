@@ -129,7 +129,39 @@ def run(agent: Agent) -> None:
             agent.nap(1.0)
 
 
-def post_batch(agent, lines):
+BATCH_MAX, BATCH_S = 256, 0.5  # one prioritiser batch: at most 256 changes or 0.5 s
+LOG_THOUGHT_S = 5.0  # a batch of estate log lines only narrates "Comms: ..." at most this often
+LOGS_RESUME = 'waggle_logs_resume'
+
+
+def drain(streams, limit=BATCH_MAX, budget_s=BATCH_S):
+    """One bounded batch from several change streams, round-robin so an estate log flood never starves the
+    hive's own events: [(name, event)], at most `limit` long. A stream that has nothing left drops out."""
+    live, out, start = list(streams), [], time.monotonic()
+    while live and len(out) < limit:
+        for name, stream in list(live):
+            ev = stream.try_next()
+            if ev is None:
+                live.remove((name, stream))
+                continue
+            out.append((name, ev))
+            if len(out) >= limit or time.monotonic() - start >= budget_s:
+                return out
+    return out
+
+
+def log_lines(docs):
+    """world.system_logs inserts -> comms inputs (source=<system>), tagged with the active incident whose
+    blast radius holds that system (when exactly one does)."""
+    owner, seen = {}, set()
+    for inc in col('incidents').find({'active': True}, {'affected': 1, 'system': 1}):
+        for sysid in set(inc.get('affected') or []) | {inc.get('system')}:
+            owner[sysid] = None if sysid in seen else inc['_id']
+            seen.add(sysid)
+    return [m for m in (comms.from_log(d, owner.get(d.get('system'))) for d in docs) if m]
+
+
+def post_batch(agent, lines, *, narrate=True):
     waiting = {a.get('incident') for a in col('approvals').find({'status': 'pending'}, {'incident': 1})}
     groups = comms.prioritise(lines, waiting - {None})
     for m in groups:
@@ -141,35 +173,43 @@ def post_batch(agent, lines):
                 col('messages').update_many({'_id': {'$in': stored[1:]}},
                     {'$set': {'comms_processed': True, 'merged_into': stored[0]}})
         else:
-            say(agent.id, m['to'], m['kind'], m['body'], incident=m['incident'],
+            say(agent.id, m['to'], m['kind'], m['body'], incident=m['incident'], source=m['source'],
                 system=m['system'], severity=m['severity'], count=m['count'], processed=True, priority=m['priority'])
     if groups:
         n = sum(m['count'] for m in groups)
-        text = f"Comms: {n} messages, {n - len(groups)} merged, top: {str(groups[0]['body'])[:140]}"
-        think(agent.id, 'waggle', text, kind='comms')
-        col('stats').update_one({'_id': 'comms'}, {'$inc': {'messages': n, 'merged': n - len(groups)},
+        n_logs = sum(m['count'] for m in groups if m['kind'] == 'log')
+        if narrate:
+            text = f"Comms: {n} messages, {n - len(groups)} merged, top: {str(groups[0]['body'])[:140]}"
+            think(agent.id, 'waggle', text, kind='comms')
+        col('stats').update_one({'_id': 'comms'}, {'$inc': {'messages': n, 'merged': n - len(groups), 'logs': n_logs},
             '$set': {'top': str(groups[0]['body'])[:140]}}, upsert=True)
+    return groups
 
 
 def run_prioritiser(agent):
-    """Bounded batches on the existing agent; save the token after posting the batch."""
+    """Bounded batches on the existing agent over two streams: the swarm DB (hive events + messages) and
+    world.system_logs (WARN/ERROR/ABEND estate lines). Each stream's token is saved after its batch is posted."""
     pipeline = [{'$match': {'$or': PIPELINE[0]['$match']['$or'] + [
         {'ns.coll': 'messages', 'operationType': 'insert', 'fullDocument.comms_processed': {'$ne': True}},
         {'ns.coll': 'approvals', 'operationType': 'insert'},
     ]}}]
+    last_log_thought = 0.0
     while not agent.stop.is_set():
         token = (col('stats').find_one({'_id': 'waggle_resume'}) or {}).get('token')
+        log_token = (col('stats').find_one({'_id': LOGS_RESUME}) or {}).get('token')
         try:
             with swarm().watch(pipeline, full_document='updateLookup', resume_after=token,
-                               max_await_time_ms=500) as stream:
+                               max_await_time_ms=400) as stream, \
+                    col('system_logs').watch(comms.LOG_PIPELINE, resume_after=log_token,
+                                             max_await_time_ms=100) as logs:
                 while not agent.stop.is_set():
-                    lines, start = [], time.monotonic()
-                    for _ in range(256):
-                        ev = stream.try_next()
-                        if ev is None:
-                            break
-                        coll = ev['ns']['coll']
+                    lines, log_docs = [], []
+                    for name, ev in drain([('swarm', stream), ('logs', logs)]):
                         doc = ev.get('fullDocument') or {}
+                        if name == 'logs':
+                            log_docs.append(doc)
+                            continue
+                        coll = ev['ns']['coll']
                         if coll == 'messages':
                             lines.append(doc)
                         elif coll == 'approvals':
@@ -181,16 +221,19 @@ def run_prioritiser(agent):
                                 m.update(source=coll, incident=ev['documentKey']['_id'] if coll == 'incidents'
                                          else doc.get('incident'), system=doc.get('system'))
                                 lines.append(m)
-                        if time.monotonic() - start >= 0.5:
-                            break
+                    hive_lines = bool(lines)
+                    lines += log_lines(log_docs) if log_docs else []
                     if lines:
-                        post_batch(agent, lines)
-                    if stream.resume_token:
-                        col('stats').update_one({'_id': 'waggle_resume'},
-                            {'$set': {'token': stream.resume_token}}, upsert=True)
+                        narrate = hive_lines or time.monotonic() - last_log_thought >= LOG_THOUGHT_S
+                        post_batch(agent, lines, narrate=narrate)
+                        if narrate and not hive_lines:
+                            last_log_thought = time.monotonic()
+                    for doc_id, s in (('waggle_resume', stream), (LOGS_RESUME, logs)):
+                        if s.resume_token:
+                            col('stats').update_one({'_id': doc_id}, {'$set': {'token': s.resume_token}}, upsert=True)
         except OperationFailure as e:
-            log(agent.id, f'resume failed ({e.code}); starting a fresh stream')
-            col('stats').delete_one({'_id': 'waggle_resume'})
+            log(agent.id, f'resume failed ({e.code}); starting fresh streams')
+            col('stats').delete_many({'_id': {'$in': ['waggle_resume', LOGS_RESUME]}})
         except PyMongoError as e:
             log(agent.id, f'stream error: {e}')
             agent.nap(1.0)

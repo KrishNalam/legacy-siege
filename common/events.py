@@ -14,10 +14,10 @@ def think(agent: str, role: str, text: str, incident: str | None = None, system:
 
 
 def say(frm: str, to: str, kind: str, body: dict | str, *, incident=None, system=None,
-        severity=None, count=1, processed=False, priority=None) -> None:
+        severity=None, count=1, processed=False, priority=None, source=None) -> None:
     doc = {"from": frm, "to": to, "kind": kind, "body": body, "ts": now()}
     if comms.enabled():
-        doc.update(comms.metadata(frm, kind, body, incident=incident, system=system, severity=severity))
+        doc.update(comms.metadata(source or frm, kind, body, incident=incident, system=system, severity=severity))
         doc.update(count=count, comms_processed=processed)
         if priority is not None:
             doc["priority"] = priority
