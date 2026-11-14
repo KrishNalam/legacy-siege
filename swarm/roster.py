@@ -101,8 +101,10 @@ class Roster:
 
     def sweep(self) -> int:
         self.n += 1
-        if self.n % FULL_REFRESH_EVERY == 0:
-            self.written.clear()
+        # Every Nth sweep force-writes every live doc (self-heals a roster wiped behind our back) without
+        # forgetting the lifecycle cache: clearing self.written would drop retired agents before their
+        # RETIRED_KEEP_S expiry and leave their rows in swarm.roster forever.
+        force = self.n % FULL_REFRESH_EVERY == 0
         t = now()
         agents = list(col("agents").find({}, {"role": 1, "specialty": 1, "status": 1, "target": 1, "incident": 1,
                                              "task": 1, "phase": 1, "pid": 1, "last_seen": 1, "standby_for": 1,
@@ -126,7 +128,7 @@ class Roster:
         for aid, d in docs.items():
             hb, prev_hb = seen.get(aid), self.hb_written.get(aid)
             hb_due = hb is not None and (prev_hb is None or (hb - prev_hb).total_seconds() >= config.HEARTBEAT_S)
-            if d != self.written.get(aid) or hb_due:
+            if force or d != self.written.get(aid) or hb_due:
                 ops.append(UpdateOne({"_id": aid}, {"$set": {**d, "last_seen": hb, "updated_at": t}}, upsert=True))
                 self.written[aid], self.hb_written[aid] = d, hb
         for aid in list(self.written):

@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from common.db import col, now
 from swarm import roster
+from swarm.tests.conftest import reset_runtime
 
 
 def test_roster_tracks_parent_death_takeover_and_retire(db):
@@ -43,3 +44,27 @@ def test_roster_tracks_parent_death_takeover_and_retire(db):
     col("agents").delete_one({"_id": "worker-unix-2"})  # scaled down (retire deletes the agent doc)
     r.sweep()
     assert col("roster").find_one({"_id": "worker-unix-2"})["state"] == "retired"
+
+
+def test_retired_row_expires_across_full_refresh_sweep(db, monkeypatch):
+    """RF1: the every-Nth full-refresh sweep must not forget retired agents (row would never expire)."""
+    reset_runtime()
+    t0 = now()
+    col("roster").delete_many({})
+    col("agents").insert_many([{"_id": "scout-1", "role": "scout", "status": "idle", "last_seen": t0},
+                               {"_id": "worker-unix-9", "role": "worker", "status": "idle", "last_seen": t0}])
+    clock = {"t": t0}
+    monkeypatch.setattr(roster, "now", lambda: clock["t"])
+    r = roster.Roster()
+    r.sweep()
+    col("agents").delete_one({"_id": "worker-unix-9"})  # scaled down
+    r.sweep()
+    assert col("roster").find_one({"_id": "worker-unix-9"})["state"] == "retired"
+    while r.n % roster.FULL_REFRESH_EVERY != roster.FULL_REFRESH_EVERY - 1:
+        r.sweep()
+    r.sweep()  # the full-refresh sweep, inside the retired keep window
+    assert r.n % roster.FULL_REFRESH_EVERY == 0
+    clock["t"] = t0 + timedelta(seconds=roster.RETIRED_KEEP_S + 5)
+    r.sweep()
+    assert col("roster").find_one({"_id": "worker-unix-9"}) is None
+    assert col("roster").find_one({"_id": "scout-1"})["state"] == "idle"
