@@ -205,19 +205,31 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     also fails while the mapping doesn't match. A drifted feed makes the portal `degraded`, blames `unix`,
     `error_rate` 0.25; unix stays `up`. Full fix: `map_field` → `refresh_cache`.
   - War room: `schema_drift` in the fault launcher, with its own strike caption.
-- **`swarm.incidents.ai` (optional, advisory — "AI second opinion").** Written only when `ANTHROPIC_API_KEY` is set, by a
-  background thread the Scout starts right after it writes the plan (`swarm/second_opinion.py`; ≤1 call per incident,
-  ≤2 in flight per process, 20 s end-to-end budget, never awaited). Claude (`LLM_MODEL`, structured JSON output) gets
-  the Hive's findings (symptoms, systems examined, status/blames/facts — not the policy's fault_class, root cause or
-  plan) plus the ops catalog, and proposes a root cause and ops. A deterministic judge compares each op with the plan
-  being executed and with read-backs taken before the call. Shape:
-  `{status: "thinking"|"done"|"offline", model, request_id, started_at, done_at, latency_ms, error?, hypothesis,
-  root_system, fault_class, root_agrees, policy: {root_system, fault_class}, agrees_with_policy, evidence_at,
-  proposed_ops: [{system, op, params, why, verdict: "agree"|"overruled", reason, note, gated, plan_n}],
-  overruled_ops: [{op, system, reason}], missed_ops: [{system, op, params, n}]}`.
-  Writes are conditional on `{_id, opened_at}` + `ai.request_id` (a reset can reuse an `INC-` id). **No decision path
-  reads this field**; the policy still picks every op. No key / timeout / error → field absent or `status:"offline"`,
-  and the war room's "AI second opinion" card stays hidden or shows offline. `common.llm.complete_json()` is the
-  structured-output sibling of `complete()` (same rules: no sampling params, thinking off, effort low; no retries).
-  The Scout also posts one activity line (`kind:"thought"`) with the verdict. `scripts.demo_check --check-ai` adds an
-  opt-in row for it (not one of the 26 beats; skipped without a key).
+- **`swarm.incidents.ai` (optional, advisory) — shared shape for every "Claude proposes, verification disposes" feature.**
+  Written by W2's second opinion (`kind:"second_opinion"`) and W3's schema-drift mapping (`kind:"schema_mapping"`);
+  the war-room "AI" card renders either kind from these common fields:
+  ```
+  ai: {kind: "second_opinion"|"schema_mapping",
+       status: "thinking"|"done"|"offline",          # optional; absent = done
+       model, hypothesis: str, cites: [str],          # cites = ids of the evidence lines Claude relied on
+       confidence: 0..1|null, latency_ms: int,
+       proposed_ops: [{op, target, params: {}, risk: "safe"|"destructive", why}],
+       verdicts:     [{op, target, verdict: "accepted"|"overruled", rule, reason}],   # aligned with proposed_ops by index
+       evidence: [{id, src, text}]}                   # optional: the cited lines, so the card can show them
+  ```
+  `rule` names the guardrail that decided (e.g. `"P3 blast radius"`, `"P6 approval gate"`, or W3's read-back check);
+  `reason` is one plain sentence. Kind-specific extras are allowed next to these fields (second_opinion adds
+  `request_id, started_at, done_at, error, root_system, fault_class, root_agrees, policy{root_system, fault_class},
+  missed_ops[{op, target, params}], tally{proposed, accepted, overruled}`). **No decision path reads `ai`.**
+- **Second opinion details (W2, `swarm/second_opinion.py`).** Behind `AI_SECOND_OPINION=1` (default off) and a key.
+  The Scout starts one background thread right after writing the plan (≤1 call per incident, ≤2 in flight per
+  process, 20 s end-to-end budget, never awaited). Claude (`LLM_MODEL`, structured JSON) gets numbered evidence
+  (symptoms, each hop's status/blames/facts, the last few `/logs` lines per system; never the policy's fault_class,
+  root cause or plan) plus the ops catalog, and is asked for the fastest safe recovery. A deterministic judge
+  checks each proposed op against the plan being executed and read-backs taken before the call; named rules:
+  P1 catalog, P2 dependency order, P3 blast radius, P4 read-back, P5 scope, P6 approval gate (accepted, gated).
+  Writes are conditional on `{_id, opened_at}` + `ai.request_id` (a reset can reuse an `INC-` id). Running tally
+  in `swarm.stats{_id:"ai_tally", proposed, accepted, overruled, incidents}` (copied onto each `ai.tally`).
+  No flag / no key / timeout / error → field absent or `status:"offline"`. `common.llm.complete_json()` is the
+  structured-output sibling of `complete()` (no sampling params, thinking off, effort low, no retries).
+  `scripts.demo_check --check-ai` adds an opt-in row (not one of the 26 beats; skipped without flag + key).
