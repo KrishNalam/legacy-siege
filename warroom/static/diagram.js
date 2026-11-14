@@ -298,9 +298,10 @@ const SHORT_OPS = { quarantine_record: "Set aside the bad record", restart_batch
   refresh_cache: "Refresh balances", map_field: "Use the new field name" };
 const sop = (o) => SHORT_OPS[o] || Op(o);
 const PERSONA = { batch_abort: "SABOTEUR", disk_fill: "SABOTEUR", cron_stop: "SABOTEUR", session_leak: "SABOTEUR",
-  agent_kill: "ASSASSIN", lying_success: "LIAR", slow_apply: "LIAR", false_log: "LIAR",
+  agent_kill: "ASSASSIN", agent_freeze: "ASSASSIN", lying_success: "LIAR", slow_apply: "LIAR", false_log: "LIAR", lie_to_agent: "LIAR",
+  poison_memory: "MEMORY",
   sqli_exploit: "HACKER", config_exploit: "HACKER", credential_exploit: "HACKER", schema_drift: "DRIFTER" };
-const persona = (e) => String(e?.red?.persona || PERSONA[e?.fault] || "ATTACKER").toUpperCase();
+const persona = (e) => String(e?.red?.persona || PERSONA[e?.fault] || "ATTACKER").toUpperCase().replace(/ STRIKER$/, ""); // "Memory Striker" → MEMORY
 
 function seatMap() {
   const out = {}; let spare = 0;
@@ -383,9 +384,9 @@ const sysBox = (s) => ({ x: SYSXY[s][0], y: SYSXY[s][1], w: SW, h: SH });
 // ------------------------------------------------------------------ attack → defence pairs
 function defenceFor(e, nightIncs) {
   const t0 = ts(e.ts);
-  if (e.fault === "agent_kill") {
+  if (e.fault === "agent_kill" || e.fault === "agent_freeze") { // a frozen bee loses its lease like a dead one: same nurse takeover
     const v = e.result?.agent;
-    if (!v) return ["failed", "error"].includes(e.status) || e.result?.how === "gave_up" ? { c: "wait", t: "NO BUSY AGENT TO KILL" } : { c: "wait", t: "HUNTING A BUSY AGENT…" };
+    if (!v) return ["failed", "error"].includes(e.status) || e.result?.how === "gave_up" ? { c: "wait", t: `NO BUSY AGENT TO ${e.fault === "agent_kill" ? "KILL" : "FREEZE"}` } : { c: "wait", t: "HUNTING A BUSY AGENT…" };
     if (roleOf(v) === "queen") {
       const q = [...state.thoughts].reverse().find((t) => /takes the queen lease/.test(t.text || "") && ts(t.ts) >= t0);
       return q ? { c: "ok", t: `${U(agentName(q.agent))} TOOK OVER AS QUEEN` } : { c: "wait", t: "BACKUP QUEEN NOTICES THE SILENCE…" };
@@ -399,6 +400,18 @@ function defenceFor(e, nightIncs) {
     const st = nightIncs.flatMap((i) => i.steps || []).find((s) => s.system === e.target && (s.attempts || []).length > 1);
     if (rj || st) return { c: "ok", t: `GUARD CAUGHT THE LIE${st?.status === "verified" ? " · REDONE, VERIFIED" : " (ACK ≠ APPLIED)"}` };
     return { c: "wait", t: "THE GUARD RE-CHECKS EVERY “DONE”" };
+  }
+  if (e.fault === "lie_to_agent") { // an injected log line: workers treat logs as data, the Guard's read-back decides
+    const rj = state.thoughts.find((t) => isLie(t) && ts(t.ts) >= t0 && (!t.system || t.system === e.target));
+    if (rj) return { c: "ok", t: "LOG DOUBTED · GUARD READ-BACK CAUGHT IT" };
+    return { c: "wait", t: "LOGS ARE DATA · GUARD READS BACK" };
+  }
+  if (e.fault === "poison_memory") { // judged where the plant is recalled, possibly a later night
+    if (["failed", "error"].includes(e.status) || e.result?.skipped) return { c: "wait", t: "NO MEMORY TO POISON" };
+    const mr = state.thoughts.find((t) => isMemReject(t) && ts(t.ts) >= t0);
+    const ri = [...state.incidents.values()].find((i) => ts(i.opened_at) >= t0 - 3000 && (i.recall?.rejected || (i.recall?.hits || []).some((h) => h.rejected)));
+    if (mr || ri) return { c: "ok", t: /Restored /.test(mr?.text || "") ? "RECALL REJECTED · VERIFIED FIX RESTORED" : "GUARD REJECTED THE POISONED FIX" };
+    return { c: "wait", t: "RECALL MUST MATCH WHAT THE GUARD VERIFIED" };
   }
   const after = nightIncs.filter((i) => ts(i.opened_at) >= t0 - 3000);
   const inc = after.find((i) => i.root_cause_system === e.target || (i.affected || []).includes(e.target) || i.system === e.target)
@@ -424,7 +437,8 @@ const ATKWORD = {
   false_log: (e) => `PLANTED FALSE LOGS ON ${U(sn(e.target))}`,
   batch_abort: (e) => `CORRUPTED THE ${U(sn(e.target))} BATCH`, disk_fill: (e) => `FILLED ${U(sn(e.target))}’S DISK`,
   cron_stop: (e) => `FROZE ${U(sn(e.target))}’S JOBS`, session_leak: (e) => `JAMMED ${U(sn(e.target))} SESSIONS`,
-  schema_drift: (e) => `RENAMED A FIELD ON ${U(sn(e.target))}`, agent_kill: (e) => (e.result?.agent ? `KILLED ${U(agentName(e.result.agent))}` : "HUNTING AN AGENT"),
+  schema_drift: (e) => `RENAMED A FIELD ON ${U(sn(e.target))}`, lie_to_agent: (e) => `PLANTED A LYING LOG ON ${U(sn(e.target))}`,
+  poison_memory: () => "POISONED A REMEMBERED FIX", agent_freeze: (e) => (e.result?.agent ? `FROZE ${U(agentName(e.result.agent))}` : "HUNTING AN AGENT"), agent_kill: (e) => (e.result?.agent ? `KILLED ${U(agentName(e.result.agent))}` : "HUNTING AN AGENT"),
   sqli_exploit: (e) => `BROKE IN TO ${U(sn(e.target))}`, config_exploit: (e) => `TAMPERED WITH ${U(sn(e.target))}`,
   credential_exploit: (e) => `USED A DEFAULT PASSWORD ON ${U(sn(e.target))}`,
 };
@@ -821,7 +835,7 @@ function renderOverview() {
   const lastDuel = ds[ds.length - 1];
   const chaos = `<div class="big chaos ${ds.length ? "hot" : ""}" data-zoom="chaos" style="${pos(B.chaos)}">
     <div class="bh"><span class="bt">CHAOS MONKEY</span><span class="dim">US, ATTACKING</span></div>
-    <div class="pers">${["SABOTEUR", "LIAR", "ASSASSIN", "HACKER", "DRIFTER"].map((n) => `<span class="${struck.has(n) ? "on" : ""}">${n}</span>`).join("")}</div>
+    <div class="pers">${["SABOTEUR", "LIAR", "ASSASSIN", "HACKER", "DRIFTER", "MEMORY"].map((n) => `<span class="${struck.has(n) ? "on" : ""}">${n}</span>`).join("")}</div>
     <div class="bl-k">ATTACK <span class="ar">→</span> DEFENCE</div>
     ${ds.length ? ds.slice(-2).map((d) => `<div class="duo"><div><span class="pn">${esc(d.who)}</span> ${esc(d.atk)}</div><div class="def ${d.def.c}">↳ ${esc(d.def.t)}</div></div>`).join("") : '<div class="bl dim">—</div>'}
     ${liveLine("chaos", lastDuel ? `<span class="r">${esc(lastDuel.who)}</span> ${esc(lastDuel.atk)}` : '<span class="dim">READY</span>')}
@@ -994,7 +1008,8 @@ function setMode(m) {
 function renderChaos() {
   const ds = duels();
   const PERS = [["SABOTEUR", "Legacy breakage: crashed batches, full disks, dead scheduled jobs, stuck sessions."], ["ASSASSIN", "Really kills (SIGKILL) an agent's process in the middle of a job."],
-    ["LIAR", "Makes a system answer “done” without doing anything, or apply late."], ["HACKER", "Walks in through holes planted in the old systems."], ["DRIFTER", "Silently renames data fields under the agents."]];
+    ["LIAR", "Makes a system answer “done” without doing anything, or apply late."], ["HACKER", "Walks in through holes planted in the old systems."], ["DRIFTER", "Silently renames data fields under the agents."],
+    ["MEMORY", "Poisons a fix the Hive remembers, so recall must match what the Guard verified."]];
   const struck = new Map(); for (const d of ds) struck.set(d.who, (struck.get(d.who) || 0) + 1);
   const clock = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour12: false }); };
   const rows = ds.slice(-15);
