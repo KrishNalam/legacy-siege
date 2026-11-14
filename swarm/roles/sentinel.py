@@ -25,6 +25,7 @@ from pymongo.errors import DuplicateKeyError
 
 from common.db import col, next_id, now
 from common.events import say
+from common import comms
 
 from .. import leases, policy, schema, settings
 from ..harness import Agent, checkpointer, log
@@ -342,6 +343,7 @@ def run(agent: Agent) -> None:
 
         if time.monotonic() - last_slow > 3:
             last_slow = time.monotonic()
+            note_repeated_problems(agent)
             for row in col("incidents").aggregate(RECURRING):
                 upgrade.invoke({"system": row["_id"]["system"], "fault_class": row["_id"]["fault_class"],
                                 "evidence": row["evidence"]},
@@ -358,3 +360,29 @@ def run(agent: Agent) -> None:
         except Exception as e:
             log(agent.id, f"sweep error: {type(e).__name__}: {e}")
         agent.nap(max(0.05, settings.SENTINEL_POLL_S - (time.monotonic() - t0)))
+
+
+def note_repeated_problems(agent):
+    """Sentinel #2 mode: durable advisory notes only, independent of FAILURE_MEMORY."""
+    if not comms.enabled():
+        return
+    groups = {}
+    for inc in col('incidents').find({}, {'root_cause_system': 1, 'system': 1, 'fault_class': 1, 'symptoms': 1}):
+        sig = lessons.problem_signature(inc)
+        g = groups.setdefault('incident:' + sig, {'system': inc.get('root_cause_system') or inc.get('system'),
+            'problem': inc.get('fault_class') or '; '.join(inc.get('symptoms') or [])[:160], 'evidence': [], 'count': 0})
+        g['count'] += 1
+        g['evidence'].append(inc['_id'])
+    for ls in col('lessons').find({'count': {'$gte': 3}, 'stale': False}):
+        groups['lesson:' + ls['_id']] = {'system': ls.get('system'), 'problem': ls.get('why'),
+            'count': ls['count'], 'evidence': ls.get('incidents') or []}
+    for sig, g in groups.items():
+        if g['count'] < 3:
+            continue
+        text = f"sent to the Gardener: {g['problem']}, seen {g['count']} times"
+        result = col('gardener_notes').update_one({'_id': sig},
+            {'$setOnInsert': {'source': agent.id, 'ts': now()},
+             '$set': {**g, 'text': text, 'updated_at': now()}}, upsert=True)
+        if result.upserted_id is not None:
+            say(agent.id, 'gardener', 'gardener_note', text, system=g['system'])
+            agent.think(text, kind='gardener_note', system=g['system'], pause=False)

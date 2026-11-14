@@ -7,13 +7,15 @@ misses nor repeats events.
 """
 from __future__ import annotations
 
+import time
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from pymongo.errors import OperationFailure, PyMongoError
 
 from common.db import col, swarm
-from common.events import say
+from common.events import say, think
+from common import comms
 
 from ..harness import Agent, checkpointer, log
 
@@ -100,6 +102,8 @@ def build_graph(agent: Agent):
 
 
 def run(agent: Agent) -> None:
+    if comms.enabled():
+        return run_prioritiser(agent)
     graph = build_graph(agent)
     while not agent.stop.is_set():
         token = (col("stats").find_one({"_id": "waggle_resume"}) or {}).get("token")
@@ -122,4 +126,71 @@ def run(agent: Agent) -> None:
             col("stats").delete_one({"_id": "waggle_resume"})
         except PyMongoError as e:
             log(agent.id, f"stream error: {e}")
+            agent.nap(1.0)
+
+
+def post_batch(agent, lines):
+    waiting = {a.get('incident') for a in col('approvals').find({'status': 'pending'}, {'incident': 1})}
+    groups = comms.prioritise(lines, waiting - {None})
+    for m in groups:
+        stored = [x['_id'] for x in m['members'] if '_id' in x]
+        fields = {k: m[k] for k in ('priority', 'source', 'incident', 'system', 'severity', 'count')}
+        if stored:
+            col('messages').update_one({'_id': stored[0]}, {'$set': {**fields, 'comms_processed': True}})
+            if len(stored) > 1:
+                col('messages').update_many({'_id': {'$in': stored[1:]}},
+                    {'$set': {'comms_processed': True, 'merged_into': stored[0]}})
+        else:
+            say(agent.id, m['to'], m['kind'], m['body'], incident=m['incident'],
+                system=m['system'], severity=m['severity'], count=m['count'], processed=True, priority=m['priority'])
+    if groups:
+        n = sum(m['count'] for m in groups)
+        text = f"Comms: {n} messages, {n - len(groups)} merged, top: {str(groups[0]['body'])[:140]}"
+        think(agent.id, 'waggle', text, kind='comms')
+        col('stats').update_one({'_id': 'comms'}, {'$inc': {'messages': n, 'merged': n - len(groups)},
+            '$set': {'top': str(groups[0]['body'])[:140]}}, upsert=True)
+
+
+def run_prioritiser(agent):
+    """Bounded batches on the existing agent; save the token after posting the batch."""
+    pipeline = [{'$match': {'$or': PIPELINE[0]['$match']['$or'] + [
+        {'ns.coll': 'messages', 'operationType': 'insert', 'fullDocument.comms_processed': {'$ne': True}},
+        {'ns.coll': 'approvals', 'operationType': 'insert'},
+    ]}}]
+    while not agent.stop.is_set():
+        token = (col('stats').find_one({'_id': 'waggle_resume'}) or {}).get('token')
+        try:
+            with swarm().watch(pipeline, full_document='updateLookup', resume_after=token,
+                               max_await_time_ms=500) as stream:
+                while not agent.stop.is_set():
+                    lines, start = [], time.monotonic()
+                    for _ in range(256):
+                        ev = stream.try_next()
+                        if ev is None:
+                            break
+                        coll = ev['ns']['coll']
+                        doc = ev.get('fullDocument') or {}
+                        if coll == 'messages':
+                            lines.append(doc)
+                        elif coll == 'approvals':
+                            if doc.get('status') == 'pending':
+                                lines.append(dict(to='beekeeper', kind='approval', body='Human approval waiting',
+                                                  incident=doc.get('incident'), severity='warning', source='approvals'))
+                        else:
+                            for m in interpret(ev):
+                                m.update(source=coll, incident=ev['documentKey']['_id'] if coll == 'incidents'
+                                         else doc.get('incident'), system=doc.get('system'))
+                                lines.append(m)
+                        if time.monotonic() - start >= 0.5:
+                            break
+                    if lines:
+                        post_batch(agent, lines)
+                    if stream.resume_token:
+                        col('stats').update_one({'_id': 'waggle_resume'},
+                            {'$set': {'token': stream.resume_token}}, upsert=True)
+        except OperationFailure as e:
+            log(agent.id, f'resume failed ({e.code}); starting a fresh stream')
+            col('stats').delete_one({'_id': 'waggle_resume'})
+        except PyMongoError as e:
+            log(agent.id, f'stream error: {e}')
             agent.nap(1.0)
