@@ -140,9 +140,9 @@ class Patch:
         return f"systems/{self.path.name}"
 
 
-def build_patch(system: str, original: str | None = None) -> Patch:
+def build_patch(system: str, original: str | None = None, fault_class: str | None = None) -> Patch:
     """Deterministically derive the remediation patch for `system` (raises PatchError)."""
-    rem = remediations.for_request(system)
+    rem = remediations.for_request(system, fault_class)
     if rem is None:
         raise PatchError(f"no predetermined remediation for system {system!r}")
     path = inside_systems(SYSTEMS_DIR / f"{system}.py")
@@ -164,7 +164,8 @@ def build_patch(system: str, original: str | None = None) -> Patch:
         raise PatchError(f"diff is {n} lines (> {patcher.MAX_DIFF_LINES}); refusing")
     return Patch(system, path, original, patched, diff, {
         "source": layout.source, "length": layout.length_expr, "fields": layout.field_expr,
-        "notes": layout.notes, "remediation": rem.NAME, "function": rem.FUNCTION})
+        "notes": layout.notes, "remediation": rem.NAME, "function": rem.FUNCTION,
+        "prove_fault": getattr(rem, "PROVE_FAULT", PROVE_FAULT)})
 
 
 def _approved_patch(upg: dict) -> Patch:
@@ -175,10 +176,10 @@ def _approved_patch(upg: dict) -> Patch:
     path = inside_systems(SYSTEMS_DIR / f"{upg['system']}.py")
     current = path.read_text() if path.exists() else ""
     if patcher.sha256(current) == upg.get("source_sha256"):
-        p = build_patch(upg["system"], current)
+        p = build_patch(upg["system"], current, upg.get("fault_class"))
     elif upg.get("backup") and Path(upg["backup"]).exists() \
             and patcher.sha256(Path(upg["backup"]).read_text()) == upg.get("source_sha256"):
-        p = build_patch(upg["system"], Path(upg["backup"]).read_text())
+        p = build_patch(upg["system"], Path(upg["backup"]).read_text(), upg.get("fault_class"))
     else:
         raise PatchError(f"{path.name} changed since the plan was made; re-plan required")
     if patcher.sha256(p.diff) != upg.get("diff_sha256"):
@@ -226,15 +227,43 @@ def explain(upg: dict, patch: Patch, ev: dict) -> str:
 
 
 # ------------------------------------------------------------------ 1. plan
+def _pick_kind(upg: dict) -> dict:
+    """GARDENER_HELP=1: no vetted code remediation for this problem but an accepted platform tool covers
+    it -> the upgrade ships that tool instead (remediation_kind 'tool'). Otherwise unchanged."""
+    if upg.get("remediation_kind") or not _help_enabled():
+        return upg
+    system, fc = upg.get("system"), upg.get("fault_class")
+    if remediations.for_request(system or "", fc) is not None:
+        return upg
+    from . import tools  # noqa: PLC0415
+    tool = tools.accepted(system, fc)
+    if tool is None:
+        return upg
+    return advance(upg["_id"], {"planning"}, "planning", remediation_kind="tool", tool_id=tool["_id"])
+
+
+def _help_enabled() -> bool:
+    from . import help as help_desk  # noqa: PLC0415
+    return help_desk.enabled()
+
+
+def _is_tool(upg: dict) -> bool:
+    return upg.get("remediation_kind") == "tool"
+
+
 def plan(upg_id: str) -> dict:
     """Claim the request, read the source + evidence, derive the predetermined diff."""
     upg = advance(upg_id, {"requested", "planning"}, "planning", owner=AGENT)
     system = upg.get("system", "")
     set_phase("planning", upg_id)
+    upg = _pick_kind(upg)
+    if upg.get("remediation_kind") == "tool":
+        from . import tool_upgrade  # noqa: PLC0415
+        return tool_upgrade.plan(upg)
     ev_ids = ", ".join(upg.get("evidence") or [])
     say(f"{upg_id}: reading systems/{system}.py" + (f" and evidence {ev_ids}" if ev_ids else ""), system)
     try:
-        patch = build_patch(system)
+        patch = build_patch(system, fault_class=upg.get("fault_class"))
     except PatchError as e:
         reject(upg_id, str(e), system)
     ev = evidence_summary(list(upg.get("evidence") or []))
@@ -256,6 +285,9 @@ def test(upg_id: str) -> dict:
     upg = advance(upg_id, {"planning", "testing"}, "testing")
     system = upg["system"]
     set_phase("testing", upg_id)
+    if _is_tool(upg):
+        from . import tool_upgrade  # noqa: PLC0415
+        return tool_upgrade.test(upg)
     try:
         patch = _approved_patch(upg)
     except PatchError as e:
@@ -280,13 +312,18 @@ def request_approval(upg_id: str) -> dict:
     if upg["status"] != "testing" or not (upg.get("tests") or {}).get("passed"):
         raise StepError(f"{upg_id}: gate needs status 'testing' with passing tests")
     apr_id = next_id("APR")
+    if _is_tool(upg):
+        from . import tool_upgrade  # noqa: PLC0415
+        desc, risk = tool_upgrade.approval_text(upg)
+    else:
+        desc = (f"{upg_id}: patch {upg['file']} {upg['layout']['function']}() - "
+                f"{upg.get('explanation', '')}"[:600])
+        risk = (f"low: one function body, {upg['diff_lines']}-line diff, tests passed; "
+                f"valid records unchanged, malformed records skipped instead of aborting the batch")
     approval = {
         "_id": apr_id, "kind": "upgrade", "incident": None, "step_id": None, "action_id": None,
         "upgrade": upg_id, "requested_by": AGENT,
-        "desc": f"{upg_id}: patch {upg['file']} {upg['layout']['function']}() - "
-                f"{upg.get('explanation', '')}"[:600],
-        "risk": f"low: one function body, {upg['diff_lines']}-line diff, tests passed; "
-                f"valid records unchanged, malformed records skipped instead of aborting the batch",
+        "desc": desc, "risk": risk,
         "diff": upg["diff"], "tests_passed": True,
         "status": "pending", "decided_by": None, "ts": now(), "decided_at": None,
     }
@@ -393,6 +430,9 @@ def deploy(upg_id: str) -> dict:
         raise StepError(f"{upg_id}: approval {upg.get('approval_id')} is {apr.get('status')!r}, not approved")
     upg = advance(upg_id, {"awaiting_approval", "deploying"}, "deploying")
     set_phase("deploying", upg_id, target=system)
+    if _is_tool(upg):
+        from . import tool_upgrade  # noqa: PLC0415
+        return tool_upgrade.deploy(upg, apr)
     try:
         patch = _approved_patch(upg)
     except PatchError as e:
@@ -460,7 +500,11 @@ def prove(upg_id: str, window_s: float = PROVE_WINDOW_S) -> dict:
     upg = get(upg_id)
     if upg["status"] != "deployed":
         raise StepError(f"{upg_id}: prove needs status 'deployed', found {upg['status']}")
+    if _is_tool(upg):
+        from . import tool_upgrade  # noqa: PLC0415
+        return tool_upgrade.prove(upg)
     system = upg["system"]
+    fault = (upg.get("layout") or {}).get("prove_fault") or PROVE_FAULT
     set_phase("proving", upg_id)
     incidents = col("incidents")
     stream = None
@@ -470,19 +514,19 @@ def prove(upg_id: str, window_s: float = PROVE_WINDOW_S) -> dict:
         log.warning("incident change stream unavailable (%s); polling", e)
     fired_at = now()
     try:
-        via = fire_fault(PROVE_FAULT, system)
+        via = fire_fault(fault, system)
     except Exception as e:
         if stream:
             stream.close()
         col("upgrade_requests").update_one({"_id": upg_id}, {"$set": {"prove": {
-            "fault": PROVE_FAULT, "fired_at": fired_at, "window_s": window_s, "incident_opened": None,
+            "fault": fault, "fired_at": fired_at, "window_s": window_s, "incident_opened": None,
             "error": str(e)}}})
-        say(f"{upg_id}: could not replay {PROVE_FAULT} ({e})", system)
+        say(f"{upg_id}: could not replay {fault} ({e})", system)
         set_phase(None)
         return get(upg_id)
     col("upgrade_requests").update_one({"_id": upg_id}, {"$set": {"prove": {
-        "fault": PROVE_FAULT, "fired_at": fired_at, "window_s": window_s, "incident_opened": None, "via": via}}})
-    say(f"{upg_id}: replayed {PROVE_FAULT} on {system}; watching {int(window_s)}s for incidents", system)
+        "fault": fault, "fired_at": fired_at, "window_s": window_s, "incident_opened": None, "via": via}}})
+    say(f"{upg_id}: replayed {fault} on {system}; watching {int(window_s)}s for incidents", system)
 
     opened = None
     deadline = time.monotonic() + window_s
@@ -504,11 +548,11 @@ def prove(upg_id: str, window_s: float = PROVE_WINDOW_S) -> dict:
         hit = incidents.find_one(_incident_filter(fired_at), {"_id": 1})
         opened = hit and hit["_id"]
 
-    prove_doc = {"fault": PROVE_FAULT, "fired_at": fired_at, "window_s": window_s,
+    prove_doc = {"fault": fault, "fired_at": fired_at, "window_s": window_s,
                  "incident_opened": opened is not None, "incident": opened, "via": via}
     if opened is None:
         advance(upg_id, {"deployed"}, "proven", prove=prove_doc, proven_at=now())
-        say(f"{upg_id}: proven - {system} shrugged off {PROVE_FAULT}, no incident opened", system)
+        say(f"{upg_id}: proven - {system} shrugged off {fault}, no incident opened", system)
     else:
         col("upgrade_requests").update_one({"_id": upg_id}, {"$set": {"prove": prove_doc}})
         say(f"{upg_id}: replay still opened {opened}; upgrade stays 'deployed'", system)
