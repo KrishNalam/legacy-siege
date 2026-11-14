@@ -254,23 +254,29 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   - New collections `swarm.schema_samples` (TTL 24h on `ts`; `_id:"good:unix:xfer_manifest"` = known-good sample the
     sentinel rewrites every 10 s while unix+portal are up and the sample matches the expected schema) and
     `swarm.schema_mappings` (`_id:"unix.xfer_manifest.balance"`, `{source, previous, version, history[], learned_from,
-    verified_by, evidence}`). Both are wiped on full and next_round resets (the estate's schema goes back to v1).
+    verified_by, evidence, reused}`). `schema_samples` is wiped on full and next_round resets. `schema_mappings` is
+    durable memory: next_round only *rewinds* the live mapping (`source` back to the field, `version:1`, the estate's
+    feed is v1 again) and keeps `history[]` (every Guard-verified rename); only a full reset deletes it.
   - The unix diagnosis hop matches the manifest sample against the expected schema with a `$jsonSchema` query and
     diffs its fields against the good sample with an aggregation (`$objectToArray`/`$setDifference`/`$type`) →
     `fault_class:"schema_drift"`, plan `map_field` + `refresh_cache` on portal (`policy.rebind` uses today's names).
   - Only the Guard stores a mapping: after it verifies `map_field` by read-back (portal reads the new field, values
-    line up with the good sample within 35%) it writes the mapping (version+1) and says
-    "unix renamed X → Y · mapping learned vN". The resolved incident's playbook (with embedding) is the memory that
+    line up with the good sample within 35%) it writes the mapping (max version+1, or the earlier version with
+    `reused:true` when this exact change is in `history`), re-captures the good sample at once, and says
+    "unix renamed X → Y · mapping learned vN" (or "· seen before: mapping vN reused"). The resolved incident's playbook (with embedding) is the memory that
     a repeat drift recalls via `$vectorSearch`. `schema_drift` is excluded from the sentinel's Gardener upgrade
     requests (the mapping is the adaptation).
-  - Who proposes the mapping (`findings.params.proposed_by`): **memory** (a non-stale schema_drift playbook already maps
-    to one of the new fields: reused, no Claude call) → **claude** (key + `AI_SECOND_OPINION=1`: Claude names the field
+  - Who proposes the mapping (`findings.params.proposed_by`): **memory** (`schema_mappings.history` holds a verified
+    entry for this exact change, else a non-stale schema_drift playbook maps to one of the new fields: reused, no Claude
+    call, after the same value check as Claude's answer; a memory that fails it is marked stale) → **claude** (key + `AI_SECOND_OPINION=1`: Claude names the field
     that means the same thing, `common.llm.complete`, `SCHEMA_AI_TIMEOUT_S` budget (6 s) in a side thread; the rules
     pre-check it, field exists + numeric + values line up, and overrule it otherwise) → **rules** (no key/flag, timeout,
     error, overruled: best type + value match). With the flag on, the worker writes `incident.ai` in the shared shape
     with `kind:"schema_mapping"` (+ `proposed_by`, `guard:{verdict, rule, reason, version}` stamped by the Guard after
-    the read-back). The Guard narrates the chain: "rules: no playbook/op for unknown field acct_bal → Claude proposed
-    balance→acct_bal → Guard verified (3/3 values match) → mapping v2 stored". W2: `second_opinion` should skip an
+    the read-back). The Guard narrates the chain, naming the real proposer: "rules: no op for unknown field acct_bal → Claude
+    proposed balance→acct_bal → Guard verified (3/3 values match) → mapping v2 stored" / "memory: MongoDB already knew
+    balance→acct_bal (no Claude call) → Guard verified (…) → mapping v2 reused". The sentinel says "unix feed schema
+    changed: balance missing, acct_bal new" as soon as its periodic sample stops matching (notice only). W2: `second_opinion` should skip an
     incident that already has `ai.kind == "schema_mapping"`.
-  - War room watches `swarm.schema_mappings` (caption + "MAPPING LEARNED" stamp on unix).
+  - War room watches `swarm.schema_mappings` (caption + "MAPPING LEARNED" / "MAPPING REUSED" stamp on unix).
     Rehearsal: `python -m scripts.drift_check` (14 checks incl. the repeat-from-memory round; separate from demo_check).

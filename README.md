@@ -204,9 +204,10 @@ longer read balances. The Hive diffs the new sample against a known-good one in 
 a field-diff aggregation), proposes `balance → acct_bal`, and the Guard verifies it by read-back (the values line
 up). The mapping is then stored in `swarm.schema_mappings` (v2) for every agent to use. With a key and
 `AI_SECOND_OPINION=1`, Claude proposes the mapping (renaming is a question of meaning) and the rules pre-check it.
-Without a key, a type + value match does the job. Fire it again and the next rename is learned as v3. If the
-same rename comes back in a later round, `$vectorSearch` recall plus the playbook supply the mapping from memory
-with no Claude call. The scenario `bank-drift` plays it, and `python -m scripts.drift_check` rehearses it
+Without a key, a type + value match does the job. Fire it again and the next rename is learned as v3. Learned mappings
+survive a round reset (only a full reset clears them), so when the same rename comes back in a later night the Hive
+says "seen before: mapping v2 reused": the mapping comes from MongoDB memory with no Claude call, and
+`$vectorSearch` recall makes it a single hop. The scenario `bank-drift` plays it, and `python -m scripts.drift_check` rehearses it
 (14 checks).
 
 ## Rehearse: `scripts/demo_check.py`

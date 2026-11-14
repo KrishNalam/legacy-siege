@@ -11,8 +11,9 @@ Separate from scripts.demo_check on purpose: the four scored beats are untouched
   d. swarm.schema_mappings holds balance -> acct_bal at v2; the guard says "mapping learned v2"
   e. incident resolved, portal up, playbook saved; no Gardener upgrade request for schema_drift
   f. (default) a second vendor patch acct_bal -> ledger_bal is diffed against the LEARNED schema -> v3
-  g. (default) next round, the same balance -> acct_bal patch again: $vectorSearch recall (1 hop) and the mapping
-     comes from MongoDB memory (playbook), no Claude call
+  g. (default) next round, the same balance -> acct_bal patch again: the round reset kept the verified mapping
+     history, so the unix hop says "seen before: mapping v2 reused" (no Claude call), the Guard reuses v2, and
+     $vectorSearch recall makes it 1 hop
 With AI_SECOND_OPINION=1 + a key on the stack, an extra row checks incident.ai (kind schema_mapping, Guard verdict).
 """
 from __future__ import annotations
@@ -57,6 +58,10 @@ class Drift(Demo):
                     break
             time.sleep(0.5)
         secs = time.monotonic() - t0
+        early = self.s.thoughts.find_one({"agent": {"$regex": "^sentinel"}, "text": {"$regex": f"feed schema changed: "
+                                          f"{old} missing"}}, sort=[("ts", -1)])
+        if early:
+            log(f"sentinel noticed early: {early['text'][:90]}")
         feed = self.sys_http.get("/unix/state").json().get("feed") or {}
         rec = (feed.get("sample") or [{}])[0]
         self.r.add(f"v{version} a. drift", portal_bad is not None and not unix_down and new in rec and old not in rec,
@@ -98,7 +103,7 @@ class Drift(Demo):
 
 
 def _repeat(self, timeout: float) -> bool:
-    """Next round (estate back to v1, mappings cleared, playbooks kept), same rename again."""
+    """Next round (estate back to v1, live mapping rewound to v1, history + playbooks kept), same rename again."""
     log("POST /api/reset {mode: next_round}")
     self.post("/api/reset", {"mode": "next_round"})
     if not self.wait_good_sample():
@@ -112,13 +117,18 @@ def _repeat(self, timeout: float) -> bool:
                           time.monotonic() - t0)
     said = self.s.tasks.find_one({"incident": inc["_id"], "kind": "diagnose",
                                   "findings.params.proposed_by": "memory"}, {"findings.facts": 1})
-    said = said and {"text": next((f for f in said["findings"]["facts"] if f.startswith("memory:")), "memory")}
+    said = said and {"text": next((f for f in said["findings"]["facts"] if f.startswith("seen before:")), "")}
     m = self.s.schema_mappings.find_one({"_id": MID}) or {}
+    guard = self.s.thoughts.find_one({"incident": inc["_id"], "kind": "learn",
+                                      "text": {"$regex": "seen before: mapping v2 reused"}})
     return self.r.add("repeat g. memory", inc["status"] == "resolved" and (inc.get("recall") or {}).get("used")
-                      and len(inc.get("diagnosis_path") or []) == 1 and bool(said) and m.get("source") == "acct_bal",
+                      and len(inc.get("diagnosis_path") or []) == 1 and bool(said and said["text"])
+                      and m.get("source") == "acct_bal" and m.get("version") == 2 and m.get("reused") is True
+                      and bool(guard),
                       f"{inc['_id']}: recall used={(inc.get('recall') or {}).get('used')}, path "
                       f"{'→'.join(inc.get('diagnosis_path') or [])}, TTR {(inc.get('metrics') or {}).get('ttr_s')}s, "
-                      f"mapping v{m.get('version')} {m.get('source')}; {(said or {}).get('text', 'no memory line')[:70]}",
+                      f"mapping v{m.get('version')} {m.get('source')} reused={m.get('reused')} "
+                      f"history={len(m.get('history') or [])}; {(said or {}).get('text') or 'no seen-before line'}"[:230],
                       time.monotonic() - t0)
 
 
@@ -140,8 +150,11 @@ def main() -> int:
         if d.preflight(reset=not a.no_reset) and d.wait_good_sample():
             ok = d.drift(lambda: d.post("/api/scenario/bank-drift"), "balance", "acct_bal", 2, a.timeout)
             if ok and not a.once:
-                time.sleep(12)  # let the sentinel re-sample the healthy v2 feed
-                ok = d.drift(lambda: d.post("/api/chaos/schema_drift", {"target": "unix", "params": {}}),
+                # no wait: the Guard re-captured the good sample when it stored v2 (review fix 1)
+                g = d.s.schema_samples.find_one({"_id": "good:unix:xfer_manifest"}) or {}
+                ok = rep.add("v2 good sample", "acct_bal" in (g.get("record") or {}),
+                             f"good sample right after v2 carries acct_bal: {'acct_bal' in (g.get('record') or {})}")
+                ok = ok and d.drift(lambda: d.post("/api/chaos/schema_drift", {"target": "unix", "params": {}}),
                              "acct_bal", "ledger_bal", 3, a.timeout)
             if ok and not a.once:
                 d.repeat(a.timeout)
