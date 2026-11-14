@@ -96,6 +96,9 @@ fault class has been resolved twice, the sentinel files an **upgrade request** f
 | **LangGraph `MongoDBSaver`** | Every role is a StateGraph checkpointed in `swarm.checkpoints`. The thread id is the *task* id, so the checkpoint follows the work, not the process | `swarm/harness.py:27`; nurse resume `swarm/roles/nurse.py:68` |
 | Atomic counters | `INC-0001`, `RUN-0001`, `CHX-0001` | `common/db.py:47`, `chaos/runner.py:42` |
 | Conditional update | An approval decision lands only on `{status:"pending"}`, so double clicks are no-ops | `warroom/api.py:114` |
+| **Change-stream pre-images** (`MONGO_SPINE=1`) | `changeStreamPreAndPostImages` on tasks/incidents/approvals; a resumable watcher with `fullDocumentBeforeChange` turns every claim, nurse takeover, release and Beekeeper decision into a sha256-chained `swarm.custody` row (before → after owner/generation, lease expired or not). Tamper-evident: `custody.verify_chain()` | `swarm/custody.py`, `scripts/setup_db.py` (`ensure_spine`) |
+| **`$facet` + `$setWindowFields` + `$percentile`** (`MONGO_SPINE=1`) | `/api/spine`: the learning curve per fault class (`$documentNumber` night, `$shift` previous TTR, speedup), p50/p90 TTR per round, median takeover time, custody summary, all computed in MongoDB; shown in the Atlas overlay | `warroom/spine.py` |
+| More `$jsonSchema` (`MONGO_SPINE=1`) | tasks (fencing token is an int, lease a date, status enum), approvals (a decision must carry `decided_by`/`decided_at`), upgrade_requests, playbooks (embedding exactly `EMBED_DIM` long, or the vector index would silently skip it) | `scripts/setup_db.py` |
 
 ## Run it (one command)
 
@@ -131,6 +134,7 @@ Docker, Fly and the other hosting options. The app reads only `MONGODB_URI`; oth
 | var | effect without it |
 |---|---|
 | `ANTHROPIC_API_KEY` (+ `LLM_MODEL`) | No **AI second opinion** card (also needs `AI_SECOND_OPINION=1`) (Claude's independent diagnosis + op plan per incident, judged op-by-op by the deterministic policy and read-backs, `swarm/second_opinion.py`); agents narrate with fixed sentences and the Gardener writes a template explanation |
+| `MONGO_SPINE=1` | Off by default. Adds change-stream pre-images + the lease chain of custody, four more `$jsonSchema` validators and the spine analytics card in the Atlas overlay (needs MongoDB 7.0+; run `scripts.setup_db` once with it on) |
 | `AI_DRIVES=1` (+ key) | Off by default. When on, Claude reasons over the evidence at plan time and **its plan runs** if it passes every guardrail; otherwise (or when `AI_DRIVE_TIMEOUT_S`, 6 s for evidence + Claude, runs out; ≈7 s worst case with bookkeeping) the rules plan runs and the card says why |
 | `VOYAGE_API_KEY` (+ `VOYAGE_MODEL`) | Embeddings use a deterministic local hashing model (`local-hash-v1`, 1024-d). The same vector index works either way |
 | `PACE` (default 1.0) | Multiplier on the deliberate "thinking" delays (0 in tests) |
