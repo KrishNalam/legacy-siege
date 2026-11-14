@@ -8,6 +8,7 @@ import pytest
 from bson import Binary, ObjectId
 from fastapi.testclient import TestClient
 
+from common import config
 from common.db import now, swarm, world
 from warroom.bson_json import slim, to_json
 from warroom.stream import to_message
@@ -32,8 +33,8 @@ def test_checkpoint_docs_are_slimmed_to_ids():
     assert set(out) == {"_id", "thread_id", "checkpoint_id"}
 
 
-def _change(op, coll, fields=None, doc=None, db="swarm_test_warroom"):
-    ch = {"operationType": op, "ns": {"db": db, "coll": coll}, "documentKey": {"_id": "a1"}}
+def _change(op, coll, fields=None, doc=None, db=None):
+    ch = {"operationType": op, "ns": {"db": db or config.SWARM_DB, "coll": coll}, "documentKey": {"_id": "a1"}}
     if fields is not None:
         ch["updateDescription"] = {"updatedFields": {f: 1 for f in fields}, "removedFields": []}
     if doc is not None:
@@ -70,13 +71,16 @@ def _recv_until(ws, pred, limit=40):
     raise AssertionError("expected message never arrived")
 
 
-def test_ws_snapshot_then_change_stream(app_client):
+def test_ws_snapshot_then_change_stream(app_client, monkeypatch):
+    monkeypatch.setattr(config, "VOYAGE_API_KEY", "test-only")
+    monkeypatch.setattr(config, "VOYAGE_MODEL", "configured-model")
     swarm().agents.insert_one({"_id": "scout-1", "role": "scout", "status": "idle", "last_seen": now()})
     with app_client.websocket_connect("/ws") as ws:
         snap = ws.receive_json()
         assert snap["type"] == "snapshot"
         assert [a["_id"] for a in snap["agents"]] == ["scout-1"]
-        assert snap["meta"]["dbs"] == {"world": "world_test_warroom", "swarm": "swarm_test_warroom"}
+        assert snap["meta"]["dbs"] == {"world": config.WORLD_DB, "swarm": config.SWARM_DB}
+        assert snap["meta"]["embed_model"] == "configured-model"
         swarm().agents.update_one({"_id": "scout-1"}, {"$set": {"last_seen": now()}})  # heartbeat: aggregated
         swarm().thoughts.insert_one({"agent": "scout-1", "role": "scout", "text": "hello", "kind": "thought", "ts": now()})
         seen = []

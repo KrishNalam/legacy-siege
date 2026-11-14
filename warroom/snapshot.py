@@ -76,6 +76,6 @@ async def build(hub: Hub) -> dict:
         "logs": {g["_id"]: list(reversed(g["lines"])) for g in logs if g.get("_id")},
         "runs": runs, "current": current, "run": run, "counts": counts,
         "meta": {"dbs": db_names(), "stream": "live" if hub.connected else "down",
-                 "embed_model": "voyage-3.5" if config.VOYAGE_API_KEY else "local-hash-v1",
+                 "embed_model": config.VOYAGE_MODEL if config.VOYAGE_API_KEY else "local-hash-v1",
                  "server_time": datetime.now(timezone.utc)},
     })
