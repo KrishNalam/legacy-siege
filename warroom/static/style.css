@@ -359,3 +359,10 @@ button, select { font: inherit; color: inherit; }
 .ai-op.overruled { background: #1f0a10; border: 1px solid #5a1c26; border-radius: 6px; padding: 3px 7px 4px 2px; }
 .ai-op.overruled .tg { color: var(--red); }
 #ai-verdict { font-size: 11.5px; padding: 3px 10px; }
+.ai-cites { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 4px; margin-bottom: 5px; font: 500 10.5px var(--mono); }
+.ai-cite { padding: 0 5px; border-radius: 4px; border: 1px solid #33275a; color: #e7dcff; background: #140e24; cursor: help; white-space: nowrap; }
+.ai-cite i { font-style: normal; color: var(--muted); }
+.ai-tally { margin-top: 6px; font: 500 10.5px var(--mono); color: var(--muted); }
+.ai-tally .ok { color: var(--green); font-weight: 600; } .ai-tally .bad { color: var(--red); font-weight: 600; }
+.ai-lead { flex-basis: 100%; font: 500 10.5px var(--mono); color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ai-lead b { color: var(--violet); }

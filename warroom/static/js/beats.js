@@ -80,18 +80,23 @@ export function installBeats(stage, panels, caption) {
       stage.burst(doc.root_cause_system, C.red, "root cause");
       caption(`Root cause: ${doc.root_cause_system}`, doc.root_cause || doc.fault_class || "", C.red);
     }
-    // AI second opinion landed (first observed completion: change-stream lookups can skip "thinking")
-    if (doc.ai?.status === "done" && prev.ai?.status !== "done") {
-      const bad = (doc.ai.overruled_ops || []);
+    // AI card landed (first observed completion: change-stream lookups can skip "thinking"; absent status = done)
+    const aiDone = (a) => a && (!a.status || a.status === "done");
+    if (aiDone(doc.ai) && !aiDone(prev.ai)) {
+      const ai = doc.ai, ops = ai.proposed_ops || [];
+      const bad = ops.map((o, i) => ({ ...o, ...((ai.verdicts || [])[i] || {}) })).filter((v) => v.verdict === "overruled");
+      const missed = ai.missed_ops || [];
       const who = doc.owner || "scout-1";
-      const p = stage.posOfAgent(who); if (p) stage.float(p.x, p.y - 44, "Claude: second opinion", C.violet, 13, 3);
-      const missed = doc.ai.missed_ops || [];
-      const title = doc.ai.agrees_with_policy ? "AI second opinion: agrees"
-        : bad.length ? `AI second opinion: ${bad.length} op${bad.length === 1 ? "" : "s"} overruled`
-        : !doc.ai.root_agrees ? "AI second opinion: different root cause" : `AI second opinion: missed ${missed.length} step${missed.length === 1 ? "" : "s"}`;
-      const sub = doc.ai.agrees_with_policy ? "Claude reached the same plan independently · policy still decides"
-        : bad.length ? `${bad[0].op}: ${bad[0].reason}`
-        : !doc.ai.root_agrees ? `Claude: ${doc.ai.root_system}/${doc.ai.fault_class} · policy: ${doc.ai.policy?.root_system}/${doc.ai.policy?.fault_class} · policy decides`
+      const p = stage.posOfAgent(who); if (p) stage.float(p.x, p.y - 44, ai.kind === "schema_mapping" ? "Claude: field mapping" : "Claude: second opinion", C.violet, 13, 3);
+      const what = ai.kind === "schema_mapping" ? "AI field mapping" : "AI second opinion";
+      const title = bad.length ? `${what}: ${bad.length} op${bad.length === 1 ? "" : "s"} overruled`
+        : ai.kind === "schema_mapping" ? `${what}: verified by read-back`
+        : ai.agrees_with_policy ? `${what}: agrees`
+        : !ai.root_agrees ? `${what}: different root cause` : `${what}: missed ${missed.length} step${missed.length === 1 ? "" : "s"}`;
+      const sub = bad.length ? `${bad[0].op} → ${bad[0].rule || "refused"}: ${bad[0].reason || ""}`
+        : ai.kind === "schema_mapping" ? (ai.hypothesis || "rules had no fix → Claude proposed a mapping → Guard verified")
+        : ai.agrees_with_policy ? "Claude reached the same plan independently · the guardrail still checks every op"
+        : !ai.root_agrees ? `Claude: ${ai.root_system}/${ai.fault_class} · policy: ${ai.policy?.root_system}/${ai.policy?.fault_class} · policy decides`
         : `policy adds ${missed.map((m) => m.op).join(", ")}`;
       caption(title, sub, C.violet);
     }

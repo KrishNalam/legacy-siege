@@ -474,19 +474,19 @@ class Demo:
                    f"rejected={st['batch'].get('rejected')}, unhealthy={worst or 'none'}", time.monotonic() - t0)
 
     def check_ai(self, inc_ids: list[str]) -> None:
-        """Optional (--check-ai, needs ANTHROPIC_API_KEY): Claude's second opinion landed on each night's incident
-        and every proposed op carries the guardrail's verdict. Advisory only, so it is not one of the 26 beats."""
+        """Optional (--check-ai; needs AI_SECOND_OPINION=1 and ANTHROPIC_API_KEY on the stack): Claude's second opinion
+        landed on each night's incident and every proposed op carries a named verdict. Advisory, not one of the 26."""
         parts, ok = [], bool(inc_ids)
         for inc_id in inc_ids:
             ai = (self.s.incidents.find_one({"_id": inc_id}, {"ai": 1}) or {}).get("ai") or {}
-            ops = ai.get("proposed_ops") or []
-            good = (ai.get("status") == "done" and bool(ops) and ai.get("latency_ms") is not None
-                    and all(o.get("verdict") in ("agree", "overruled") for o in ops)
-                    and all(o.get("reason") for o in ops if o.get("verdict") == "overruled"))
+            ops, vs = ai.get("proposed_ops") or [], ai.get("verdicts") or []
+            good = (ai.get("status") == "done" and ai.get("kind") == "second_opinion" and bool(ops)
+                    and len(vs) == len(ops) and ai.get("latency_ms") is not None
+                    and all(v.get("verdict") in ("accepted", "overruled") and v.get("rule") and v.get("reason") for v in vs))
             ok = ok and good
-            parts.append(f"{inc_id} {ai.get('status', 'absent')} {ai.get('latency_ms')}ms root_agrees={ai.get('root_agrees')} "
-                         f"{sum(o.get('verdict') == 'agree' for o in ops)}✓/{len(ai.get('overruled_ops') or [])}✗"
-                         f"/{len(ai.get('missed_ops') or [])}+")
+            parts.append(f"{inc_id} {ai.get('status', 'absent')} {ai.get('latency_ms')}ms conf={ai.get('confidence')} "
+                         f"cites={len(ai.get('cites') or [])} {sum(v.get('verdict') == 'accepted' for v in vs)} accepted/"
+                         f"{sum(v.get('verdict') == 'overruled' for v in vs)} overruled/{len(ai.get('missed_ops') or [])} missed")
         self.r.add("h. AI second opinion judged (opt-in)", ok, "; ".join(parts) or "no incidents")
 
     def final_reset(self) -> None:
@@ -514,7 +514,7 @@ def main() -> int:
     ap.add_argument("--autoplay", action="store_true", default=config.DEMO_AUTOPLAY,
                     help="the stack runs with DEMO_AUTOPLAY=1: don't click Night 2/3, next round or later approvals")
     ap.add_argument("--check-ai", action="store_true",
-                    help="also check Claude's second opinion on each night's incident (skipped without ANTHROPIC_API_KEY)")
+                    help="also check Claude's second opinion on each night's incident (skipped without AI_SECOND_OPINION=1 + key)")
     a = ap.parse_args()
     rep = Report()
     d = Demo(a.base, a.approve_delay, rep, autoplay=a.autoplay)
@@ -528,10 +528,10 @@ def main() -> int:
                 n2 = d.night2(n1, a.night_timeout)
                 if n2 and d.gardener(a.night_timeout):
                     d.night3(a.night3_watch)
-            if a.check_ai and config.ANTHROPIC_API_KEY:
+            if a.check_ai and config.ANTHROPIC_API_KEY and config.AI_SECOND_OPINION:
                 d.check_ai([n["inc"]["_id"] for n in (n1, n2) if n])
             elif a.check_ai:
-                log("--check-ai skipped: no ANTHROPIC_API_KEY")
+                log("--check-ai skipped: needs AI_SECOND_OPINION=1 and ANTHROPIC_API_KEY")
             if not a.keep:
                 d.final_reset()
     except KeyboardInterrupt:
