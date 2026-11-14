@@ -142,3 +142,19 @@ def test_announce_current_mirrors_into_swarm_stats(systems):
     run_id = runner.run_scenario("bank-night-2", block=True, announce=True)
     cur = swarm().stats.find_one({"_id": "current"})
     assert cur["run_id"] == run_id and cur["round"] == 1
+
+
+def test_schema_drift_fault_and_flagged_night3(monkeypatch):
+    import importlib
+    f = faults.get("schema_drift")
+    assert f.targets == ("unix",) and faults.resolve_target(f, None) == "unix"
+    assert [s["fault"] for s in scenarios.get("bank-drift")["steps"]] == ["schema_drift"]
+    assert [s["fault"] for s in scenarios.get("bank-night-3")["steps"]] == ["batch_abort"]   # flag off: unchanged
+    monkeypatch.setenv("SCHEMA_DRIFT_DEMO", "1")
+    importlib.reload(scenarios)
+    try:
+        assert [s["fault"] for s in scenarios.get("bank-night-3")["steps"]] == ["batch_abort", "schema_drift"]
+    finally:
+        monkeypatch.delenv("SCHEMA_DRIFT_DEMO")
+        importlib.reload(scenarios)
+    assert [s["fault"] for s in scenarios.get("bank-night-3")["steps"]] == ["batch_abort"]  # stored copy follows code
