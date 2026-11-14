@@ -509,6 +509,7 @@ function patch(host, items, svg = false) {
     const n = svg ? t.content.firstElementChild.firstElementChild : t.content.firstElementChild;
     n.dataset.k = it.k; n.dataset.h = it.html;
     if (el) el.replaceWith(n); else host.appendChild(n);
+    for (const am of n.querySelectorAll ? n.querySelectorAll("animateMotion") : []) am.beginElement?.();
   }
   for (const e of have.values()) e.remove();
 }
@@ -621,24 +622,61 @@ function renderBees() {
 }
 
 
-// ================================================================== level 0: three boxes · zoom in / out
-const BOXR = { chaos: { x: 50, y: 150, w: 380, h: 600 }, bees: { x: 550, y: 150, w: 500, h: 600 }, gardener: { x: 1170, y: 150, w: 380, h: 600 } };
-const FULL = { x: 20, y: 136, w: 1560, h: 712 };
-const ZOOMS = ["overview", "chaos", "bees", "gardener"];
-const TITLE = { overview: "EXHIBIT A: THE WHOLE NIGHT IN THREE BOXES", chaos: "EXHIBIT A.1: INSIDE CHAOS MONKEY", bees: "EXHIBIT A.2: INSIDE THE BEES", gardener: "EXHIBIT A.3: INSIDE THE GARDENER" };
+// ================================================================== level 0: four boxes · zoom in / out
+// CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES, THE GARDENER below Legacy pointing up into it.
+const BOXR = {
+  chaos: { x: 40, y: 104, w: 360, h: 420 }, legacy: { x: 500, y: 104, w: 600, h: 420 },
+  bees: { x: 1200, y: 104, w: 360, h: 420 }, gardener: { x: 580, y: 618, w: 440, h: 186 },
+};
+const FULL = { x: 0, y: 84, w: 1600, h: 760 };
+const ZOOMS = ["overview", "chaos", "legacy", "bees", "gardener"];
+const KEYZ = { 1: "chaos", 2: "legacy", 3: "bees", 4: "gardener" };
+const TITLE = { overview: "EXHIBIT A: THE WHOLE NIGHT", chaos: "EXHIBIT A.1: INSIDE CHAOS MONKEY", legacy: "EXHIBIT A.2: INSIDE THE LEGACY SYSTEMS", bees: "EXHIBIT A.3: INSIDE THE BEES", gardener: "EXHIBIT A.4: INSIDE THE GARDENER" };
 let zoom = (() => { try { const z = new URLSearchParams(location.search).get("zoom"); return ZOOMS.includes(z) ? z : "overview"; } catch { return "overview"; } })();
 let zooming = false;
+// transform that maps the FULL exhibit onto box b (and its inverse)
+const toBox = (b) => { const s = Math.min(b.w / FULL.w, b.h / FULL.h), cx = b.x + b.w / 2, cy = b.y + b.h / 2; return `translate(${cx - s * (FULL.x + FULL.w / 2)}px, ${cy - s * (FULL.y + FULL.h / 2)}px) scale(${s})`; };
+const fromBox = (b) => { const s = Math.max(FULL.w / b.w, FULL.h / b.h), cx = b.x + b.w / 2, cy = b.y + b.h / 2; return `translate(${FULL.x + FULL.w / 2 - s * cx}px, ${FULL.y + FULL.h / 2 - s * cy}px) scale(${s})`; };
 function setZoom(z) {
   if (!ZOOMS.includes(z) || z === zoom || zooming) return;
-  const from = zoom, lens = $("#lens");
-  const a = z === "overview" ? FULL : BOXR[z], b = z === "overview" ? BOXR[from] : FULL;
-  const place = (r) => { lens.style.left = `${r.x}px`; lens.style.top = `${r.y}px`; lens.style.width = `${r.w}px`; lens.style.height = `${r.h}px`; };
+  const from = zoom, inward = z !== "overview", box = BOXR[inward ? z : from];
+  const ov = $("#v-overview"), det = $(`#v-${inward ? z : from}`);
   zooming = true;
-  for (const v of ZOOMS) $(`#v-${v}`).hidden = true;
-  lens.classList.remove("go"); place(a); lens.hidden = false;
-  void lens.offsetWidth; // start from a, then move to b in stepped frames
-  lens.classList.add("go"); place(b);
-  setTimeout(() => { lens.hidden = true; zooming = false; zoom = z; try { history.replaceState(null, "", z === "overview" ? location.pathname : `?zoom=${z}`); } catch { /* file:// */ } render(); }, 380);
+  zoom = z; // render the destination once before it animates in
+  for (const v of ZOOMS) $(`#v-${v}`).hidden = !(v === "overview" || v === (inward ? z : from));
+  try { ({ chaos: renderChaos, legacy: renderLegacy, bees: renderBees, gardener: renderGardener, overview: renderOverview })[inward ? z : "overview"](); } catch (e) { console.error(e); }
+  for (const el of [ov, det]) el.classList.remove("anim");
+  // start state
+  ov.style.transform = inward ? "none" : fromBox(box); ov.style.opacity = inward ? "1" : "0";
+  det.style.transform = inward ? toBox(box) : "none"; det.style.opacity = inward ? "0" : "1";
+  void det.offsetWidth;
+  for (const el of [ov, det]) el.classList.add("anim");
+  ov.style.transform = inward ? fromBox(box) : "none"; ov.style.opacity = inward ? "0" : "1";
+  det.style.transform = inward ? "none" : toBox(box); det.style.opacity = inward ? "1" : "0";
+  setTimeout(() => {
+    for (const el of [ov, det]) { el.classList.remove("anim"); el.style.transform = ""; el.style.opacity = ""; }
+    zooming = false;
+    try { history.replaceState(null, "", z === "overview" ? location.pathname : `?zoom=${z}`); } catch { /* ignore */ }
+    render();
+  }, 470);
+}
+
+// live pulses: a dot runs along an arrow when the event it stands for really happens
+const pulses = []; // {id, wire, color, at}
+function pulse(wire, color) { pulses.push({ id: `${wire}:${Date.now()}:${Math.random()}`, wire, color, at: Date.now() }); }
+function watchForPulses(m, prev) {
+  if (m.coll === "chaos_events" && m.op === "insert" && m.doc) pulse(m.doc.fault === "agent_kill" ? "kill" : "atk", "var(--red)");
+  if (m.coll === "chaos_events" && m.doc?.fault === "agent_kill" && m.doc?.result?.agent && !prev?.result?.agent) pulse("kill", "var(--red)");
+  if (m.coll === "thoughts" && m.op === "insert" && m.doc) {
+    if (m.doc.kind === "verify" || /^Verified /.test(m.doc.text || "")) pulse("fix", "var(--green)");
+    if (m.doc.kind === "reject") pulse("fix", "var(--red)");
+  }
+  if (m.coll === "upgrade_requests" && m.doc) {
+    if (m.op === "insert") pulse("req", "var(--amber)");
+    if (m.doc.status === "deployed" && prev?.status !== "deployed") pulse("code", "var(--amber)");
+    if (m.doc.status === "proven" && prev?.status !== "proven") pulse("code", "var(--green)");
+  }
+  if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") pulse("fix", "var(--green)");
 }
 
 // the Bees box's hive grid: one cell per agent
@@ -652,16 +690,27 @@ function hiveCells() {
       return `<i class="hc ${cls}" title="${esc(agentName(a._id))}">${GLYPH[role] || "·"}</i>`;
     }).join("");
 }
-function miniChain(inc) {
-  const live = inc?.active ? inc : null;
-  return CHAIN.map((s) => {
+const tickMark = (s) => s.status === "verified" ? '<b class="g">✓</b>' : s.status === "failed" ? '<b class="r">X</b>' : ["sent", "unknown"].includes(s.status) ? "<b>›</b>" : '<b class="dim">·</b>';
+function legacyChain(inc, lieSys) {
+  const live = inc?.active ? inc : null, path = live?.diagnosis_path || [];
+  const box = (s) => {
     const d = state.systems.get(s), st = d?.status || "?", root = live && live.root_cause_system === s;
     const cls = root ? "bad" : st === "up" ? "ok" : st === "down" ? "bad" : "warn";
-    const w = root ? "ROOT CAUSE" : st === "up" ? ((d?.version || 1) > 1 ? `UP V${d.version}` : "UP") : st === "down" ? "DOWN" : "TROUBLE";
-    return `<span class="mc ${cls}"><span class="mn">${U(sn(s))}</span><b>${w}</b></span>`;
-  }).join('<span class="mca">═</span>');
+    const w = root ? "ROOT CAUSE" : st === "up" ? ((d?.version || 1) > 1 ? `UP · V${d.version}` : "UP") : st === "down" ? "DOWN" : "TROUBLE";
+    const sym = String(d?.symptom || "");
+    const cap = !live ? (SYSROLE[s] || "") : root && st === "up" ? "SAYS OK. IT IS THE CAUSE" : st === "up" ? "WORKING"
+      : s === "portal" && /stale/i.test(sym) ? "CUSTOMERS SEE OLD BALANCES" : s === "unix" ? "FILE TRANSFER FAILED" : s === "mainframe" ? "NIGHTLY BATCH CRASHED" : "NOT HEALTHY";
+    return `<span class="mc ${cls}"><span class="mn">${U(sn(s))}</span><b>${w}</b><span class="ms">${esc(cap)}${live && path.includes(s) && !root ? " · CHECKED" : ""}</span>${lieSys.has(s) ? '<span class="stampS">ACK ≠ APPLIED</span>' : ""}</span>`;
+  };
+  const arrow = (a, b) => { const bl = live && state.systems.get(a)?.blames === b; return `<span class="mca ${bl ? "red" : ""}">${bl ? "BLAMES<br>→" : "NEEDS<br>→"}</span>`; };
+  return `${box("portal")}${arrow("portal", "unix")}${box("unix")}${arrow("unix", "mainframe")}${box("mainframe")}`;
 }
-const tickMark = (s) => s.status === "verified" ? '<b class="g">✓</b>' : s.status === "failed" ? '<b class="r">X</b>' : ["sent", "unknown"].includes(s.status) ? "<b>›</b>" : '<b class="dim">·</b>';
+function liesTonight(since, live) {
+  const rejects = state.thoughts.filter((t) => t.kind === "reject" && ts(t.ts) >= since && !String(t.agent || "").startsWith("red-"));
+  const lieSys = new Set(rejects.map((t) => t.system || stepByAction(null, (String(t.text).match(/INC-\S+-a\d+/) || [])[0])?.system || "mainframe"));
+  for (const s2 of (live?.steps || [])) if ((s2.attempts || []).length > 1) lieSys.add(s2.system);
+  return { rejects, lieSys };
+}
 
 function renderOverview() {
   const since = (runStartedAt() || 0) - 5000;
@@ -669,87 +718,89 @@ function renderOverview() {
   const ds = duels(), lt = lastThoughts(since);
   const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"));
   const dead = agents.filter((a) => a.status === "dead").length, working = agents.filter((a) => a.status === "working" || a.phase).length;
-  const lies = state.thoughts.filter((t) => t.kind === "reject" && ts(t.ts) >= since && !String(t.agent || "").startsWith("red-")).length;
+  const { rejects, lieSys } = liesTonight(since, live);
   const hos = nightIncidents().flatMap((i) => i.handoffs || []).length;
-  const recalled = nightIncidents().some((i) => i.recall?.used);
   const steps = inc?.steps || [];
-  const last = lt.last && !String(lt.last.agent || "").startsWith("red-") ? lt.last : [...state.thoughts].reverse().find((t) => ts(t.ts) >= since && !String(t.agent || "").startsWith("red-"));
+  const notRed = (t) => !String(t?.agent || "").startsWith("red-");
+  const last = lt.last && notRed(lt.last) ? lt.last : [...state.thoughts].reverse().find((t) => ts(t.ts) >= since && notRed(t));
   const lastTx = last ? (translate(last)?.text || "").replace(/<[^>]+>/g, "") : "";
   const r = rounds(), liveR2 = [...state.incidents.values()].find((i) => i.active && i.round === 2);
   const t1 = r[1]?.ttr, t2 = r[2]?.ttr ?? (liveR2 ? (serverNow() - ts(liveR2.opened_at)) / 1000 : null);
-  const mx = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / mx) * 200);
-  const look = (_k, n) => `<div class="look"><span>${n}</span>LOOK INSIDE +</div>`;
+  const mx = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / mx) * 150);
+  const look = (n) => `<div class="look"><span>${n}</span>LOOK INSIDE +</div>`;
+  const liveLine = (k, html) => `<div class="live"><span class="lk">NOW</span>${html} <span class="eta" data-eta="${k}"></span></div>`; // .eta = W24 progress/ETA slot
   const B = BOXR;
-  const lieFresh = state.thoughts.some((t) => t.kind === "reject" && serverNow() - ts(t.ts) < 12000);
+  const lieFresh = rejects.some((t) => serverNow() - ts(t.ts) < 12000);
   const killFresh = ds.some((d) => d.e.fault === "agent_kill" && d.e.result?.agent && serverNow() - ts(d.e.done_at || d.e.ts) < 20000);
-  const beesBusy = !!live || working > 0;
+  const u = latestUpgrade();
+  const at = u ? ["requested", "planning", "testing", "awaiting_approval", "deploying", "deployed", "proven"].indexOf(u.status) : -1;
+  const pos = (b) => `left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px`;
 
   // CHAOS MONKEY
-  const struck = new Map(); for (const d of ds) struck.set(d.who, (struck.get(d.who) || 0) + 1);
-  const ROSTER = [["SABOTEUR", "BREAKS OLD SYSTEMS"], ["LIAR", "SAYS “DONE”, DOES NOTHING"], ["ASSASSIN", "KILLS AN AGENT MID-JOB"], ["HACKER", "WALKS IN THROUGH OLD HOLES"], ["DRIFTER", "RENAMES DATA FIELDS"]];
-  const chaos = `<div class="big chaos ${ds.length ? "hot" : ""}" data-zoom="chaos" style="left:${B.chaos.x}px;top:${B.chaos.y}px;width:${B.chaos.w}px;height:${B.chaos.h}px">
+  const struck = new Set(ds.map((d) => d.who));
+  const lastDuel = ds[ds.length - 1];
+  const chaos = `<div class="big chaos ${ds.length ? "hot" : ""}" data-zoom="chaos" style="${pos(B.chaos)}">
     <div class="bh"><span class="bt">CHAOS MONKEY</span><span class="dim">THE ATTACKERS · US</span></div>
-    <div class="bs">WE ATTACK THE BANK ON PURPOSE. EACH ATTACKER HAS ONE TRICK.</div>
-    <div class="bl-k">ATTACKERS</div>
-    ${ROSTER.map(([n, d]) => `<div class="bl per ${struck.has(n) ? "on" : ""}"><span class="pn">${n}</span><span>${d}</span><span class="pc">${struck.has(n) ? `×${struck.get(n)}` : ""}</span></div>`).join("")}
+    <div class="bs">WE ATTACK THE BANK ON PURPOSE. FIVE ATTACKERS, ONE TRICK EACH.</div>
+    <div class="pers">${["SABOTEUR", "LIAR", "ASSASSIN", "HACKER", "DRIFTER"].map((n) => `<span class="${struck.has(n) ? "on" : ""}">${n}</span>`).join("")}</div>
     <div class="bl-k">ATTACK <span class="ar">→</span> DEFENCE${ds.length ? ` · ${ds.length} TONIGHT` : ""}</div>
-    ${ds.length ? ds.slice(-4).map((d) => `<div class="duo"><div><span class="pn">${esc(d.who)}</span> ${esc(d.atk)}</div><div class="def ${d.def.c}">↳ ${esc(d.def.t)}</div></div>`).join("") : '<div class="bl dim">PRESS START: TONIGHT’S ATTACKS AND HOW THE BEES ANSWERED EACH ONE SHOW HERE.</div>'}
-    ${look("chaos", 1)}</div>`;
+    ${ds.length ? ds.slice(-3).map((d) => `<div class="duo"><div><span class="pn">${esc(d.who)}</span> ${esc(d.atk)}</div><div class="def ${d.def.c}">↳ ${esc(d.def.t)}</div></div>`).join("") : '<div class="bl dim">EACH ATTACK, AND THE DEFENCE THAT ANSWERED IT.</div>'}
+    ${liveLine("chaos", lastDuel ? `<span class="r">${esc(lastDuel.who)}</span> ${esc(lastDuel.atk)}` : '<span class="dim">WAITING FOR NIGHT 1</span>')}
+    ${look(1)}</div>`;
+
+  // LEGACY SYSTEMS
+  const cascade = live ? nowLine().replace(/<[^>]+>/g, "") : inc?.status === "resolved" ? "ALL GREEN AGAIN" : "ALL THREE UP";
+  const legacy = `<div class="big legacy ${live ? "hot" : ""}" data-zoom="legacy" style="${pos(B.legacy)}">
+    <div class="bh"><span class="bt">LEGACY SYSTEMS</span><span class="dim">THE OLD BANK · EACH ONE NEEDS THE NEXT</span></div>
+    <div class="bs">THE WEBSITE NEEDS THE UNIX FILE SERVER, WHICH NEEDS THE 1987 MAINFRAME. BREAK THE MAINFRAME AND THE WEBSITE LOOKS BROKEN.</div>
+    <div class="chainL">${legacyChain(inc, lieSys)}</div>
+    <div class="bl-k" style="margin-top:22px">TONIGHT’S FIXES${steps.length ? ` · ${steps.filter((s) => s.status === "verified").length} OF ${steps.length} VERIFIED BY THE GUARD` : ""}</div>
+    <div class="bl">${steps.length ? steps.slice(0, 4).map((s) => `${tickMark(s)} ${U(sop(s.op))}${(s.attempts || []).length > 1 ? ' <b class="r">LIED</b>' : ""}`).join("&nbsp;&nbsp;") : inc?.status === "resolved" ? '<span class="g">FIXED. EVERY STEP CHECKED.</span>' : '<span class="dim">NOTHING TO FIX.</span>'}</div>
+    ${liveLine("legacy", esc(cascade.toUpperCase()))}
+    ${look(2)}</div>`;
 
   // THE BEES
-  const ok = steps.filter((s) => s.status === "verified").length;
-  const bees = `<div class="big bees ${beesBusy ? "hot" : ""}" data-zoom="bees" style="left:${B.bees.x}px;top:${B.bees.y}px;width:${B.bees.w}px;height:${B.bees.h}px">
-    <div class="bh"><span class="bt">THE BEES</span><span class="dim">THE AI SWARM · ${agents.length - dead} ALIVE · ${working} WORKING</span></div>
-    <div class="bs">AI AGENTS THAT FIND WHAT REALLY BROKE, FIX IT, AND CHECK THE FIX IS TRUE.</div>
-    <div class="bl-k">THE BANK THEY GUARD</div>
-    <div class="chainm">${miniChain(inc)}</div>
-    <div class="bl-k">THE HIVE · ONE SQUARE PER AGENT</div>
+  const bees = `<div class="big bees ${live || working ? "hot" : ""}" data-zoom="bees" style="${pos(B.bees)}">
+    <div class="bh"><span class="bt">THE BEES</span><span class="dim">AI SWARM · ${agents.length - dead} ALIVE</span></div>
+    <div class="bs">AI AGENTS THAT WATCH THE SYSTEMS, FIND WHAT REALLY BROKE, FIX IT, AND CHECK EVERY “DONE”.</div>
     <div class="hive">${hiveCells()}</div>
-    <div class="bl hl dim"><i class="hc work">W</i> WORKING <i class="hc idle">W</i> IDLE <i class="hc dead">W</i> KILLED <i class="hc took">N</i> TOOK OVER</div>
-    <div class="bl-k">RIGHT NOW</div>
-    <div class="bl now2">${last ? `<span class="pn2">${U(agentName(last.agent))}</span> ${esc(lastTx)}` : '<span class="dim">ALL QUIET.</span>'}</div>
-    <div class="bl-k">TONIGHT’S CASE${steps.length ? ` · ${ok} OF ${steps.length} FIXES VERIFIED` : ""}</div>
-    <div class="bl">${steps.length ? steps.slice(0, 5).map((s) => `${tickMark(s)} ${U(sop(s.op))}${(s.attempts || []).length > 1 ? ' <b class="r">LIED FIRST</b>' : ""}`).join("&nbsp;&nbsp;") : inc?.status === "resolved" ? '<span class="g">FIXED. LESSON SAVED IN MONGODB.</span>' : '<span class="dim">NO CASE OPEN.</span>'}</div>
-    <div class="cnt"><span class="${lies ? "r" : ""} ${lieFresh ? "flash" : ""}">LIES CAUGHT <b>${lies}</b></span><span class="${dead ? "r" : ""} ${killFresh ? "flash" : ""}">KILLED <b>${dead}</b></span><span class="${hos ? "a" : ""}">TAKEOVERS <b>${hos}</b></span><span class="${recalled ? "a" : ""}">REMEMBERED <b>${recalled ? "YES" : "—"}</b></span></div>
-    <div class="ttf"><span class="dim">TIME TO FIX</span><span>NIGHT 1 ${t1 != null ? secs(t1).toUpperCase() : "—"}</span>${t1 != null ? `<i style="width:${bw(t1)}px"></i>` : ""}</div>
-    <div class="ttf"><span class="dim" style="visibility:hidden">TIME TO FIX</span><span>NIGHT 2 ${t2 != null ? secs(t2).toUpperCase() : "—"}</span>${t2 != null ? `<i class="g2" style="width:${bw(t2)}px"></i>` : ""}${r[1] && r[2] && r[2].ttr < r[1].ttr ? `<span class="x">${(r[1].ttr / r[2].ttr).toFixed(1)}× FASTER</span>` : ""}</div>
-    ${look("bees", 2)}</div>`;
+    <div class="cnt"><span class="${rejects.length ? "r" : ""} ${lieFresh ? "flash" : ""}">LIES <b>${rejects.length}</b></span><span class="${dead ? "r" : ""} ${killFresh ? "flash" : ""}">KILLED <b>${dead}</b></span><span class="${hos ? "a" : ""}">TAKEOVERS <b>${hos}</b></span></div>
+    <div class="ttf"><span class="dim">FIX TIME</span><span>N1 ${t1 != null ? secs(t1).toUpperCase() : "—"}</span>${t1 != null ? `<i style="width:${bw(t1)}px"></i>` : ""}</div>
+    <div class="ttf"><span class="dim" style="visibility:hidden">FIX TIME</span><span>N2 ${t2 != null ? secs(t2).toUpperCase() : "—"}</span>${t2 != null ? `<i class="g2" style="width:${bw(t2)}px"></i>` : ""}${r[1] && r[2] && r[2].ttr < r[1].ttr ? `<span class="x">${(r[1].ttr / r[2].ttr).toFixed(1)}×</span>` : ""}</div>
+    ${liveLine("bees", last ? `<span class="pn2">${U(agentName(last.agent))}</span>${esc(lastTx)}` : '<span class="dim">ALL QUIET</span>')}
+    ${look(3)}</div>`;
 
   // THE GARDENER
-  const u = latestUpgrade();
-  const STEPS = [["requested", "SAME FAILURE TWICE: FILE A REQUEST"], ["planning", "WRITE THE CODE FIX"], ["testing", "TEST IT IN A SANDBOX"], ["awaiting_approval", "WAIT FOR YOUR OK"], ["deploying", "DEPLOY THE NEW CODE"], ["deployed", "PROVE IT: REPLAY THE ATTACK"]];
-  const order = ["requested", "planning", "testing", "awaiting_approval", "deploying", "deployed", "proven"];
-  const at = u ? order.indexOf(u.status) : -1;
   const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
-  const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="left:${B.gardener.x}px;top:${B.gardener.y}px;width:${B.gardener.w}px;height:${B.gardener.h}px">
+  const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="${pos(B.gardener)}">
     <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">PERMANENT FIXES</span></div>
-    <div class="bs">WHEN THE SAME FAILURE COMES BACK, IT WRITES NEW CODE SO IT CAN’T HAPPEN AGAIN.</div>
-    <div class="bl-k">THE STEPS</div>
-    ${STEPS.map(([k, t], i) => { const st = u?.status === "rejected" ? "" : at > i ? "done" : at === i ? "now" : ""; return `<div class="bl gs ${st}"><b>${st === "done" ? "✓" : st === "now" ? "›" : String(i + 1)}</b> ${t}</div>`; }).join("")}
-    <div class="bl gs ${u?.status === "proven" ? "done" : ""}"><b>${u?.status === "proven" ? "✓" : "7"}</b> FIXED FOR GOOD</div>
-    <div class="bl-k">STATUS</div>
-    <div class="gv">${u ? (u.status === "proven" ? `${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}` : u.status === "rejected" ? "FIX REJECTED" : U(String(u.status).replace(/_/g, " "))) : "WAITING FOR A REPEAT FAILURE"}</div>
-    <div class="bl dim">${u?.status === "proven" ? "THE SAME ATTACK CAME BACK. NOTHING BROKE." : gThought ? esc((translate(gThought)?.text || "").replace(/<[^>]+>/g, "")) : "NIGHT 1 + NIGHT 2 SAME FAILURE → A CODE FIX."}</div>
-    ${look("gardener", 3)}</div>`;
+    <div class="gsteps">${["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"].map((n, i) => `<span class="${u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "now" : ""}">${n}</span>`).join("")}</div>
+    ${liveLine("gardener", u ? (u.status === "proven" ? `<span class="g">${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}: ATTACK REPLAYED, NOTHING BROKE</span>` : esc((gThought ? (translate(gThought)?.text || "").replace(/<[^>]+>/g, "") : String(u.status)).toUpperCase())) : '<span class="dim">WAITING FOR A FAILURE THAT COMES BACK</span>')}
+    <div class="look" style="height:24px;line-height:22px"><span>4</span>LOOK INSIDE +</div></div>`;
 
-  patch($("#ov-nodes"), [{ k: "chaos", html: chaos }, { k: "bees", html: bees }, { k: "gard", html: gard }]);
+  patch($("#ov-nodes"), [{ k: "chaos", html: chaos }, { k: "legacy", html: legacy }, { k: "bees", html: bees }, { k: "gard", html: gard }]);
 
-  // the lines between the boxes
-  const W = [];
-  const lineH = (k, x1, x2, y, cls, label, rev = false) => W.push({ k, html: `<g><path class="w ${cls}" d="M${rev ? x2 : x1} ${y} L${rev ? x1 + 8 : x2 - 8} ${y}" marker-end="url(#ah-${cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i"})"/><text class="wl ${cls.replace(/\bon\b/, "")}" x="${(x1 + x2) / 2}" y="${y - 7}" text-anchor="middle">${esc(label)}</text></g>` });
-  const cx1 = B.chaos.x + B.chaos.w + 4, bx1 = B.bees.x - 4, bx2 = B.bees.x + B.bees.w + 4, gx1 = B.gardener.x - 4;
+  // arrows
   const atkNow = ds.some((d) => d.e.fault !== "agent_kill" && serverNow() - ts(d.e.ts) < 25000) || !!live;
-  W.push({ k: "defs", html: `<defs>${[["r", "var(--red)"], ["a", "var(--amber)"], ["g", "var(--green)"], ["i", "var(--faint)"]].map(([n, c]) => `<marker id="ah-${n}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("")}</defs>` });
-  lineH("atk", cx1, bx1, 250, `red ${atkNow ? "on" : ""}`, ds.some((d) => d.e.fault !== "agent_kill") ? "ATTACKS" : "ATTACKS");
-  lineH("kill", cx1, bx1, 330, `red ${killFresh ? "on" : ""}`, "KILLS AN AGENT");
-  lineH("lie", cx1, bx1, 410, `${lies ? "grn" : ""} ${lieFresh ? "on" : ""}`, lies ? "LIE CAUGHT" : "LIES", true);
-  const upgReq = !!u, deployed = u && ["deployed", "proven"].includes(u.status);
-  lineH("req", bx2, gx1, 250, `${upgReq ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, "SAME FAILURE ×2");
-  lineH("code", bx2, gx1, 330, `${deployed ? "grn" : ""} ${u?.status === "deployed" ? "on" : ""}`, deployed ? `NEW CODE V${u.version_after ?? 2}` : "NEW CODE", true);
-  // the proof: the attack is replayed against the new code (runs under the boxes)
-  const proving = u?.status === "deployed", proven = u?.status === "proven";
-  const yb = B.bees.y + B.bees.h + 20;
-  W.push({ k: "prove", html: `<g><path class="w ${proven ? "grn" : proving ? "red on" : ""}" d="M${B.gardener.x + 60} ${B.gardener.y + B.gardener.h} L${B.gardener.x + 60} ${yb} L${B.chaos.x + B.chaos.w - 60} ${yb} L${B.chaos.x + B.chaos.w - 60} ${B.chaos.y + B.chaos.h + 6}"/><text class="wl ${proven ? "grn" : proving ? "red" : ""}" x="800" y="${yb + 14}" text-anchor="middle">${proven ? "PROVEN: THE ATTACK WAS REPLAYED AND NOTHING BROKE" : proving ? "PROVING: CHAOS MONKEY REPLAYS THE ATTACK…" : "THE PROOF: THE ATTACK IS REPLAYED AGAINST THE NEW CODE"}</text></g>` });
+  const fixNow = state.thoughts.some((t) => (t.kind === "verify" || /^Verified /.test(t.text || "")) && serverNow() - ts(t.ts) < 8000);
+  const deployed = u && ["deployed", "proven"].includes(u.status);
+  const cx = B.chaos.x + B.chaos.w, lx1 = B.legacy.x, lx2 = B.legacy.x + B.legacy.w, bx = B.bees.x;
+  const gy = B.gardener.y, gyb = B.gardener.y + B.gardener.h;
+  const WIRES = {
+    atk: { d: `M${cx + 6} 250 L${lx1 - 12} 250`, cls: `red ${atkNow ? "on" : ""}`, label: "ATTACKS", lx: (cx + lx1) / 2, ly: 242 },
+    fix: { d: `M${bx - 6} 250 L${lx2 + 12} 250`, cls: `${fixNow ? "grn on" : live ? "on" : ""}`, label: "WATCH + FIX", lx: (bx + lx2) / 2, ly: 242 },
+    lie: { d: `M${bx - 6} 330 L${lx2 + 12} 330`, cls: `${rejects.length ? "red" : ""} ${lieFresh ? "on" : ""}`, label: rejects.length ? "LIE CAUGHT" : "CHECKS", lx: (bx + lx2) / 2, ly: 322 },
+    kill: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y - 6} L${B.chaos.x + B.chaos.w / 2} 92 L${B.bees.x + B.bees.w / 2} 92 L${B.bees.x + B.bees.w / 2} ${B.bees.y - 12}`, cls: `red ${killFresh ? "on" : ""}`, label: "KILLS A BEE (A REAL PROCESS KILL)", lx: 800, ly: 88 },
+    code: { d: `M800 ${gy - 6} L800 ${B.legacy.y + B.legacy.h + 12}`, cls: `${deployed ? "amb" : ""} ${u?.status === "deployed" ? "on" : ""}`, label: deployed ? `NEW CODE: V${u.version_after ?? 2}` : "WRITES NEW CODE", lx: 810, ly: (gy + B.legacy.y + B.legacy.h) / 2 + 4, anchor: "start" },
+    req: { d: `M${B.bees.x + B.bees.w / 2} ${B.bees.y + B.bees.h + 6} L${B.bees.x + B.bees.w / 2} ${gy + 60} L${B.gardener.x + B.gardener.w + 12} ${gy + 60}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "SAME FAILURE TWICE", lx: B.bees.x + B.bees.w / 2 - 10, ly: gy + 52, anchor: "end" },
+    prove: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y + B.chaos.h + 6} L${B.chaos.x + B.chaos.w / 2} ${gy + 60} L${B.gardener.x - 12} ${gy + 60}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? "ATTACK REPLAYED: NOTHING BROKE" : "PROOF: REPLAY THE ATTACK", lx: B.chaos.x + B.chaos.w / 2 + 10, ly: gy + 52 },
+  };
+  const mk = (cls) => (cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i");
+  const W = [{ k: "defs", html: `<defs>${[["r", "var(--red)"], ["a", "var(--amber)"], ["g", "var(--green)"], ["i", "var(--faint)"]].map(([n, c]) => `<marker id="ah-${n}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("")}</defs>` }];
+  for (const [k, w] of Object.entries(WIRES)) W.push({ k, html: `<g><path id="wire-${k}" class="w ${w.cls}" d="${w.d}" marker-end="url(#ah-${mk(w.cls)})"/><text class="wl ${w.cls.replace(/\bon\b/, "")}" x="${w.lx}" y="${w.ly}" text-anchor="${w.anchor || "middle"}">${esc(w.label)}</text></g>` });
+  const now = Date.now();
+  for (let i = pulses.length - 1; i >= 0; i--) if (now - pulses[i].at > 1400) pulses.splice(i, 1);
+  for (const p of pulses) if (WIRES[p.wire]) W.push({ k: p.id, html: `<circle class="pulse" r="5" fill="${p.color}" style="color:${p.color}"><animateMotion begin="indefinite" dur="1.1s" fill="freeze" path="${WIRES[p.wire].d}"/></circle>` });
   patch($("#ov-wires"), W, true);
 }
 
@@ -776,6 +827,45 @@ function renderChaos() {
     <div class="eta" data-eta="chaos" style="left:580px;top:700px;width:980px"></div>
   </div>`;
   const host = $("#chaos-body");
+  if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }
+}
+
+// ================================================================== level 1: inside the Legacy systems
+function renderLegacy() {
+  const since = (runStartedAt() || 0) - 5000;
+  const inc = focusIncident(), live = inc?.active ? inc : null, path = live?.diagnosis_path || [];
+  const { lieSys } = liesTonight(since, live);
+  const ledger = [...state.ledger.values()].filter((l) => ts(l.ts) >= since).sort((a, b) => ts(a.ts) - ts(b.ts));
+  const X = { portal: 60, unix: 580, mainframe: 1100 };
+  const cards = CHAIN.map((s) => {
+    const d = state.systems.get(s) || {}, st = d.status || "?", m = d.metrics || {}, root = live && live.root_cause_system === s;
+    const cls = root || st === "down" ? "bad" : st === "up" ? "" : "warn";
+    const w = root ? "ROOT CAUSE" : st === "up" ? "UP" : st === "down" ? "DOWN" : "TROUBLE";
+    const rows = [["SAYS", `${U(st)}${d.blames ? ` · BLAMES ${U(sn(d.blames))}` : ""}`], ["VERSION", `V${esc(d.version ?? 1)}${(d.version || 1) > 1 ? ' <span class="g">UPGRADED</span>' : ""}`],
+      ["SYMPTOM", d.symptom ? esc(String(d.symptom)).slice(0, 60) : "—"], ["LATENCY", m.latency_ms != null ? `${Math.round(m.latency_ms)} MS` : "—"],
+      ["ERRORS", m.error_rate != null ? `${(m.error_rate * 100).toFixed(0)}%` : "—"], [s === "mainframe" ? "BATCH" : s === "unix" ? "DISK" : "SESSIONS", esc(s === "mainframe" ? (m.batch_status || "—") : s === "unix" ? (m.disk_pct != null ? `${Math.round(m.disk_pct)}%` : "—") : (m.sessions ?? "—"))]];
+    const ops = ledger.filter((l) => l.system === s).slice(-4);
+    const logs = (state.logs[s] || []).slice(-4);
+    return `<div class="lz ${cls}" style="left:${X[s]}px">
+      ${root ? '<span class="band">ROOT CAUSE</span>' : live && path.includes(s) ? '<span class="band ck">CHECKED BY THE SCOUT</span>' : ""}
+      <h3><span>${U(sn(s))}</span><small>${SYSROLE[s] || ""}</small></h3>
+      <div class="ss" style="margin:6px 0"><b class="${cls === "bad" ? "r" : cls === "warn" ? "" : "g"}">■ ${w}</b></div>
+      ${rows.map(([k, v]) => `<div class="kv"><span class="dim">${k}</span><span>${v}</span></div>`).join("")}
+      <div class="bl-k">FIXES SENT HERE TONIGHT</div>
+      ${ops.length ? ops.map((l) => `<div class="kv"><span>${l.status === "verified" ? '<b class="g">✓ VERIFIED</b>' : l.status === "failed" ? '<b class="r">X IT LIED</b>' : U(l.status)}</span><span>${U(sop(l.op))}</span></div>`).join("") : '<div class="pd">None.</div>'}
+      <div class="bl-k">ITS OWN LOG</div>
+      ${logs.length ? logs.map((g) => `<div class="log">${esc(prettyTime(g.line || g.code || ""))}</div>`).join("") : '<div class="pd">Quiet.</div>'}
+      ${lieSys.has(s) ? '<span class="stamp">ACK ≠ APPLIED</span>' : ""}
+    </div>`;
+  }).join("");
+  const arrows = [["portal", "unix", 500], ["unix", "mainframe", 1020]].map(([a, b, x]) => {
+    const bl = live && state.systems.get(a)?.blames === b;
+    return `<path class="w dbl ${bl ? "red" : ""}" d="M${x + 6} 400 L${x + 66} 400"/><path class="w dbl-in" d="M${x + 6} 400 L${x + 66} 400"/><text class="wl ${bl ? "red" : ""}" x="${x + 40}" y="390" text-anchor="middle">${bl ? "BLAMES" : "NEEDS"}</text>`;
+  }).join("");
+  const html = `<div class="zc"><svg class="wires" viewBox="0 0 1600 900" style="position:absolute;left:0;top:0;width:1600px;height:900px">${arrows}</svg>
+    <div class="zcol" style="left:60px;top:84px;width:1480px"><span class="dim">CASCADE&nbsp;&nbsp;</span>${esc((live ? nowLine().replace(/<[^>]+>/g, "") : "the website needs the unix server, which needs the mainframe").toUpperCase())}</div>
+    ${cards}<div class="eta" data-eta="legacy-inside" style="left:60px;top:700px;width:1480px"></div></div>`;
+  const host = $("#legacy-body");
   if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }
 }
 
@@ -820,7 +910,7 @@ function renderDiagram() {
   $("#clock").textContent = rid ? `NIGHT ${state.current?.round ?? "?"} · T+${el != null ? `${String(Math.floor(el / 60)).padStart(2, "0")}:${String(el % 60).padStart(2, "0")}` : "—"}` : "NO NIGHT RUNNING";
   if (zooming) return;
   for (const v of ZOOMS) { const el2 = $(`#v-${v}`); if (el2.hidden !== (v !== zoom)) el2.hidden = v !== zoom; }
-  ({ overview: renderOverview, chaos: renderChaos, bees: renderBees, gardener: renderGardener })[zoom]();
+  ({ overview: renderOverview, chaos: renderChaos, legacy: renderLegacy, bees: renderBees, gardener: renderGardener })[zoom]();
 }
 
 function bindZoom() {
@@ -836,9 +926,7 @@ function bindZoom() {
     if (e.ctrlKey || e.metaKey || e.altKey || /input|select|textarea/i.test(e.target.tagName)) return;
     if (e.key === "Escape") { if (!$("#help").hidden) $("#help").hidden = true; else if ($("#details").hidden) setZoom("overview"); }
     else if (e.key === "0") setZoom("overview");
-    else if (e.key === "1") setZoom("chaos");
-    else if (e.key === "2") setZoom("bees");
-    else if (e.key === "3") setZoom("gardener");
+    else if (KEYZ[e.key]) setZoom(KEYZ[e.key]);
     else if (e.key === "?" || e.key.toLowerCase() === "h") help();
   });
 }
@@ -919,6 +1007,7 @@ function render() {
 
 on("snapshot", () => { render(); refreshScore(); });
 on("change", (m, prev) => {
+  try { watchForPulses(m, prev); } catch (e) { console.error(e); }
   if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") refreshScore();
   render();
 });

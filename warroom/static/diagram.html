@@ -13,9 +13,8 @@
      Classic war room: ?classic=1 · W9's flowchart: ?view=flow -->
 <div id="fit">
 <div id="frame">
-  <header class="sheet">
-    <div class="l row" style="top:14px"><span>LEGACY SIEGE&nbsp;&nbsp;/&nbsp;&nbsp;NIGHT SHIFT AT AN OLD BANK</span><span id="conn" class="conn"><i></i><span id="conn-txt">CONNECTING…</span></span></div>
-    <div class="l row" style="top:42px"><span class="dim">AI AGENTS KEEP A 1980s BANK RUNNING WHILE WE ATTACK IT. <span id="night" class="chip">READY</span></span>
+  <header class="top">
+    <div class="l row" style="top:14px"><span><span class="brand">LEGACY SIEGE</span><span class="dim">&nbsp;&nbsp;AI AGENTS KEEP A 1980s BANK RUNNING WHILE WE ATTACK IT</span><span id="night" class="chip">READY</span><span id="conn" class="conn"><i></i><span id="conn-txt">CONNECTING…</span></span></span>
       <nav class="controls">
         <button id="btn-start" class="btn inv" title="S">START</button>
         <button id="btn-kill" class="btn" title="Kill the worker that is in the middle of a job (K)">KILL A WORKER</button>
@@ -42,13 +41,13 @@
   </header>
 
   <main class="screen">
-    <div class="l row" style="top:104px"><span class="crumbs"><button id="z-back" class="btn sm" hidden title="Back to the three boxes (Esc)">&lt; OVERVIEW</button><span id="ex-a-l" class="dim"></span></span><span id="ex-title">EXHIBIT A: THE WHOLE NIGHT IN THREE BOXES</span><span id="clock" class="dim">—</span></div>
+    <div class="l row" style="top:52px"><span class="crumbs"><button id="z-back" class="btn sm" hidden title="Back to the overview (Esc)">&lt; OVERVIEW</button><span id="ex-a-l" class="dim"></span></span><span id="ex-title">EXHIBIT A: THE WHOLE NIGHT</span><span id="clock" class="dim">—</span></div>
 
     <!-- level 0: three boxes. Click one (or press 1 2 3) to zoom in. -->
     <section id="v-overview" class="layer">
       <svg id="ov-wires" class="wires" viewBox="0 0 1600 900" aria-hidden="true"></svg>
       <div id="ov-nodes"></div>
-      <div class="l hint" style="top:812px"><span>CLICK A BOX (OR PRESS 1 · 2 · 3) TO LOOK INSIDE&nbsp;&nbsp;·&nbsp;&nbsp;ESC COMES BACK&nbsp;&nbsp;·&nbsp;&nbsp;<button class="lnk" data-help>? HELP: WHAT EVERY BUTTON DOES</button></span></div>
+      <div class="l hint" style="top:826px"><span>CLICK A BOX (OR PRESS 1 · 2 · 3 · 4) TO LOOK INSIDE&nbsp;&nbsp;·&nbsp;&nbsp;ESC COMES BACK&nbsp;&nbsp;·&nbsp;&nbsp;<button class="lnk" data-help>? HELP: WHAT EVERY BUTTON DOES</button></span></div>
     </section>
 
     <!-- level 1: inside the Bees (the agents as seats around the systems they work on) -->
@@ -64,6 +63,9 @@
 
     <!-- level 1: inside Chaos Monkey (who attacks, and the defence that answered each attack) -->
     <section id="v-chaos" class="layer" hidden><div id="chaos-body"></div></section>
+
+    <!-- level 1: inside the Legacy systems (the cascade portal → unix → mainframe, what each one says, the lie) -->
+    <section id="v-legacy" class="layer" hidden><div id="legacy-body"></div></section>
 
     <!-- level 1: inside the Gardener (a repeated failure becomes new, tested, approved, proven code) -->
     <section id="v-gardener" class="layer" hidden><div id="gard-body"></div></section>
@@ -94,13 +96,13 @@
     <div class="det-h"><h2>HOW TO USE THIS SCREEN</h2><button class="x" id="help-x" aria-label="close">×</button></div>
     <div class="det-body">
       <h3>The picture</h3>
-      <p>Three boxes. <b>CHAOS MONKEY</b> is us: we attack an old bank on purpose. <b>THE BEES</b> are AI agents that find and fix what broke, live. <b>THE GARDENER</b> turns a failure that keeps coming back into new, tested code. Lines between the boxes light up when one acts on another. Everything you see is read live from MongoDB.</p>
+      <p>Four boxes. <b>CHAOS MONKEY</b> is us: we attack the <b>LEGACY SYSTEMS</b> of an old bank on purpose (a website, a Unix file server, a 1987 mainframe). <b>THE BEES</b> are AI agents that watch those systems and fix what broke, live. <b>THE GARDENER</b> turns a failure that keeps coming back into new, tested code. Arrows light up as it happens: red = an attack lands, green = a fix is verified, orange = new code deployed. Everything you see is read live from MongoDB.</p>
       <h3>Looking inside</h3>
       <table>
-        <tr><td>Click a box · keys 1 2 3</td><td>Zoom in: 1 Chaos Monkey (every attack and the defence that answered it) · 2 the Bees (each agent, the system it is working on, its moves on a timeline) · 3 the Gardener (the code fix, step by step).</td></tr>
+        <tr><td>Click a box · keys 1 2 3 4</td><td>Zoom in: 1 Chaos Monkey (every attack and the defence that answered it) · 2 Legacy systems (the cascade, what each system claims, the lie) · 3 the Bees (each agent, the system it is working on, its moves on a timeline) · 4 the Gardener (the code fix, step by step).</td></tr>
         <tr><td>&lt; OVERVIEW · Esc · 0</td><td>Zoom back out to the three boxes.</td></tr>
       </table>
-      <h3>Buttons (top right)</h3>
+      <h3>Buttons (top right, small)</h3>
       <table>
         <tr><td>START · S</td><td>Starts Night 1: the attack begins. After a night it reads START OVER (wipes everything, runs Night 1 again).</td></tr>
         <tr><td>KILL A WORKER · K</td><td>Really kills (SIGKILL) the worker agent that is in the middle of a fix. Glows red when one is mid-job. A nurse agent takes over its job from the saved progress in MongoDB.</td></tr>

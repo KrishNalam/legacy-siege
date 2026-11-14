@@ -315,3 +315,49 @@ button { font: inherit; color: inherit; }
 /* full-sheet layers must not swallow clicks meant for the header row */
 #nodes, #ov-nodes { pointer-events: none; }
 #nodes > *, #ov-nodes > * { pointer-events: auto; }
+
+/* ---- v2: no white bar; a quiet top row inside the dark page ---- */
+.top { position: absolute; left: 0; top: 0; width: 1600px; height: 44px; z-index: 5; border-bottom: 1px solid var(--faint); }
+.top .brand { letter-spacing: .12em; }
+.top .row > span:first-child { display: inline-flex; align-items: center; gap: 1.5ch; }
+.top .chip { margin-left: 2ch; font-size: 12px; }
+.top .controls { gap: .8ch; }
+.top .btn { height: 24px; line-height: 22px; font-size: 12px; padding: 0 1.1ch; border-color: var(--faint); color: var(--muted); }
+.top .btn:hover:not(:disabled) { border-color: var(--ink); background: transparent; color: var(--ink); }
+.top .btn.inv { background: transparent; border-color: var(--ink); color: var(--ink); }
+.top .btn.inv:hover:not(:disabled) { background: var(--ink); color: var(--paper); }
+.top .pop { top: 30px; }
+main > .l { z-index: 5; }
+.layer { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; z-index: 1; pointer-events: none; }
+.layer > * { pointer-events: auto; }
+.layer > .wires, .layer > #nodes, .layer > #ov-nodes, .layer > .zc { pointer-events: none; }
+.layer.anim { transition: transform .45s cubic-bezier(.2,.75,.2,1), opacity .45s cubic-bezier(.2,.75,.2,1); }
+.big { padding: 10px 2ch 0; }
+.live { margin-top: 8px; border-top: 1px dashed var(--faint); padding-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.live .lk { color: var(--gutter); font-size: 10px; letter-spacing: .08em; margin-right: 1ch; }
+.big .eta { position: static; border: 0; padding: 0; color: var(--amber); }
+.big.legacy { cursor: pointer; }
+.chainL { display: flex; align-items: stretch; margin-top: 10px; gap: 0; }
+.chainL .mc { padding: 6px 1ch; position: relative; min-height: 96px; }
+.chainL .mc .mn { font-size: 15px; }
+.chainL .mc .ms { color: var(--muted); font-size: 10px; line-height: 1.4; margin-top: 4px; white-space: normal; }
+.chainL .mc.bad .ms, .chainL .mc.warn .ms { color: var(--ink); }
+.chainL .mca { align-self: center; font-size: 11px; color: var(--muted); padding: 0 .6ch; text-align: center; line-height: 1.2; }
+.chainL .mca.red { color: var(--red); }
+.chainL .stampS { position: absolute; right: -10px; bottom: -12px; border: 2px solid var(--red); color: var(--red); background: var(--paper); font-size: 11px; padding: 0 .6ch; transform: rotate(-6deg); white-space: nowrap; }
+.pers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pers span { border: 1px solid var(--faint); color: var(--gutter); padding: 0 .8ch; font-size: 11px; }
+.pers span.on { background: var(--red); border-color: var(--red); color: #fff; }
+.gsteps { display: flex; gap: 6px; margin-top: 10px; }
+.gsteps span { flex: 1; border: 1px solid var(--faint); color: var(--gutter); font-size: 10px; text-align: center; line-height: 22px; }
+.gsteps span.done { border-color: var(--green); color: var(--green); }
+.gsteps span.now { background: var(--amber); border-color: var(--amber); color: #111; animation: blink 1s steps(2, jump-none) infinite; }
+.pulse { filter: drop-shadow(0 0 4px currentColor); }
+/* inside Legacy */
+.lz { position: absolute; top: 120px; width: 440px; height: 560px; border: 1px solid var(--ink); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--ink); padding: 10px 2ch; font-size: 12px; line-height: 1.7; background: var(--paper); }
+.lz.bad { border-color: var(--red); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--red); }
+.lz.warn { border-color: var(--warn); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--warn); }
+.lz h3 { margin: 0; font-size: 20px; letter-spacing: .08em; display: flex; justify-content: space-between; }
+.lz h3 small { font-size: 11px; color: var(--muted); }
+.lz .log { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; }
+.lz .stamp { left: auto; right: 20px; top: 60px; }
