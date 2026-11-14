@@ -8,6 +8,13 @@
 The stack must already be running (`.venv/bin/python run.py --reset`). Approvals are auto-approved through
 POST /api/approvals/{id} (like the Beekeeper clicking Approve); the agent kill is fired through POST /api/kill
 right after restart_batch is approved, so the worker dies in phase step_sent. Exit code 0 = every beat PASS.
+
+    .venv/bin/python -m scripts.demo_check --drift         # + Statement 3 Q3 rows (opt-in, after night 3)
+
+--drift adds: (field) one schema drift on unix, checked with scripts.drift_check's own logic (mapping learned v2);
+(workflow, when the stack runs WORKFLOW_DRIFT=1, which adds JES2 maintenance to nights 1 and 2) night 1 learned
+"restart_batch now needs release_hold" from the refusal and stored it, night 2 planned it up front from memory.
+Without --drift the run is the same 26 checks as before.
 """
 from __future__ import annotations
 
@@ -565,6 +572,51 @@ class Demo:
                          f"{sum(v.get('verdict') == 'overruled' for v in vs)} overruled/{len(ai.get('missed_ops') or [])} missed")
         self.r.add("h. AI second opinion judged (opt-in)", ok, "; ".join(parts) or "no incidents")
 
+    def check_workflow(self, n1: dict | None, n2: dict | None) -> None:
+        """--drift + WORKFLOW_DRIFT=1: night 1 learned the changed workflow, night 2 reused it (no refusal)."""
+        inc1 = self.s.incidents.find_one({"_id": n1["inc"]["_id"]}) if n1 else None
+        if not inc1:
+            self.r.add("w1. workflow change noticed + learned", False, "no night-1 incident")
+            return
+        wd = inc1.get("workflow_drift") or {}
+        st = {s["op"]: s for s in inc1.get("steps") or []}
+        rh, rb = st.get("release_hold") or {}, st.get("restart_batch") or {}
+        m = self.s.schema_mappings.find_one({"_id": "mainframe.workflow.restart_batch"}) or {}
+        said = self.s.thoughts.find_one({"incident": inc1["_id"], "agent": "guard-1", "kind": "learn",
+                                         "text": {"$regex": "^workflow changed: restart_batch now needs release_hold"}})
+        # the refused attempt as the incident recorded it (world.op_receipts is wiped by the round reset)
+        refused = {"_id": wd["refused"]} if wd.get("refused") in (rb.get("attempts") or [])[:-1] else None
+        ok = (wd.get("requires") == ["release_hold"] and rh.get("status") == "verified"
+              and rb.get("status") == "verified" and rh.get("judged_at") and rb.get("judged_at")
+              and rh["judged_at"] < rb["judged_at"] and refused is not None and m.get("kind") == "workflow"
+              and m.get("requires") == ["release_hold"] and (m.get("version") or 0) >= 2 and bool(said))
+        self.r.add("w1. workflow change noticed + learned", ok,
+                   f"{inc1['_id']}: refused {refused['_id'] if refused else 'NONE'} (\"{(wd.get('message') or '')[:40]}\"), "
+                   f"proposed_by={wd.get('proposed_by')}; release_hold {rh.get('status')} before restart_batch "
+                   f"{rb.get('status')}; schema_mappings v{m.get('version')} {m.get('requires')}")
+        inc2 = self.s.incidents.find_one({"_id": n2["inc"]["_id"]}) if n2 else None
+        if not inc2:
+            self.r.add("w2. workflow memory reused (no refusal)", False, "no night-2 incident")
+            return
+        st2 = sorted(inc2.get("steps") or [], key=lambda s: s["n"])
+        ops2 = [s["op"] for s in st2]
+        rh2 = next((s for s in st2 if s["op"] == "release_hold"), {})
+        rb2 = next((s for s in st2 if s["op"] == "restart_batch"), {})
+        ok2 = ("release_hold" in ops2 and "restart_batch" in ops2 and ops2.index("release_hold") < ops2.index("restart_batch")
+               and (rh2.get("workflow") or {}).get("memory") == m.get("_id") and len(rb2.get("attempts") or []) == 1
+               and not inc2.get("workflow_drift") and rb2.get("status") == "verified")
+        self.r.add("w2. workflow memory reused (no refusal)", ok2,
+                   f"{inc2['_id']}: plan {' → '.join(ops2)}; release_hold from {(rh2.get('workflow') or {}).get('memory')} "
+                   f"v{(rh2.get('workflow') or {}).get('version')}; restart_batch attempts {len(rb2.get('attempts') or [])}")
+
+    def check_field_drift(self, timeout: float) -> None:
+        """--drift: one unix schema drift after night 3, judged by scripts.drift_check's own beats (a-e, v2)."""
+        from scripts.drift_check import Drift  # noqa: PLC0415 (drift_check imports this module)
+        dr = Drift(str(self.http.base_url).rstrip("/"), self.approve_delay, self.r)
+        log("=== DRIFT: a vendor patch renames a unix manifest field ===")
+        if dr.wait_good_sample():
+            dr.drift(lambda: dr.post("/api/scenario/bank-drift"), "balance", "acct_bal", 2, timeout)
+
     def final_reset(self) -> None:
         log("POST /api/reset {mode: full} (demo reset: Gardener revert)")
         out = self.post("/api/reset", {"mode": "full"})
@@ -593,6 +645,8 @@ def main() -> int:
                     help="the stack runs with DEMO_AUTOPLAY=1: don't click Night 2/3, next round or later approvals")
     ap.add_argument("--check-ai", action="store_true",
                     help="also check Claude's second opinion on each night's incident (skipped without AI_SECOND_OPINION=1 + key)")
+    ap.add_argument("--drift", action="store_true",
+                    help="also check Statement 3 Q3: a unix field drift, and (stack with WORKFLOW_DRIFT=1) the workflow drift")
     a = ap.parse_args()
     rep = Report()
     d = Demo(a.base, a.approve_delay, rep, autoplay=a.autoplay, red_kill=a.red_kill)
@@ -610,6 +664,12 @@ def main() -> int:
                 d.check_ai([n["inc"]["_id"] for n in (n1, n2) if n])
             elif a.check_ai:
                 log("--check-ai skipped: needs AI_SECOND_OPINION=1 or AI_DRIVES=1, and ANTHROPIC_API_KEY")
+            if a.drift:
+                if os.environ.get("WORKFLOW_DRIFT", "").strip().lower() in ("1", "true", "yes", "on"):
+                    d.check_workflow(n1, n2)
+                else:
+                    log("--drift: workflow rows skipped (run the stack and this check with WORKFLOW_DRIFT=1)")
+                d.check_field_drift(a.night_timeout)
             if not a.keep:
                 d.final_reset()
     except KeyboardInterrupt:

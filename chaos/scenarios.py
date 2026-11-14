@@ -49,6 +49,21 @@ if os.environ.get("SCHEMA_DRIFT_DEMO", "").lower() in ("1", "true", "on", "yes")
             _s["steps"] = [*_s["steps"], DRIFT_STEP]
             _s["title"] += " + schema drift"
 
+# WORKFLOW_DRIFT=1 (default off): JES2 maintenance changes the mainframe workflow before nights 1 and 2 (restart_batch
+# now needs release_hold first). Night 1 the Hive learns the new step from the refusal; night 2 it plans it up front.
+# Also adds `bank-workflow` (drift + batch_abort) for free play. Off = the seeded nights are unchanged.
+WORKFLOW_STEP = {"t": 0, "fault": "workflow_drift", "target": "mainframe", "params": {}}
+if os.environ.get("WORKFLOW_DRIFT", "").strip().lower() in ("1", "true", "on", "yes"):
+    for _s in SCENARIOS:
+        if _s["_id"] in ("bank-night-1", "bank-night-2"):
+            _s["steps"] = [WORKFLOW_STEP, *_s["steps"]]
+            _s["title"] += " + workflow drift"
+    SCENARIOS.insert(-1, {
+        "_id": "bank-workflow", "seed": 1005,
+        "title": "Bank workflow — JES2 maintenance: restart_batch now needs release_hold (the Hive must learn it)",
+        "steps": [WORKFLOW_STEP, {"t": 1, "fault": "batch_abort", "target": "mainframe", "params": {}}],
+    })
+
 
 def _validate(scn: dict) -> None:
     for step in scn["steps"]:

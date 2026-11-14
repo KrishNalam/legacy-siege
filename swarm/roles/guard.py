@@ -20,7 +20,7 @@ from langgraph.graph import END, START, StateGraph
 from common import config as shared
 from common.db import col, now
 
-from .. import recovery, schema, settings, steps, verify
+from .. import recovery, schema, settings, steps, verify, workflow
 from ..harness import Agent, checkpointer, log
 from .. import lessons, platform
 
@@ -117,6 +117,10 @@ def build_graph(agent: Agent):
                 platform.judged(agent, inc, st, True)
                 if op == "map_field":
                     learn_mapping(inc, st, facts)
+                try:
+                    workflow.on_verified(agent, inc, st, facts)  # WORKFLOW_DRIFT: verified new workflow -> memory
+                except Exception as e:
+                    log(agent.id, f"workflow not stored: {type(e).__name__}: {e}")
                 return {"verdict": "verified"}
             return {"verdict": "moot"}
         resp = st.get("response")

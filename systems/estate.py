@@ -28,7 +28,7 @@ from pymongo import ASCENDING, DESCENDING, ReturnDocument
 from pymongo.errors import CollectionInvalid, DuplicateKeyError
 
 from common.db import txn, world
-from systems.base import Ctx, LegacySystem, now_ms
+from systems.base import Ctx, LegacySystem, OpRefused, now_ms
 
 ORDER = ("mainframe", "unix", "portal")  # upstream first: downstream sees this tick's upstream state
 MODULES = {sid: f"systems.{sid}" for sid in ORDER}
@@ -162,7 +162,10 @@ class Estate:
                     return_document=ReturnDocument.AFTER, session=s)
                 if rec is None:
                     break
-                applied, msg = h.apply(ctx, rec["op"], rec.get("params") or {})
+                try:
+                    applied, msg = h.apply(ctx, rec["op"], rec.get("params") or {})
+                except OpRefused as e:  # a delayed op that the system now refuses: it simply never lands
+                    applied, msg = False, str(e)
                 self.db.op_receipts.update_one({"_id": rec["_id"]}, {"$set": {"effective": applied, "late_message": msg}},
                                                session=s)
             h.tick(ctx)
@@ -186,7 +189,7 @@ class Estate:
                 r = dict(receipt)
                 ctx = self._ctx(sid, now, s)
                 chaos = ctx["chaos"]
-                if h.op_spec(op) is None:
+                if not h.op_available(ctx, op):
                     r["message"] = f"unknown op {op!r} for {sid}"
                 elif chaos["lying"] > 0:  # ACK != APPLIED: claim success, do nothing
                     chaos["lying"] -= 1
@@ -198,8 +201,11 @@ class Estate:
                              apply_at=now + timedelta(seconds=chaos["slow"]["delay_s"]),
                              message="ACCEPTED - queued for execution")
                 else:
-                    applied, msg = h.apply(ctx, op, params)
-                    r.update(accepted=True, claimed_applied=applied, effective=applied, applied_at=now, message=msg)
+                    try:
+                        applied, msg = h.apply(ctx, op, params)
+                        r.update(accepted=True, claimed_applied=applied, effective=applied, applied_at=now, message=msg)
+                    except OpRefused as e:  # refused outright (e.g. a workflow prerequisite is missing)
+                        r["message"] = str(e)
                 self.db.op_receipts.insert_one(r, session=s)  # unique _id = action_id → exactly once
                 self._commit(ctx, s)
                 return r
@@ -290,7 +296,9 @@ class Estate:
                                           "line": d["line"]} for d in docs]}
 
     def ops(self, sid: str) -> list[dict]:
-        return [o.catalog() for o in self.handler(sid).OPS]
+        h = self.handler(sid)
+        with self.lock:
+            return h.catalog(self._ctx(sid, now_ms(), None))
 
     def state(self, sid: str) -> dict:
         h = self.handler(sid)

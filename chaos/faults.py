@@ -85,6 +85,12 @@ FAULTS: dict[str, Fault] = {f.name: f for f in [
           "healthy, the portal can no longer unmarshal balances and serves stale ones with HTTP 200.",
           "Adapting to a changed layout: detect the field diff, propose and verify a mapping, remember it.",
           {}),
+    Fault("workflow_drift", "system", ("mainframe",), "mainframe",
+          "JES2 maintenance changes the operator workflow: an ABENDed NIGHTBAT is now held, restart_batch is refused "
+          "('JCL HOLD: issue release_hold before restart_batch') and a new op release_hold appears in /ops.",
+          "Adapting to a changed workflow: notice the refusal, read the live catalog, insert the new step, verify, "
+          "remember it.",
+          {}, switch="WORKFLOW_DRIFT"),
     Fault("false_log", "system", SYSTEM_TARGETS, "mainframe",
           "A 'false comment': plausible log lines (an ABEND, a SOAP fault, an operator note) that blame the wrong "
           "system. Nothing else changes.",

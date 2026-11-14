@@ -15,7 +15,8 @@ def test_library_has_every_contract_fault():
     expected = {"batch_abort", "disk_fill", "cron_stop", "session_leak", "lying_success", "slow_apply",
                 "sqli_exploit", "config_exploit", "agent_kill", "agent_freeze", "lie_to_agent", "schema_drift",  # schema_drift: additive (§8)
                 "false_log", "credential_exploit",  # Red fleet: additive (§8)
-                "poison_memory"}  # W18 Memory Striker, CHAOS_POISON_MEMORY (default off)
+                "poison_memory",  # W18 Memory Striker, CHAOS_POISON_MEMORY (default off)
+                "workflow_drift"}  # W26 workflow drift: additive, switch WORKFLOW_DRIFT
     assert set(faults.FAULTS) == expected
     for f in faults.FAULTS.values():
         assert f.description and f.tests and f.default_target in f.targets

@@ -45,6 +45,9 @@ def check(op: str, params: dict, read, probe=None, sent_at: datetime | None = No
         last = _ts(b.get("last_run_ok"))
         fresh = last is not None and (sent_at is None or last >= sent_at - timedelta(seconds=5))
         return b.get("status") == "OK" and fresh, f"state.batch.status={b.get('status')}; last_run_ok={b.get('last_run_ok')}"
+    if op == "release_hold":  # workflow drift: the new prerequisite step (state.workflow only exists once drifted)
+        w = read("mainframe").get("workflow") or {}
+        return w.get("hold") is False, f"state.workflow.hold={w.get('hold')} (workflow v{w.get('version')})"
     if op == "rotate_credential":
         cred = read("mainframe").get("credentials", {}).get(p.get("account", "OPERATOR"))
         clean, pf = _probe_clean(probe, "mainframe") if probe else (True, "no probe")
