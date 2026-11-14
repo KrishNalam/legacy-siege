@@ -114,6 +114,14 @@ class Ctx:
             return doc["data"]
         return copy.deepcopy(self._peers[system_id].full_baseline(self.now)[kind])
 
+    def peek_latest(self, system_id: str, kind: str) -> dict | None:
+        """Latest committed copy of another system's state, read outside this transaction's snapshot."""
+        try:
+            doc = self._db.system_state.find_one({"_id": f"{system_id}:{kind}"})
+        except Exception:  # noqa: BLE001 - best effort; the in-txn peek still stands
+            return None
+        return doc["data"] if doc else None
+
     def peek_status(self, system_id: str) -> str:
         doc = self._db.systems.find_one({"_id": system_id}, {"status": 1}, session=self._s)
         return (doc or {}).get("status", "up")

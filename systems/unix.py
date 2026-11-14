@@ -208,16 +208,25 @@ class Unix(LegacySystem):
         if ctx["spool"]["disk_pct"] >= DISK_FULL_PCT:
             return False, f"xfer_pull: write {SPOOL}/in failed: No space left on device"
         batch = ctx.peek("mainframe", "batch")
+        if batch.get("status") != "OK" or batch["output"]["as_of"] <= t["last_file_batch_ts"]:
+            # the in-transaction snapshot can lag the mainframe on a slow cluster: re-read the latest committed batch
+            fresh = ctx.peek_latest("mainframe", "batch")
+            if fresh and (fresh.get("status") == "OK" or fresh["output"]["as_of"] > batch["output"]["as_of"]):
+                batch = fresh
         out = batch["output"]
         if out["as_of"] > t["last_file_batch_ts"]:
             self._pull(ctx, out, "manual rerun")
             return True, f"xfer_pull: received {t['last_file']}"
-        if t["status"] == "ok" or batch["status"] == "OK":
-            # we already hold the newest generation and the mainframe is healthy: just re-arm the job
-            t.update({"status": "ok", "ticks_since_file": 0})
+        if batch.get("status") == "OK":
+            # the mainframe is healthy and we hold its newest generation: re-pull it and re-arm the job
+            self._pull(ctx, out, "manual rerun")
+            return True, f"xfer_pull: re-pulled current generation {t['last_file']}"
+        if t["status"] == "ok":
+            t["ticks_since_file"] = 0
             return True, f"xfer_pull: already current ({t['last_file'] or 'boot file'})"
         ctx.log("ERROR", "XFER-E-NOFILE", "xfer_pull: manual rerun: PROD.NIGHTBAT.OUTPUT(0) has no new generation on mvs1")
-        return False, "xfer_pull: no new NIGHTBAT.OUTPUT generation on mvs1 (is the mainframe batch OK?)"
+        return False, (f"xfer_pull: no new NIGHTBAT.OUTPUT generation on mvs1 (mainframe batch status="
+                       f"{batch.get('status')}, output as_of={out['as_of']}, last file as_of={t['last_file_batch_ts']})")
 
     # ------------------------------------------------------------ chaos
     def chaos_disk_fill(self, ctx: Ctx, params: dict) -> tuple[bool, str]:

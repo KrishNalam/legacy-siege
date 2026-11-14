@@ -107,7 +107,10 @@ def build_graph(agent: Agent):
     # ------------------------------------------------------------------ fix
     def select(state: WorkerState, config) -> dict:
         task = task_doc(state["task_id"])
-        inc = col("incidents").find_one({"_id": task["incident"]}, {"steps": 1})
+        inc = col("incidents").find_one({"_id": task["incident"]}, {"steps": 1}) if task else None
+        if task is None or inc is None:  # task/incident removed under us (reset, scenario switch): nothing to do
+            print(f"[worker] select: task {state['task_id']} or its incident is gone; ending this run", flush=True)
+            return {"step": None, "outcome": "gone"}
         mine = sorted((s for s in inc.get("steps", []) if s["step_id"] in task["step_ids"]), key=lambda s: s["n"])
         for s in mine:
             if s["status"] == "verified":
@@ -187,7 +190,7 @@ def build_graph(agent: Agent):
         steps.record_response(task, me, gen, step, aid, resp)
         agent.set(phase="awaiting_verify")
         agent.think(f"{step['system']} answered accepted={resp.get('accepted')} applied={resp.get('applied')} "
-                    f"for {aid}; waiting for the Guard to read it back.", kind="action",
+                    f"for {aid} ({str(resp.get('message') or resp.get('error') or '')[:160]!r}); waiting for the Guard to read it back.", kind="action",
                     incident=task["incident"], system=step["system"])
         return {}
 
@@ -204,6 +207,8 @@ def build_graph(agent: Agent):
 
     def finish(state: WorkerState, config) -> dict:
         me, gen = _who(config)
+        if state.get("outcome") == "gone":  # the task doc no longer exists: nothing to fence or update
+            return {"outcome": "gone"}
         status = "failed" if state.get("outcome") == "failed" else "done"
 
         def fn(s):
