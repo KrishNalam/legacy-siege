@@ -78,8 +78,8 @@ def test_refuses_live_dbs(monkeypatch):
     assert core.live_db_refusal() is None
 
 
-def test_five_personas_cover_the_library():
-    assert set(P) == {"red-saboteur", "red-assassin", "red-liar", "red-hacker", "red-drifter"}
+def test_personas_cover_the_library():
+    assert set(P) == {"red-saboteur", "red-assassin", "red-liar", "red-hacker", "red-drifter", "red-memory"}
     from chaos import faults
     covered = {f for p in P.values() for f in p.faults}
     assert covered <= set(faults.FAULTS) and covered == set(faults.FAULTS)

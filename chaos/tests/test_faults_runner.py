@@ -14,7 +14,8 @@ from common.db import world
 def test_library_has_every_contract_fault():
     expected = {"batch_abort", "disk_fill", "cron_stop", "session_leak", "lying_success", "slow_apply",
                 "sqli_exploit", "config_exploit", "agent_kill", "agent_freeze", "lie_to_agent", "schema_drift",  # schema_drift: additive (§8)
-                "false_log", "credential_exploit"}  # Red fleet: additive (§8)
+                "false_log", "credential_exploit",  # Red fleet: additive (§8)
+                "poison_memory"}  # W18 Memory Striker, CHAOS_POISON_MEMORY (default off)
     assert set(faults.FAULTS) == expected
     for f in faults.FAULTS.values():
         assert f.description and f.tests and f.default_target in f.targets
@@ -173,24 +174,29 @@ def test_every_event_says_who_what_why(systems):
     assert (red["source"], red["who"], red["why"], red["by"]) == ("red-fleet", "red-saboteur", "mid-repair", "red-saboteur")
 
 
-def test_poison_is_opt_in_tagged_and_reset_preserves_real_memory(monkeypatch):
+def test_poison_is_opt_in_wrong_system_and_reset_restores_real_memory(monkeypatch):
     from common.db import swarm
     monkeypatch.delenv("CHAOS_POISON_MEMORY", raising=False)
     with pytest.raises(faults.FaultError):
         runner.fire("poison_memory")
     monkeypatch.setenv("CHAOS_POISON_MEMORY", "1")
-    real = {"_id": "PB-real", "system": "mainframe", "stale": False, "system_version": 1,
-            "fix": [{"system": "mainframe", "op": "quarantine_record", "params": {"record_id": "TX123456"}}]}
-    swarm().playbooks.insert_one(real)
-    with pytest.raises(faults.FaultError):
-        runner.fire("poison_memory")  # withheld even with switch: visible Guard rejection not proved
-    result = faults.poison_memory({})
-    assert result["ok"] and not result["defence_observed"]
+    batch = {"_id": "PB-batch", "fault_class": "batch_abort", "system": "mainframe", "stale": False,
+             "fix": [{"system": "mainframe", "op": "quarantine_record", "params": {"record_id": "TX123456"}}]}
+    swarm().playbooks.insert_one(batch)
+    assert runner.fire("poison_memory", manual=False)["result"]["skipped"]   # rebind would neutralise it: never
+    disk = {"_id": "PB-disk", "fault_class": "disk_fill", "system": "unix", "stale": False, "created_at": 1,
+            "fix": [{"system": "unix", "op": "purge_spool", "params": {"path": "/var/spool/xfer"}}]}
+    swarm().playbooks.insert_one(disk)
+    ev = runner.fire("poison_memory", manual=False)
+    assert ev["status"] == "ok" and ev["result"]["wrong_fix"] == [{"system": "mainframe", "op": "purge_spool"}]
     planted = swarm().playbooks.find_one({"red_planted": True})
-    assert planted["fix"][0]["params"] == {"record_id": "TX000000"}
-    runner.cancel()
-    assert swarm().playbooks.find_one({"_id": "PB-real"}) == real
-    assert not swarm().lessons.count_documents({"red_planted": True})
+    assert planted["_id"] == "RED-POISON:PB-disk" and planted["fix"][0]["system"] == "mainframe"
+    assert planted["fix"][0]["params"] == {"path": "/var/spool/xfer"} and not planted["stale"]
+    hidden = swarm().playbooks.find_one({"_id": "PB-disk"})
+    assert hidden["stale"] and hidden["fix"] == disk["fix"]           # genuine repair hidden, never edited
+    runner.cancel()                                                  # any reset
+    assert swarm().playbooks.find_one({"_id": "PB-disk"}) == disk
+    assert swarm().playbooks.find_one({"_id": "PB-batch"}) == batch
     assert not swarm().playbooks.count_documents({"red_planted": True})
 
 

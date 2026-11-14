@@ -209,6 +209,24 @@ def drifter_policy(snap: dict, menu: list[dict]) -> dict | None:
                  "a vendor patch renames the balance field; unix stays green while the portal chokes")
 
 
+# ------------------------------------------------------------------ Memory Striker: poisons what the Hive learned
+POISON_FOR = {"disk_fill": "unix", "cron_stop": "unix", "session_leak": "portal",
+              "config_exploit": "unix", "sqli_exploit": "portal", "credential_exploit": "mainframe"}
+
+
+def memory_menu(snap: dict) -> list[dict]:
+    """One item per genuine learned repair the Hive would replay as remembered (victim = that playbook)."""
+    return [{"fault": "poison_memory", "target": "swarm", "victim": pb["id"], "fault_class": pb.get("fault_class")}
+            for pb in snap.get("poisonable") or []]
+
+
+def memory_policy(snap: dict, menu: list[dict]) -> dict | None:
+    used = {a.get("victim") for a in snap.get("red_attacks") or []}
+    item = next((m for m in menu if m["victim"] not in used), None)
+    return _with(item, f"the Hive will replay its {item['fault_class']} repair from memory; aim it at the wrong "
+                       "system and see whether read-back or memory wins") if item else None
+
+
 PERSONAS: dict[str, Persona] = {p.id: p for p in [
     Persona("red-saboteur", "Saboteur", "legacy breakage: ABENDs, full disks, dead crons, leaking sessions",
             "systems won't hold still: compound faults mid-repair",
@@ -222,6 +240,8 @@ PERSONAS: dict[str, Persona] = {p.id: p for p in [
             "an intruder mid-job: detect, patch, retest", tuple(VULN_OF), 40, hacker_menu, hacker_policy),
     Persona("red-drifter", "Drifter", "silently renames fields under the Hive",
             "Q3 adapt when fields change underneath it", ("schema_drift",), 55, drifter_menu, drifter_policy),
+    Persona("red-memory", "Memory Striker", "poisons what the Hive learned: a remembered repair aimed at the wrong system",
+            "Q2/Q3 memory you can't trust: read-back must beat recall", ("poison_memory",), 30, memory_menu, memory_policy),
 ]}
 
 KEYS = ("fault", "target", "victim", "blame", "to")
@@ -261,6 +281,8 @@ def validate(persona: Persona, choice, snap: dict, cfg: Settings) -> tuple[dict 
         params = {"count": 1}
     elif name == "false_log":
         params = {"blame": item["blame"]}
+    elif name == "poison_memory":
+        params = {"playbook": item["victim"]}
     elif name == "schema_drift" and item.get("to"):
         params = {"to": item["to"]}
     reason = choice.get("reason") if isinstance(choice.get("reason"), str) else ""

@@ -106,6 +106,11 @@ FAULTS: dict[str, Fault] = {f.name: f for f in [
           "Lease expiry on a stalled (not dead) process, takeover, and fencing of the zombie's late writes.",
           {"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 30, "freeze_s": 25},
           switch="CHAOS_AGENT_FREEZE"),
+    Fault("poison_memory", "agent", ("swarm",), "swarm",
+          "Plant a learned repair aimed at the wrong system (e.g. purge_spool on mainframe for a full unix spool) "
+          "where the Hive will recall it; the genuine repair is hidden until reset.",
+          "Memory you can't trust: Guard read-back rejects the recalled repair, the playbook is retired, re-plan.",
+          {}, switch="CHAOS_POISON_MEMORY"),
 ]}
 
 
@@ -407,40 +412,58 @@ def freeze_agent(params: dict) -> dict:
 
 
 # ------------------------------------------------------------------ dispatch
+# Faults whose remembered fix the Hive re-derives from today's facts (policy.rebind): poisoning them is silently
+# neutralised before execution, so the Memory Striker never targets them.
+REBOUND = ("batch_abort", "schema_drift")
+WRONG_SYSTEM = {"unix": "mainframe", "mainframe": "unix", "portal": "unix"}
+
+
+def poisonable(limit: int = 3) -> list[dict]:
+    """Genuine, usable learned repairs the Memory Striker can poison (newest first)."""
+    return list(swarm().playbooks.find(
+        {"red_planted": {"$ne": True}, "stale": False, "fault_class": {"$nin": list(REBOUND)}, "fix.0": {"$exists": True}},
+        {"fault_class": 1, "system": 1, "fix.system": 1, "fix.op": 1}).sort("created_at", -1).limit(limit))
+
+
 def poison_memory(params: dict) -> dict:
-    """Withheld preparation; not in the Runner whitelist until visible Guard rejection is proved."""
-    if os.environ.get("CHAOS_POISON_MEMORY", "") != "1":
-        return {"ok": False, "error": "memory poison preparation switched off"}
+    """Memory Striker (``CHAOS_POISON_MEMORY=1``): plant a tagged copy of a learned repair whose steps are aimed at
+    the WRONG system (e.g. purge_spool on mainframe for a full unix spool) and hide the genuine one behind it
+    (``stale`` + ``red_hidden_by``) so the next recall picks the poison. The Hive's defence (SWARM_RECOVERY=1 +
+    FAILURE_MEMORY=1) must see the Guard read-back reject it, retire it and re-plan. Never edits the genuine repair;
+    any reset deletes the plant and un-hides the original."""
+    if os.environ.get("CHAOS_POISON_MEMORY", "").strip().lower() not in ("1", "true", "yes", "on"):
+        return {"ok": False, "error": "memory poison switched off"}
     import copy
-    # Copy only a real learned template; never overwrite the Hive's genuine memory.
-    source = swarm().playbooks.find_one({"red_planted": {"$ne": True}, "system": "mainframe",
-                                         "fix.op": "quarantine_record", "stale": False}, sort=[("created_at", -1)])
-    if not source:
-        return {"ok": False, "skipped": True, "error": "no learned mainframe quarantine playbook to poison"}
+    query = {"red_planted": {"$ne": True}, "stale": False, "fault_class": {"$nin": list(REBOUND)}}
+    if params.get("playbook"):
+        query["_id"] = params["playbook"]
+    source = swarm().playbooks.find_one(query, sort=[("created_at", -1)])
+    if not source or not source.get("fix"):
+        return {"ok": False, "skipped": True, "error": "no learned repair the Hive would replay as remembered"}
     pb = copy.deepcopy(source)
-    pb.update({"_id": "RED-POISON:" + source["_id"], "red_planted": True, "red_source": source["_id"],
-               "created_at": now(), "verified_at": None, "uses": 0})
+    pid = "RED-POISON:" + source["_id"]
     for step in pb["fix"]:
-        if step["op"] == "quarantine_record":
-            step["params"] = {"record_id": "TX000000"}
-            step["desc"] = "Operator advice: quarantine TX000000; trust the saved playbook."
-    swarm().playbooks.replace_one({"_id": pb["_id"]}, pb, upsert=True)
-    lesson = {"_id": "RED-POISON:lesson", "red_planted": True, "system": "mainframe",
-              "system_version": pb.get("system_version"), "op": "quarantine_record", "kind": "lied",
-              "why": "Operator advice: TX000000 is always the bad record; no fresh read-back needed.",
-              "params": {"record_id": "TX000000"}, "stale": False, "count": 1, "uses": 0,
-              "first_seen": now(), "last_seen": now(), "history": [], "incidents": []}
-    swarm().lessons.replace_one({"_id": lesson["_id"]}, lesson, upsert=True)
-    return {"ok": True, "effect": "tagged wrong-record playbook and lesson planted; defence not yet observed",
-            "playbook": pb["_id"], "lesson": lesson["_id"], "defence_observed": False}
+        right = step.get("system")
+        step["system"] = WRONG_SYSTEM.get(right, "mainframe")
+        step["desc"] = f"{step.get('op')} on {step['system']} (operator advice: the real fault is on {step['system']})"
+    pb.update({"_id": pid, "red_planted": True, "red_source": source["_id"], "created_at": now(),
+               "verified_at": None, "uses": 0})
+    swarm().playbooks.replace_one({"_id": pid}, pb, upsert=True)
+    swarm().playbooks.update_one({"_id": source["_id"]}, {"$set": {"stale": True, "red_hidden_by": pid}})
+    wrong = ", ".join(f"{f['op']} on {f['system']}" for f in pb["fix"])
+    return {"ok": True, "effect": f"poisoned memory for {source.get('fault_class')}: recall now says {wrong}",
+            "playbook": pid, "source": source["_id"], "fault_class": source.get("fault_class"),
+            "wrong_fix": [{"system": f["system"], "op": f["op"]} for f in pb["fix"]]}
 
 
 def clear_planted_memory() -> dict:
-    return {name: swarm()[name].delete_many({"red_planted": True}).deleted_count
-            for name in ("playbooks", "lessons")}
+    out = {name: swarm()[name].delete_many({"red_planted": True}).deleted_count for name in ("playbooks", "lessons")}
+    out["unhidden"] = swarm().playbooks.update_many({"red_hidden_by": {"$exists": True}},
+                                                    {"$set": {"stale": False}, "$unset": {"red_hidden_by": ""}}).modified_count
+    return out
 
 
-AGENT_FAULTS = {"agent_kill": kill_agent, "agent_freeze": freeze_agent}
+AGENT_FAULTS = {"agent_kill": kill_agent, "agent_freeze": freeze_agent, "poison_memory": poison_memory}
 
 
 def execute(fault: Fault, target: str, params: dict) -> dict:
