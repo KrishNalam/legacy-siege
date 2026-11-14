@@ -165,10 +165,11 @@ class track:
     def __enter__(self):
         self.t0 = time.monotonic()
         if enabled():
-            self.eta = estimate(self.side, self.action_type, self.system)
+            self.eta = estimate(self.side, self.action_type, self.system) if self.record_it else {}
             if self.announce:
                 where = f" (step {self.step}/{self.of})" if self.step is not None and self.of else ""
-                emit(self.agent, self.role, f"{self.label}{where} · {eta_text(self.eta)}",
+                eta = f" · {eta_text(self.eta)}" if self.record_it else ""   # unrecorded = not ours to time
+                emit(self.agent, self.role, f"{self.label}{where}{eta}",
                      action_type=self.action_type, system=self.system, incident=self.incident, phase="start",
                      step=self.step, of=self.of, eta=self.eta)
         return self
