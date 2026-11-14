@@ -183,3 +183,14 @@ def test_static_page_served(app_client):
     assert r.status_code == 200 and "LEGACY SIEGE" in r.text
     assert app_client.get("/app.js").status_code == 200
     assert app_client.get("/js/stage.js").status_code == 200
+
+
+def test_stage_view_is_default_and_classic_is_kept(app_client):
+    stage = app_client.get("/")
+    assert stage.status_code == 200 and "hive.js" in stage.text and "LEGACY SIEGE" in stage.text
+    for url in ("/?classic=1", "/classic"):
+        r = app_client.get(url)
+        assert r.status_code == 200 and 'src="app.js"' in r.text, url  # the classic war room, unchanged
+    assert "hive.js" in app_client.get("/?classic=0").text
+    for asset in ("/hive.js", "/hive.css", "/hive.html"):
+        assert app_client.get(asset).status_code == 200, asset

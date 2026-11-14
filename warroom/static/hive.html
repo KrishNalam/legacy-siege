@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Legacy Siege · Stage</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 2l12 7v14l-12 7-12-7V9z' fill='%23ffc94d'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="hive.css">
+</head>
+<body>
+<!-- Stage view: the simple, projector-first war room. Classic view: ?classic=1 (or /classic). -->
+<header class="top">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 40 40" aria-hidden="true"><path d="M20 3l14 8v18l-14 8-14-8V11z" fill="none" stroke="currentColor" stroke-width="3"/><path d="M20 13l6 3.5v7L20 27l-6-3.5v-7z" fill="currentColor"/></svg>
+    <div>
+      <div class="title">LEGACY SIEGE</div>
+      <div class="tag">A team of AI agents (“bees”) keeps an old bank running while we attack it</div>
+    </div>
+  </div>
+  <div class="status">
+    <span id="night" class="chip night">No night running</span>
+    <span id="conn" class="chip conn"><i></i><span id="conn-txt">connecting…</span></span>
+  </div>
+  <nav class="controls">
+    <button id="btn-start" class="btn start">Start Night 1</button>
+    <button id="btn-kill" class="btn kill" title="Kill the worker bee that is in the middle of a job">Kill a worker</button>
+    <button id="btn-queen" class="btn kill queen" title="Kill the queen bee (the coordinator); a backup queen takes over">Kill the Queen</button>
+    <div class="more">
+      <button id="btn-more" class="btn ghost" aria-haspopup="true">More <svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2 4l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2"/></svg></button>
+      <div id="more-pop" class="pop" hidden>
+        <button data-scn="bank-night-1">Run Night 1</button>
+        <button data-scn="bank-night-2">Run Night 2</button>
+        <button data-scn="bank-night-3">Run Night 3 <small>replay after the upgrade</small></button>
+        <hr>
+        <button data-reset="next_round">Reset: next night <small>keep what the bees learned</small></button>
+        <button data-reset="full">Full reset <small>wipe everything</small></button>
+        <hr>
+        <button id="btn-details">Details <small>MongoDB, memory search, per-night numbers</small></button>
+        <a id="lnk-classic" href="./?classic=1">Classic war room view</a>
+      </div>
+    </div>
+  </nav>
+</header>
+
+<section class="beats" id="beats" aria-label="demo beats"></section>
+
+<section class="now"><span class="now-k">NOW</span><span id="now" class="now-t">Connecting to the live feed…</span></section>
+
+<main class="main">
+  <section class="card team-card" aria-label="the AI agents">
+    <h2>The team <span class="h2s">AI agents (“bees”) · what each one is doing right now</span></h2>
+    <ol id="team" class="team"></ol>
+  </section>
+  <section class="right">
+    <div class="estate" id="estate" aria-label="the three bank systems"></div>
+    <div class="card judge" id="judge"></div>
+    <div class="bottom">
+      <div class="card meter" id="meter"></div>
+      <div class="card story-card"><h2>Timeline</h2><ol id="story" class="story"></ol></div>
+    </div>
+  </section>
+</main>
+
+<div id="approval" class="approval" hidden>
+  <div class="ap-k">YOUR OK IS NEEDED</div>
+  <div class="ap-t" id="ap-t"></div>
+  <div class="ap-d" id="ap-d"></div>
+  <div class="ap-b"><button class="btn approve" id="ap-yes">Approve</button><button class="btn deny" id="ap-no">Deny</button></div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<div id="details" class="details" hidden>
+  <div class="det-box">
+    <div class="det-h"><h2>Details</h2><button class="x" id="det-x" aria-label="close">×</button></div>
+    <div id="det-body" class="det-body"></div>
+  </div>
+</div>
+
+<script type="module" src="hive.js"></script>
+</body>
+</html>
