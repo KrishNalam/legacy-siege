@@ -37,6 +37,10 @@ What the demo shows, all checked automatically by `scripts/demo_check.py`:
 
 ## Architecture
 
+![Legacy Siege architecture](docs/architecture.png)
+
+Full-system diagram: [docs/architecture.png](docs/architecture.png) ([SVG](docs/architecture.svg)). Detailed wiring below.
+
 ```
                          ┌────────────────────────── MongoDB (Atlas / atlas-local 8.0) ───────────────────────────┐
                          │  world DB (Red writes)                         swarm DB (Blue writes)                  │
