@@ -2,6 +2,12 @@
 
 All Legacy Siege diagrams in one place.
 
+## Architecture (main)
+
+![Legacy Siege architecture (main)](architecture-v3.png)
+
+Architecture (main): hand-laid diagram with the swarm (Sentinels, Queen, scouts, workers, Guard, Nurses) on the left, the L1/L2/L3 legacy estate centre, Red attackers (Chaos Monkey, Red loop, Runner) on the right, the Gardener below and the MongoDB Atlas spine along the bottom ([HTML source](architecture-v3.html)).
+
 ## Full-system architecture
 
 ![Legacy Siege architecture](architecture.png)

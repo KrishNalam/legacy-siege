@@ -40,9 +40,10 @@ What the demo shows, all checked automatically by `scripts/demo_check.py`:
 
 ## Architecture
 
-![Legacy Siege architecture](docs/diagrams/architecture.png)
+![Legacy Siege architecture](docs/diagrams/architecture-v3.png)
 
-Full-system diagram: [docs/diagrams/architecture.png](docs/diagrams/architecture.png) ([SVG](docs/diagrams/architecture.svg)). Detailed wiring below.
+Main architecture diagram (hand-laid: swarm left, legacy estate centre, Red attackers right, Gardener below, MongoDB Atlas spine along the bottom): [docs/diagrams/architecture-v3.png](docs/diagrams/architecture-v3.png) ([HTML source](docs/diagrams/architecture-v3.html)).
+Earlier full-system diagram: [docs/diagrams/architecture.png](docs/diagrams/architecture.png) ([SVG](docs/diagrams/architecture.svg)). Detailed wiring below.
 Whiteboard view (same system, drawn from the team's whiteboard sketch: swarm tree left, System centre, Red right, Atlas spine bottom): [docs/diagrams/architecture-whiteboard.png](docs/diagrams/architecture-whiteboard.png) ([SVG](docs/diagrams/architecture-whiteboard.svg)). All diagrams: [docs/diagrams/](docs/diagrams/README.md).
 
 ```
