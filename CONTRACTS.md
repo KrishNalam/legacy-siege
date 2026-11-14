@@ -359,3 +359,14 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   `SWARM_RECOVERY=1` + `FAILURE_MEMORY=1` (W16): Guard read-back rejects the recalled repair, retires it, re-plans.
   Red `outcome.incidents[].memory_rejected` = incident `recall.rejected`; a rejection counts as `guard_caught:true`.
   Commander combo `poison-then-break`: poison a learned repair, then the Saboteur/Hacker causes that fault again.
+- **Comms live roster (additive W22, same switch `SWARM_COMMS=1`, default off; `swarm/roster.py`).** A thread in the
+  Waggle process sweeps every `ROSTER_SWEEP_S` (1 s) and derives `swarm.roster` from state agents already write
+  (`agents`, claimed `tasks` and active `incidents` leases, incident steps + `handoffs`, `spawn_requests`); no other
+  role writes it and no role reads it. One doc per agent `{_id, role, specialty, state: idle|working|standby|dead|retired,
+  incident, system, task, step: "<step_id> <op> (<status>)", phase, doing (one line), parent (task holder → the
+  incident's lease holder; scout → assigning queen), spawned_by, took_over {from, work, ts, takeover_s},
+  taken_over_by {to, work, ts}, pid, generation, last_seen, died_at, retired_at, updated_at}`. Only changed docs are
+  written (heartbeat refresh at most every `HEARTBEAT_S`). Killed agents stay `dead` with who took their work;
+  a deleted agent doc (dynamic retire) becomes `retired` for 60 s, then is removed. Full reset clears it.
+  War room: snapshot `roster`, change stream `coll:"roster"`, `GET /api/roster` → `{enabled, counts, agents}`;
+  compact card `warroom/static/js/roster.js` (`installRoster(cardEl)`, `rosterRows()`), hidden while empty.
