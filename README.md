@@ -43,6 +43,7 @@ What the demo shows, all checked automatically by `scripts/demo_check.py`:
 ![Legacy Siege architecture](docs/architecture.png)
 
 Full-system diagram: [docs/architecture.png](docs/architecture.png) ([SVG](docs/architecture.svg)). Detailed wiring below.
+Whiteboard view (same system, drawn from the team's whiteboard sketch: swarm tree left, System centre, Red right, Atlas spine bottom): [docs/architecture-whiteboard.png](docs/architecture-whiteboard.png) ([SVG](docs/architecture-whiteboard.svg)).
 
 ```
                          ┌────────────────────────── MongoDB (Atlas / atlas-local 8.0) ───────────────────────────┐
