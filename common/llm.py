@@ -152,6 +152,10 @@ def guard_stats() -> dict:
         return dict(_stats)
 
 
+# Slots belong to the provider thread until it really exits, even after its
+# caller times out. Permanently stuck SDK calls cannot accumulate threads.
+_provider_slots = _threading.BoundedSemaphore(4)
+
 _client = None
 _client_lock = _threading.Lock()
 
@@ -212,13 +216,22 @@ def guarded_json(task: str, system: str, prompt: str, schema: dict, max_tokens: 
     prompt = redact(prompt)
     box: _queue.Queue = _queue.Queue(maxsize=1)
 
+    if not _provider_slots.acquire(blocking=False):
+        return done("timeout")  # same deterministic fallback, without starting more work
+
     def call():
         try:
             box.put(provider(sys_text, prompt, schema, min(int(max_tokens), MAX_TOKENS_CAP), timeout))
         except Exception as e:  # noqa: BLE001 - every failure is a fallback
             box.put(e)
+        finally:
+            _provider_slots.release()
 
-    _threading.Thread(target=call, name=f"llm-{task}", daemon=True).start()
+    try:
+        _threading.Thread(target=call, name=f"llm-{task}", daemon=True).start()
+    except Exception:
+        _provider_slots.release()
+        return done("error")
     try:
         got = box.get(timeout=timeout)  # hard wall-clock cap, whatever the HTTP client does
     except _queue.Empty:
