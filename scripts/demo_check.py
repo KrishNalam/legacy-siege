@@ -488,6 +488,11 @@ class Demo:
         st = self.mf_state()
         stale = list(self.s.playbooks.find({"system": "mainframe", "system_version": {"$lt": mf.get("version", 0)}},
                                            {"stale": 1}))
+        # Under autoplay + Red fleet the upgrade can deploy before this phase starts, so before_md5 may already be the
+        # patched file: compare against the Gardener's backup of the original when it has one.
+        backup = Path(doc.get("backup") or "")
+        if backup.is_file():
+            before_md5 = md5(backup)
         deployed = (md5(MAINFRAME_PY) != before_md5 and mf.get("version") == 2 and st.get("validation_enabled") is True
                     and doc.get("version_after") == 2)
         self.r.add("g. deployed: mainframe.py patched, v2", deployed,
