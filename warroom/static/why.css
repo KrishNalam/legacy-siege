@@ -67,4 +67,4 @@ h1 { left: 60px; font-size: 104px; line-height: 1.12; letter-spacing: -.02em; }
 .q p em { color: var(--red); }
 .q ul { list-style: none; margin: 0; padding: 18px 0 0; border-top: 1px solid var(--green); }
 .q li { font-size: 19px; line-height: 1.35; color: var(--green); padding: 4px 0; }
-.q li::before { content: "◆ "; font-size: 14px; vertical-align: 2px; }
+.q li::before { content: "- "; }
