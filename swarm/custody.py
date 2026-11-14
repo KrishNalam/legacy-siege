@@ -3,7 +3,8 @@
 Every lease the Hive takes lives in one document (`tasks` for workers, `incidents` for scouts), and every
 Beekeeper decision in `approvals`. `scripts/setup_db.ensure_spine` turns on
 `changeStreamPreAndPostImages` for those collections, so each update event carries the document *as it
-was* (`fullDocumentBeforeChange`) next to the document *as it is* (`fullDocument`). This watcher turns
+was* (`fullDocumentBeforeChange`) next to the stored post-image *as of that event* (`fullDocument:
+"whenAvailable"`, never `updateLookup`, which could show a later state). This watcher turns
 every ownership / generation / status change into one row of `swarm.custody`:
 
     {doc_id, coll, incident, kind: claim|takeover|release|status|decision, from_owner, to_owner,
@@ -56,16 +57,29 @@ def _kind(coll: str, before: dict, after: dict) -> str | None:
     return None
 
 
+def event_states(ev: dict) -> tuple[dict, dict, bool]:
+    """(before, after, had_pre_image) as of THIS event, never a later state.
+
+    ``updateLookup`` would return the document as it is when the event is *read*, so a takeover followed quickly
+    by a release would look like a release and vanish from the trail. Instead: after = the stored post-image
+    (``fullDocument: "whenAvailable"``, enabled by ``changeStreamPreAndPostImages``), else pre-image +
+    ``updateDescription``; replace events carry their own replacement document."""
+    pre = ev.get("fullDocumentBeforeChange")
+    desc = ev.get("updateDescription") or {}
+    upd, removed = desc.get("updatedFields") or {}, desc.get("removedFields") or []
+    post = ev.get("fullDocument")
+    if post is None:
+        post = {k: v for k, v in (pre or {}).items() if k not in removed}
+        post.update({k: v for k, v in upd.items() if "." not in k})  # tracked fields are all top-level
+    if pre is None:  # no images: only the fields this update touched are known for sure
+        return {}, post, False
+    return pre, post, True
+
+
 def row_from_event(ev: dict) -> dict | None:
     """Change event -> custody row (without seq/hash), or None when nothing custody-relevant changed."""
     coll = ev["ns"]["coll"]
-    after = ev.get("fullDocument") or {}
-    pre = ev.get("fullDocumentBeforeChange")
-    if pre is None:  # pre-images off (or expired): rebuild what we can from the update description
-        upd = (ev.get("updateDescription") or {}).get("updatedFields") or {}
-        before = {k: v for k, v in after.items() if k not in upd}
-    else:
-        before = pre
+    before, after, had_pre = event_states(ev)
     kind = _kind(coll, before, after)
     if kind is None:
         return None
@@ -80,7 +94,7 @@ def row_from_event(ev: dict) -> dict | None:
         "status_before": before.get("status"), "status_after": after.get("status"),
         "lease_expired": bool(lease_b is not None and kind == "takeover" and lease_b < wall),
         "decided_by": after.get("decided_by") if coll == "approvals" else None,
-        "pre_image": pre is not None,
+        "pre_image": had_pre,
         "cluster_time": ct, "ts": now(),
     }
 
@@ -131,7 +145,7 @@ def run(stop: threading.Event, on_takeover=None, max_await_ms: int = 500) -> Non
     while not stop.is_set():
         token = (col("stats").find_one({"_id": TOKEN_ID}) or {}).get("token")
         try:
-            with swarm().watch(PIPELINE, full_document="updateLookup", full_document_before_change="whenAvailable",
+            with swarm().watch(PIPELINE, full_document="whenAvailable", full_document_before_change="whenAvailable",
                                resume_after=token, max_await_time_ms=max_await_ms) as stream:
                 while not stop.is_set():
                     ev = stream.try_next()
