@@ -3,11 +3,21 @@
     python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json
     python -m scripts.cut_video beats.json --out legacy-siege-60s.mp4 --voiceover vo.mp3
     python -m scripts.cut_video beats.json --print-plan          # show the source windows / speeds, cut nothing
-    python -m scripts.cut_video beats.json --layout doc          # the design doc's 5/15/10/15/10/5 s cut
+    python -m scripts.cut_video beats.json --layout doc          # the design doc's cut (see plan())
+    python -m scripts.cut_video beats.json --tts                 # offline narration from docs/video-script.md
+    python -m scripts.cut_video beats.json --no-code             # skip the CODE segment
 
 Needs a full ffmpeg on PATH (libx264, drawtext, aac). Each beat's source window is sped up (setpts) to fit
-its slot, so waiting stretches go fast but nothing is dropped. Captions name the mechanism on screen. The
-output always has an audio track: silence, or --voiceover mixed in (trimmed / padded to the video length).
+its slot, so waiting stretches go fast but nothing is dropped. Captions name the mechanism on screen.
+
+CODE segment (default on, `--no-code` to drop): 9 s of syntax-highlighted code cards (scripts/code_cards.py,
+Pillow is fetched with `uv run --no-project --with pillow` if the venv has none) between the kill and the
+learning beats, because the rules want the video to show the code as well as the functionality. The other
+beats give up their seconds, so the total stays exactly --length.
+
+Audio: --voiceover FILE mixes a human recording (trimmed / padded to the video length); --tts speaks
+docs/video-script.md with an offline engine (scripts/narration.py), each paragraph starting with its
+segment; with neither, a silent track.
 """
 from __future__ import annotations
 
@@ -19,12 +29,21 @@ import sys
 import tempfile
 from pathlib import Path
 
+try:  # `python -m scripts.cut_video` and `python scripts/cut_video.py` both work
+    from scripts import code_cards, narration
+except ImportError:  # pragma: no cover
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import code_cards  # type: ignore[no-redef]
+    import narration  # type: ignore[no-redef]
+
 FONT = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
 FONT_REG = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
 GREEN = "0x00ED64"
 FPS = 30
 KEEP_TAIL = 1.5   # a beat's key moment sits at least this long before its t_end (see record_demo.derive_beats)
 MIN_SPEED = 0.85  # slowest playback allowed; below it a beat's slot shrinks instead
+CODE_S = 9.0      # length of the CODE segment
+VO_LEAD = 0.3     # narration starts this long after its segment does
 
 
 def fmt_s(v) -> str:
@@ -34,12 +53,17 @@ def fmt_s(v) -> str:
         return "?"
 
 
-def plan(log: dict, layout: str = "brief") -> list[dict]:
+def plan(log: dict, layout: str = "brief", cards: list[dict] | None = None) -> list[dict]:
     """The edit: segments of (slot seconds, kicker, [pieces]); each piece = (beat name, seconds, caption).
 
-    layout "brief" (default): 7/10/9/10/12/12 s, ends on night 3 + the Atlas view (matches docs/video-script.md).
-    layout "doc": the design doc's cut, 5/15/10/15/10/5 s (hook, cascade, lie, kill, round 2, Gardener).
+    `cards` = the usable code cards (code_cards.usable()); with any, a CODE segment of CODE_S seconds is
+    inserted after the kill and the other beats shrink so the total stays 60 s (else the old timings):
+      layout "brief" (default), hook/cascade/lie/kill/code/learn/garden = 7/8/9/9/9/9/9 s (was 7/10/9/10/-/12/12),
+                  ends on night 3 + the Atlas view (matches docs/video-script.md).
+      layout "doc": the design doc's cut, 5/12/8/11/9/9/6 s (was 5/15/10/15/-/10/5).
+    A "card:<key>" piece is a code card, not footage.
     """
+    code = bool(cards)
     m = log.get("metrics") or {}
     n1, n2 = m.get("night1") or {}, m.get("night2") or {}
     learn = (f"Round 2: $vectorSearch recall → diagnosis {fmt_s(n1.get('diagnosis_s'))} → "
@@ -54,48 +78,63 @@ def plan(log: dict, layout: str = "brief") -> list[dict]:
         "night3": "Night 3: the same attack. Nothing happens.",
         "atlas": "MongoDB is the hive's memory: state, leases, checkpoints, playbooks",
     }
+
+    def t(with_code: float, without: float) -> float:
+        return with_code if code else without
+
+    seg_code = ([{"key": "code", "kicker": "UNDER THE HOOD · THE REAL CODE",
+                  "pieces": [(f"card:{c['key']}", round(CODE_S / len(cards), 3), c["caption"]) for c in cards]}]
+                if code else [])
+    hook = {"key": "hook", "kicker": "LEGACY SIEGE · MONGODB IS THE SPINE", "title": True}
     if layout == "doc":
         return [
-            {"key": "hook", "kicker": "LEGACY SIEGE · MONGODB IS THE SPINE", "title": True,
-             "pieces": [("night1_attack", 5.0, cap["hook"])]},
-            {"key": "cascade", "kicker": "1 · CASCADE", "pieces": [("cascade_trace", 15.0, cap["cascade"])]},
-            {"key": "lie", "kicker": "2 · THE LYING SYSTEM", "pieces": [("lie_caught", 10.0, cap["lie"])]},
+            {**hook, "pieces": [("night1_attack", 5.0, cap["hook"])]},
+            {"key": "cascade", "kicker": "1 · CASCADE", "pieces": [("cascade_trace", t(12.0, 15.0), cap["cascade"])]},
+            {"key": "lie", "kicker": "2 · THE LYING SYSTEM", "pieces": [("lie_caught", t(8.0, 10.0), cap["lie"])]},
             {"key": "kill", "kicker": "3 · REAL SIGKILL", "pieces": [
-                ("approval", 4.0, cap["approval"]), ("kill_takeover", 11.0, cap["kill"])]},
+                ("approval", t(3.0, 4.0), cap["approval"]), ("kill_takeover", t(8.0, 11.0), cap["kill"])]},
+            *seg_code,
             {"key": "learn", "kicker": "4 · THE HIVE LEARNS", "pieces": [
-                ("night2_recall", 7.0, learn), ("night2_resolved", 3.0, learn)]},
+                ("night2_recall", t(7.0, 7.0), learn), ("night2_resolved", t(2.0, 3.0), learn)]},
             {"key": "garden", "kicker": "5 · FIX IT FOR GOOD", "pieces": [
-                ("gardener", 3.0, cap["gardener"]), ("night3", 2.0, cap["night3"])]},
+                ("gardener", t(4.0, 3.0), cap["gardener"]), ("night3", 2.0, cap["night3"])]},
         ]
     return [
-        {"key": "hook", "kicker": "LEGACY SIEGE · MONGODB IS THE SPINE", "title": True,
-         "pieces": [("night1_attack", 7.0, cap["hook"])]},
-        {"key": "cascade", "kicker": "1 · CASCADE", "pieces": [("cascade_trace", 10.0, cap["cascade"])]},
+        {**hook, "pieces": [("night1_attack", 7.0, cap["hook"])]},
+        {"key": "cascade", "kicker": "1 · CASCADE", "pieces": [("cascade_trace", t(8.0, 10.0), cap["cascade"])]},
         {"key": "lie", "kicker": "2 · THE LYING SYSTEM", "pieces": [("lie_caught", 9.0, cap["lie"])]},
         {"key": "kill", "kicker": "3 · REAL SIGKILL", "pieces": [
-            ("approval", 3.0, cap["approval"]), ("kill_takeover", 7.0, cap["kill"])]},
+            ("approval", t(2.5, 3.0), cap["approval"]), ("kill_takeover", t(6.5, 7.0), cap["kill"])]},
+        *seg_code,
         # {"key": "drift", ...}  schema drift beat goes here after the code freeze (steal ~5 s from "learn")
         {"key": "learn", "kicker": "4 · THE HIVE LEARNS", "pieces": [
-            ("night2_recall", 9.0, learn), ("night2_resolved", 3.0, learn)]},
+            ("night2_recall", t(6.5, 9.0), learn), ("night2_resolved", t(2.5, 3.0), learn)]},
         {"key": "garden", "kicker": "5 · FIX IT FOR GOOD", "pieces": [
-            ("gardener", 5.0, cap["gardener"]), ("night3", 3.0, cap["night3"]), ("atlas", 4.0, cap["atlas"])]},
+            ("gardener", t(4.0, 5.0), cap["gardener"]), ("night3", t(2.5, 3.0), cap["night3"]),
+            ("atlas", t(2.5, 4.0), cap["atlas"])]},
     ]
 
 
-def resolve(log: dict, total: float, layout: str = "brief") -> list[dict]:
-    """Map pieces to source windows; missing beats give their seconds to the rest, scaled to `total`."""
+def resolve(log: dict, total: float, layout: str = "brief", cards: list[dict] | None = None) -> list[dict]:
+    """Map pieces to source windows; missing beats give their seconds to the rest, scaled to `total`.
+    Code cards keep their seconds; only the footage pieces are scaled and retimed."""
     beats = {b["name"]: b for b in log["beats"]}
     dur = float(log.get("video_duration_s") or 1e9)
     pieces = []
-    for seg in plan(log, layout):
+    for seg in plan(log, layout, cards):
         for i, (name, secs, cap) in enumerate(seg["pieces"]):
+            if name.startswith("card:"):
+                pieces.append({"seg": seg["key"], "kicker": seg["kicker"], "title": False, "beat": name,
+                               "card": name[5:], "slot": secs, "caption": cap, "speed": 1.0})
+                continue
             b = beats.get(name)
             if not b:
                 print(f"  ! beat '{name}' missing from the log, skipped", file=sys.stderr)
                 continue
             pieces.append({"seg": seg["key"], "kicker": seg["kicker"], "title": seg.get("title") and i == 0,
                            "beat": name, "slot": secs, "caption": cap, "a": b["t_start"], "b": b["t_end"]})
-    scale = total / sum(p["slot"] for p in pieces)
+    everything, pieces = pieces, [p for p in pieces if "card" not in p]
+    scale = (total - sum(p["slot"] for p in everything if "card" in p)) / sum(p["slot"] for p in pieces)
     for p in pieces:
         p["slot"] *= scale
         p["keep"] = p["b"] - KEEP_TAIL  # beats end a few seconds after their key moment; never cut before it
@@ -133,9 +172,12 @@ def resolve(log: dict, total: float, layout: str = "brief") -> list[dict]:
     for p in pieces:
         p["slot"] = round(p["slot"], 3)
         p["speed"] = round((p["b"] - p["a"]) / p["slot"], 3)
-    drift = total - sum(p["slot"] for p in pieces)
-    pieces[-1]["slot"] = round(pieces[-1]["slot"] + drift, 3)
-    return pieces
+    drift = total - sum(p["slot"] for p in everything)
+    last = everything[-1]
+    last["slot"] = round(last["slot"] + drift, 3)
+    if "card" not in last:
+        last["speed"] = round((last["b"] - last["a"]) / last["slot"], 3)
+    return everything
 
 
 def run(cmd: list[str]) -> None:
@@ -143,6 +185,53 @@ def run(cmd: list[str]) -> None:
     if r.returncode:
         sys.stderr.write(r.stderr[-3000:])
         raise SystemExit(f"ffmpeg failed: {' '.join(cmd[:6])} …")
+
+
+def render_cards(out_dir: Path) -> dict[str, str]:
+    """Render the code cards -> {key: png path}. Pillow in this interpreter if there is one, else a throwaway
+    `uv run --with pillow` (the repo venv doesn't carry it)."""
+    import importlib.util  # noqa: PLC0415
+    if importlib.util.find_spec("PIL"):
+        res = code_cards.build(out_dir)
+    else:
+        if not shutil.which("uv"):
+            raise SystemExit("code cards need Pillow: `pip install pillow` or install uv (or pass --no-code)")
+        r = subprocess.run(["uv", "run", "--no-project", "--with", "pillow", "python", str(Path(code_cards.__file__)),
+                            "--out", str(out_dir), "--json"], capture_output=True, text=True)
+        sys.stderr.write(r.stderr)
+        if r.returncode:
+            raise SystemExit("rendering the code cards failed (see above)")
+        res = json.loads(r.stdout.strip().splitlines()[-1])
+    return {c["key"]: c["png"] for c in res}
+
+
+def narration_inputs(pieces: list[dict], clips: dict, length: float, first: int) -> tuple[list[str], str]:
+    """ffmpeg inputs + filter graph (output [aout]) placing each segment's TTS clip at its segment start.
+    Clips are sped up (atempo, never slowed) just enough to fit their segment; `first` = index of the first input."""
+    segs: dict[str, list[float]] = {}
+    for p in pieces:
+        s = segs.setdefault(p["seg"], [p["at"], 0.0])
+        s[1] += p["slot"]
+    inputs, chains, labels = [], [], []
+    for key, (wav, dur) in clips.items():
+        if key not in segs:
+            continue
+        start, slot = segs[key]
+        room = max(slot - VO_LEAD - 0.15, 1.0)
+        tempo = max(1.0, dur / room)
+        if tempo > 1.25:
+            print(f"  ! narration '{key}' is {dur:.1f} s for a {slot:.1f} s segment: speeding it up ×{tempo:.2f}"
+                  " (shorten its paragraph in docs/video-script.md)", file=sys.stderr)
+        i = first + len(labels)
+        inputs += ["-i", str(wav)]
+        ms = int((start + VO_LEAD) * 1000)
+        chains.append(f"[{i}:a]aresample=48000,aformat=channel_layouts=stereo,atempo={min(tempo, 2.0):.4f},"
+                      f"adelay={ms}|{ms}[v{i}]")
+        labels.append(f"[v{i}]")
+    L = f"{length:.3f}"
+    mix = (f"{''.join(labels)}amix=inputs={len(labels)}:normalize=0:duration=longest,loudnorm=I=-16:TP=-1.5:LRA=11,"
+           f"aresample=48000,apad,atrim=0:{L},afade=t=out:st={length - 0.8:.3f}:d=0.8[aout]")
+    return inputs, ";".join(chains + [mix])
 
 
 def esc(path: Path) -> str:
@@ -155,10 +244,15 @@ def main() -> int:
     ap.add_argument("--video", type=Path, help="raw video (default: the one named in the beat log)")
     ap.add_argument("--out", type=Path, help="default: legacy-siege-60s.mp4 next to the beat log")
     ap.add_argument("--voiceover", type=Path, help="audio file to mix in (else a silent track)")
+    ap.add_argument("--tts", action="store_true",
+                    help="no recording? narrate docs/video-script.md with an offline TTS engine (ignored with --voiceover)")
+    ap.add_argument("--tts-engine", choices=narration.ENGINES, help="default: piper, else espeak, else flite")
+    ap.add_argument("--code", action=argparse.BooleanOptionalAction, default=True,
+                    help="9 s of code cards (swarm/leases.py, verify.py, schema.py) after the kill beat (default on)")
     ap.add_argument("--vo-gain", type=float, default=1.0)
     ap.add_argument("--length", type=float, default=60.0)
     ap.add_argument("--layout", choices=["brief", "doc"], default="brief",
-                    help="brief: 7/10/9/10/12/12 s ending on Atlas (default); doc: the design doc's 5/15/10/15/10/5 s")
+                    help="brief: 7/8/9/9/9/9/9 s with the code segment, ends on Atlas (default); doc: the design doc's cut")
     ap.add_argument("--crf", type=int, default=20)
     ap.add_argument("--print-plan", action="store_true")
     a = ap.parse_args()
@@ -167,19 +261,29 @@ def main() -> int:
     log = json.loads(a.beats.read_text())
     video = a.video or a.beats.parent / log["video"]
     out = a.out or a.beats.parent / "legacy-siege-60s.mp4"
-    pieces = resolve(log, a.length, a.layout)
+    cards = code_cards.usable() if a.code else []
+    if a.code and not cards:
+        print("  ! no code card source found, cutting without the code segment", file=sys.stderr)
+    pieces = resolve(log, a.length, a.layout, cards)
     t = 0.0
     for p in pieces:
         p["at"] = round(t, 3)
         t += p["slot"]
-        print(f"  {p['at']:5.1f}-{t:5.1f}s  {p['beat']:<16} src {p['a']:7.1f}-{p['b']:7.1f}  ×{p['speed']:<5}  {p['caption']}")
+        src = "code card".ljust(24) if "card" in p else f"src {p['a']:7.1f}-{p['b']:7.1f}  ×{p['speed']:<5}"
+        print(f"  {p['at']:5.1f}-{t:5.1f}s  {p['beat']:<16} {src}  {p['caption']}")
     if a.print_plan:
         return 0
     with tempfile.TemporaryDirectory(prefix="cut-", dir=out.parent) as td:
         tmp = Path(td)
         # 1) each piece: seek, speed up to fit its slot, constant 30 fps, near-lossless intermediate
+        pngs = render_cards(tmp / "cards") if cards else {}
         for i, p in enumerate(pieces):
             p["file"] = tmp / f"p{i:02d}.mp4"
+            if "card" in p:  # a still code card held for its slot
+                run(["ffmpeg", "-y", "-v", "error", "-loop", "1", "-framerate", str(FPS), "-i", pngs[p["card"]],
+                     "-t", f"{p['slot']:.3f}", "-vf", f"fps={FPS},scale=1920:1080,setsar=1", "-an", "-c:v", "libx264",
+                     "-preset", "veryfast", "-crf", "12", "-pix_fmt", "yuv420p", str(p["file"])])
+                continue
             run(["ffmpeg", "-y", "-v", "error", "-ss", f"{p['a']:.3f}", "-t", f"{p['b'] - p['a']:.3f}", "-i", str(video),
                  "-vf", f"setpts=(PTS-STARTPTS)/{p['speed']},fps={FPS},scale=1920:1080:flags=lanczos,setsar=1",
                  "-t", f"{p['slot']:.3f}", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "12",
@@ -215,7 +319,14 @@ def main() -> int:
                           f"x=(w-text_w)/2:y=(h-168)/2+60:enable='lt(t,{tt})'")
         L = f"{a.length:.3f}"
         cmd = ["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", str(tmp / "list.txt")]
-        if a.voiceover:
+        if a.tts and not a.voiceover:
+            engine, clips = narration.narrate(tmp / "vo", a.tts_engine)
+            print(f"narration: {engine}, {sum(d for _, d in clips.values()):.0f} s of speech")
+            ins, af = narration_inputs(pieces, clips, a.length, first=1)
+            cmd += ins
+        elif a.voiceover:
+            if a.tts:
+                print("  ! --voiceover given, ignoring --tts", file=sys.stderr)
             cmd += ["-i", str(a.voiceover)]
             af = (f"[1:a]aresample=48000,aformat=channel_layouts=stereo,volume={a.vo_gain},apad,atrim=0:{L},"
                   f"afade=t=out:st={a.length - 0.8:.3f}:d=0.8[aout]")
