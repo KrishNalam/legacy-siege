@@ -207,7 +207,7 @@
 <text x="447" y="912" class="tg m" text-anchor="middle" font-weight="bold">checkpoints</text>
 <text x="447" y="932" class="tg xs" text-anchor="middle">LangGraph, per task</text>
 <text x="741" y="908" class="tg m" text-anchor="middle" font-weight="bold">playbooks + $vectorSearch</text>
-<text x="741" y="928" class="tg s" text-anchor="middle">Voyage AI voyage-4 embeddings (live: local fallback)</text>
+<text x="741" y="928" class="tg s" text-anchor="middle">Voyage AI voyage-4 embeddings</text>
 <text x="741" y="946" class="tg xs it" text-anchor="middle">round 2: same fault recalled → fixed faster</text>
 <text x="1045" y="912" class="tg m" text-anchor="middle" font-weight="bold">chaos_events</text>
 <text x="1045" y="932" class="tg xs" text-anchor="middle">Red's attack log</text>

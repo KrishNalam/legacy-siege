@@ -200,7 +200,6 @@
  <text x="876" y="889" class="s">pre-filter: model, not stale</text>
  <text x="876" y="905" class="s">→ round-2 speedup</text>
  <text x="876" y="927" class="s">Voyage AI voyage-4 embeddings</text>
- <text x="876" y="943" class="s">(live: local fallback)</text>
  <rect x="1126" y="832" width="200" height="132" rx="8" fill="#fff" stroke="#00684A"/>
  <text x="1138" y="853" class="t">chaos_events</text>
  <text x="1138" y="873" class="s">every Red attack,</text>

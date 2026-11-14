@@ -46,7 +46,7 @@ flowchart LR
     LED["ledger + receipts<br/><small>transactions</small>"]
     LEA["leases<br/><small>generation fencing</small>"]
     CK["LangGraph checkpoints"]
-    PB["playbooks + $vectorSearch<br/><small>Voyage AI voyage-4<br/>(live: local fallback)</small>"]
+    PB["playbooks + $vectorSearch<br/><small>Voyage AI voyage-4</small>"]
     CE["chaos_events"]
     CS["change streams"]
   end
