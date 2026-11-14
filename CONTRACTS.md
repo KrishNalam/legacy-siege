@@ -325,7 +325,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   death, and reset thaws records in `swarm.frozen_agents`. `CHAOS_AGENT_LIE=1` adds `lie_to_agent`: Runner calls
   the existing false_log hook with `{prompt_injection:true}`; the system also checks the switch and writes a fixed
   instruction-like log line, changing no actual state. Poison preparation is NOT in the whitelist: no Memory Striker
-  until visible Guard rejection is proved. Both reset routes remove any `red_planted:true` playbooks/lessons.
+  until visible Guard rejection is proved. A full reset removes any `red_planted:true` playbooks/lessons (next-round keeps them, W27c).
 
 - **Comms / Sentinel #2 (additive W17, `SWARM_COMMS=1`, default off).** `messages` retains its
   existing fields; opt-in writes add `priority` (higher first), `severity`, `source`, `incident`,
@@ -368,11 +368,15 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   No new faults, no new collections, no swarm writes beyond thoughts.
 - **Memory Striker (W18; additive, `CHAOS_POISON_MEMORY=1`, default off; supersedes "poison not in the whitelist").**
   New fault `poison_memory` (kind agent, target `swarm`, params `{playbook?}`) and persona `red-memory` (no process
-  unless the switch is on). It copies a genuine non-stale learned playbook whose `fault_class` is NOT `batch_abort`/
-  `schema_drift` (policy.rebind re-derives those, so poison would be silently neutralised) into
-  `swarm.playbooks {_id:"RED-POISON:<id>", red_planted:true, red_source}` with every fix step's `system` moved to the
-  wrong system, and hides the genuine one (`stale:true, red_hidden_by`). It never edits the genuine fix. Any reset
-  (`runner.cancel()` / setup_db) deletes `red_planted` docs and un-hides `red_hidden_by` docs. The visible defence needs
+  unless the switch is on). It copies a genuine non-stale learned playbook (never `schema_drift`) into
+  `swarm.playbooks {_id:"RED-POISON:<id>", red_planted:true, red_source}` in one of two shapes (result `shape`):
+  `wrong_system` (every fix step's `system` moved to the wrong system) or, for `batch_abort`, `wrong_record`
+  (`quarantine_record` aimed at `TX000000`; W27). The Scout's recall-time provenance check (`recovery.vet_recall`)
+  rejects a wrong-record memory whose fix differs from the steps the Guard verified in its source incident
+  (thought "Rejected memory …", playbook stale, misfit lesson, `recall.memory_rejected` + `recall.rejected`) and
+  restores the twin from the same incident that matches those steps, if no Hive decision retired it. It hides the genuine one (`stale:true, red_hidden_by`). It never edits the genuine fix. A full reset
+  (`runner.cancel()` / setup_db) deletes `red_planted` docs and un-hides `red_hidden_by` docs; a next-round reset
+  (`runner.cancel(keep_memory=True)`) keeps them, like every other playbook (W27c). The visible defence needs
   `SWARM_RECOVERY=1` + `FAILURE_MEMORY=1` (W16): Guard read-back rejects the recalled repair, retires it, re-plans.
   Red `outcome.incidents[].memory_rejected` = incident `recall.rejected`; a rejection counts as `guard_caught:true`.
   Commander combo `poison-then-break`: poison a learned repair, then the Saboteur/Hacker causes that fault again.

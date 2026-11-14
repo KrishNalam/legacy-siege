@@ -17,6 +17,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from common import progress
 from common.db import col, now, txn
 
 from .. import diagnosis, leases, recovery, schema, settings, steps, verify
@@ -161,6 +162,12 @@ def build_graph(agent: Agent):
             apr = col("approvals").find_one({"_id": step["approval_id"]}) or {}
             approver = apr.get("decided_by")
         steps.mark_sent(task, me, gen, step, aid, approver)
+        if progress.enabled():  # PROGRESS_ETA: "step i/n · ETA ~N s (based on K past runs)" from the history
+            n_all = len((col("incidents").find_one({"_id": task["incident"]}, {"steps": 1}) or {}).get("steps") or [])
+            est = progress.estimate("swarm", f"step:{step['op']}", step["system"])
+            progress.emit(me, "worker", f"{fmt_op(step)} on {step['system']} (step {step.get('n')}/{n_all}) · "
+                          f"{progress.eta_text(est)}", action_type=f"step:{step['op']}", system=step["system"],
+                          incident=task["incident"], step=step.get("n"), of=n_all or None, eta=est)
         agent.set(status="working", target=step["system"], phase="step_sent", incident=task["incident"],
                   task=task["_id"])
         agent.think(f"Sending {fmt_op(step)} to {step['system']} as {aid}.",

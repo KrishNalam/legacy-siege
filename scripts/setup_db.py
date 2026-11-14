@@ -7,13 +7,29 @@ from __future__ import annotations
 
 import sys
 import time
+from functools import lru_cache
 
-from pymongo import ASCENDING, DESCENDING, IndexModel
+from pymongo import ASCENDING, DESCENDING, IndexModel, MongoClient
 from pymongo.errors import CollectionInvalid, OperationFailure
 from pymongo.operations import SearchIndexModel
 
 from common import config
-from common.db import swarm, world
+from common.db import swarm, world  # noqa: F401  (re-export; reset() uses its own long-timeout client)
+
+# Bulk deletes on a full reset can run past common/db.py's 15 s socket cap on Atlas (NetworkTimeout in R1).
+# Same URI/appname as the global client, used only here; the global client keeps its 15 s cap.
+SETUP_SOCKET_TIMEOUT_MS = 120000
+
+
+@lru_cache(maxsize=1)
+def _setup_client() -> MongoClient:
+    return MongoClient(config.MONGODB_URI, tz_aware=True, serverSelectionTimeoutMS=5000,
+                       connectTimeoutMS=5000, socketTimeoutMS=SETUP_SOCKET_TIMEOUT_MS, appname="legacy-siege")
+
+
+def _setup_dbs():
+    c = _setup_client()
+    return c[config.WORLD_DB], c[config.SWARM_DB]
 
 STEP_STATUSES = ["planned", "sent", "verified", "failed", "unknown"]
 
@@ -146,7 +162,7 @@ def _ensure(db, name, validator=None):
 
 
 def ensure() -> None:
-    w, s = world(), swarm()
+    w, s = _setup_dbs()
     for n in ["systems", "system_state", "system_logs", "op_receipts", "chaos_scenarios", "chaos_events", "runs"]:
         _ensure(w, n)
     _ensure(s, "incidents", INCIDENT_SCHEMA)
@@ -185,6 +201,10 @@ def ensure() -> None:
         IndexModel([("incident", ASCENDING), ("ts", ASCENDING)]),
     ])
     s.messages.create_index([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h")
+    from common import progress
+    if progress.enabled():  # PROGRESS_ETA: duration history as time-series (Red's in world, Blue's in swarm)
+        progress.ensure(w)
+        progress.ensure(s)
     from common import comms
     if comms.enabled():
         _ensure(s, "gardener_notes")
@@ -244,7 +264,7 @@ def reset() -> None:
     from chaos import faults
     faults.thaw_overdue(all_=True)
     faults.clear_planted_memory()
-    w, s = world(), swarm()
+    w, s = _setup_dbs()
     for n in ["systems", "system_state", "system_logs", "op_receipts", "chaos_events", "runs", "red_agents"]:
         w[n].delete_many({})
     for n in ["incidents", "tasks", "agents", "thoughts", "messages", "ledger", "playbooks", "approvals",
@@ -257,6 +277,8 @@ def reset() -> None:
             pass
     s.gardener_notes.delete_many({})
     s.gardener_requests.delete_many({})
+    from common import progress
+    progress.wipe()  # PROGRESS_ETA duration history goes too (kept on next_round, so round 2 estimates better)
     s.lessons.delete_many({})  # failure memory goes with the playbooks on a full reset (kept on next_round)
 
 

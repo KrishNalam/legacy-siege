@@ -21,12 +21,14 @@ from langgraph.types import Command, interrupt
 from pymongo.errors import DuplicateKeyError
 
 from common import config as shared
+from common import progress
 from common.db import col, next_id, now, txn
 from common.events import say as bus
 
 from .. import leases, policy, recall, recovery, scale, second_opinion, settings, steps
 from gardener import help as gardener_help
-from ..harness import Agent, checkpointer, main_loop, retrying
+
+from ..harness import Agent, checkpointer, log, main_loop, retrying
 from .. import lessons
 
 
@@ -146,8 +148,23 @@ def build_graph(agent: Agent):
         lead = inc["symptoms"][0] if inc.get("symptoms") else f"{inc['system']} unhealthy"
         say(inc_id, f"{inc_id}: {lead}. Affected: {affected}. Checking the hive's memory first.",
             system=inc["system"])
+        if progress.enabled():  # PROGRESS_ETA: time to resolve, learned from past incidents on this system
+            est = progress.estimate("swarm", "incident", inc["system"])
+            progress.emit(agent.id, "scout", f"{inc_id}: resolving {inc['system']} · {progress.eta_text(est)}",
+                          action_type="incident", system=inc["system"], incident=inc_id, eta=est)
         return {"started": time.time(), "symptom_text": policy.symptom_text(inc.get("symptoms") or []),
                 "path": [], "findings": {}, "hit": None}
+
+    def diag_eta(inc_id: str, system: str, how: str) -> None:
+        if progress.enabled():
+            est = progress.estimate("swarm", f"diagnose:{how}", system)
+            progress.emit(agent.id, "scout", f"{inc_id}: diagnosing from {system} ({how}) · {progress.eta_text(est)}",
+                          action_type=f"diagnose:{how}", system=system, incident=inc_id, eta=est)
+
+    def diag_done(inc_id: str, how: str, diag_s: float) -> None:
+        if progress.enabled():  # keyed by the symptom system, like the ETA asked for at the start
+            progress.record("swarm", f"diagnose:{how}", inc_doc(inc_id)["system"], "scout", diag_s, "ok",
+                            incident=inc_id)
 
     def recall_node(state: ScoutState, config) -> dict:
         inc_id = state["incident"]
@@ -161,11 +178,19 @@ def build_graph(agent: Agent):
                 usable, skipped = lessons.skip_misfits(hits, summary, usable, q, inc_id)
             except Exception:
                 skipped = []
+        vetoed = []
+        try:  # provenance: a remembered fix that the Guard never verified is tampered memory (poison)
+            usable, vetoed = recovery.vet_recall(inc_id, hits, summary, usable, q, agent.id)
+        except Exception as e:
+            log(agent.id, f"memory provenance check skipped: {type(e).__name__}: {e}")
         fenced(config, inc_id, {"$set": {"recall": {
             "query": q, "filter": flt, "hits": summary, "used": usable is not None, "model": flt.get("embedding_model"),
             "threshold": shared.RECALL_THRESHOLD, "num_candidates": recall.NUM_CANDIDATES, "limit": recall.LIMIT,
-            "ts": now()}}})
+            "ts": now(), **({"memory_rejected": rej, "rejected": rej[0]} if (rej := [
+                r["playbook_id"] for r in summary if r.get("rejected")]) else {})}}})
         inc = inc_doc(inc_id)
+        for line in vetoed:
+            say(inc_id, line, kind="reject", system=inc["system"], pause=False)
         for line in skipped:
             say(inc_id, line, kind="recall", system=inc["system"], pause=False)
         if usable:
@@ -178,6 +203,7 @@ def build_graph(agent: Agent):
                         f"v{usable['system_version']}): {usable['fault_class']} — skipping the chain walk"
                         + (" (Sentinel #2 pushed the same fix)." if agree else "."),
                 kind="recall", system=usable["system"])
+            diag_eta(inc_id, inc["system"], "recall")
             return {"hit": {"playbook_id": usable["_id"], "system": usable["system"],
                             "fault_class": usable["fault_class"], "fix": usable.get("fix") or []},
                     "diag_started": time.time(), "current": usable["system"]}
@@ -208,6 +234,7 @@ def build_graph(agent: Agent):
             note = lessons.stale_note(q)
             text = f"{text} {note}" if note else text
         say(inc_id, text, kind="recall", system=inc["system"])
+        diag_eta(inc_id, inc["system"], "walk")
         return {"hit": None, "diag_started": time.time(), "current": inc["system"]}
 
     def hop(config, state: ScoutState, sys: str, mode: str = "walk") -> tuple[dict, list[str]]:
@@ -240,6 +267,7 @@ def build_graph(agent: Agent):
             say(state["incident"], f"{hit['system']} shows the remembered fault ({hit['fault_class']}); "
                                    f"applying {hit['playbook_id']}'s fix with today's facts.", kind="recall",
                 system=hit["system"])
+            diag_done(state["incident"], "recall", diag_s)
             return {"path": path, "findings": findings, "root": hit["system"], "fault_class": f["fault_class"],
                     "root_cause": f.get("root_cause"), "params": f.get("params") or {}, "diag_s": diag_s}
         inc = inc_doc(state["incident"])
@@ -278,6 +306,7 @@ def build_graph(agent: Agent):
         diag_s = round(time.time() - state["diag_started"], 2)
         say(inc_id, f"Root cause after {len(path)} hops ({' → '.join(path)}): {f['root_cause']} "
                     f"[{f['fault_class']} on {root}].", system=root, polish=True)
+        diag_done(inc_id, "walk", diag_s)
         return {"root": root, "fault_class": f["fault_class"], "root_cause": f.get("root_cause"),
                 "params": f.get("params") or {}, "diag_s": diag_s}
 
@@ -545,6 +574,8 @@ def build_graph(agent: Agent):
                 col("playbooks").update_one({"_id": state["hit"]["playbook_id"]},
                                             {"$inc": {"uses": 1}, "$set": {"last_used_at": closed}}, session=s)
         txn(fn)
+        progress.record("swarm", "incident", inc["system"], "scout", metrics["ttr_s"], "resolved", incident=inc_id,
+                        fault_class=state["fault_class"])
         say(inc_id, f"Resolved {inc_id} in {metrics['ttr_s']:.0f}s ({metrics['hops']} hops, {metrics['steps']} steps, "
                     f"{metrics['attempts']} attempts). Saved playbook {pb['_id']} for {state['root']} "
                     f"v{pb['system_version']}.", kind="learn", system=state["root"], pause=False)

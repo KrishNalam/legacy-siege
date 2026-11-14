@@ -31,7 +31,7 @@ from pathlib import Path
 import httpx
 from pymongo import ReturnDocument
 
-from common import config
+from common import config, progress
 from common.db import col, next_id, now, txn
 from common.events import think
 from common.llm import complete
@@ -563,23 +563,35 @@ def prove(upg_id: str, window_s: float = PROVE_WINDOW_S) -> dict:
 # ------------------------------------------------------------------ whole pipeline + revert
 def run(upg_id: str, approval_timeout: float | None = None, prove_window_s: float = PROVE_WINDOW_S) -> dict:
     """Drive an upgrade from its current status to the end. Safe to call again after a crash."""
+    def stage(i: int, name: str, label: str, record_it: bool = True):
+        """PROGRESS_ETA (off = no-op): step i/5 with an ETA learned from past upgrades of this system."""
+        return progress.track("swarm", f"upgrade:{name}", system, ROLE, agent=AGENT, label=f"Gardener {upg_id}: {label}",
+                              step=i, of=5, record_it=record_it)
+
     try:
-        st = get(upg_id)["status"]
+        upg = get(upg_id)
+        st, system = upg["status"], upg.get("system")
         if st in ("requested", "planning"):
-            plan(upg_id)
+            with stage(1, "plan", "planning the patch"):
+                plan(upg_id)
             st = "planning"
         if st in ("planning", "testing"):
-            test(upg_id)
+            with stage(2, "test", "pytest + fault replay"):
+                test(upg_id)
             st = "testing"
         if st in ("testing", "awaiting_approval"):
-            if gate(upg_id, wait=True, timeout=approval_timeout) != "approved":
+            with stage(3, "approval", "waiting for the Beekeeper", record_it=False):  # a human's pace, not ours
+                decision = gate(upg_id, wait=True, timeout=approval_timeout)
+            if decision != "approved":
                 return get(upg_id)
             st = "awaiting_approval"
         if st in ("awaiting_approval", "deploying"):
-            deploy(upg_id)
+            with stage(4, "deploy", "hot reload"):
+                deploy(upg_id)
             st = "deployed"
         if st == "deployed" and not get(upg_id).get("prove"):
-            prove(upg_id, prove_window_s)
+            with stage(5, "prove", "replaying the fault"):
+                prove(upg_id, prove_window_s)
     except Rejected:
         pass
     finally:

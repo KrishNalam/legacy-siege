@@ -224,3 +224,16 @@ def test_reset_continues_cleanup_after_memory_failure(monkeypatch):
     monkeypatch.setattr(faults, 'clear_planted_memory', fail)
     assert runner.cancel() == []
     assert calls == ['thaw', 'hunts', 'memory']
+
+
+def test_next_round_reset_keeps_planted_memory(monkeypatch):
+    """Poisoned memory is memory: a next-round reset keeps it (Night 2 recalls it); a full reset removes it."""
+    from chaos import faults
+    calls = []
+    monkeypatch.setattr(faults, 'thaw_overdue', lambda **kw: calls.append('thaw'))
+    monkeypatch.setattr(faults, 'cancel_pending_hunts', lambda: calls.append('hunts'))
+    monkeypatch.setattr(faults, 'clear_planted_memory', lambda: calls.append('memory'))
+    runner.cancel(keep_memory=True)
+    assert calls == ['thaw', 'hunts']
+    runner.cancel()
+    assert calls[2:] == ['thaw', 'hunts', 'memory']
