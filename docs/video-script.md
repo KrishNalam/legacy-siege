@@ -66,19 +66,20 @@ Every frame is a MongoDB change stream. Atlas is the hive's memory.
 
 ## Cutting it
 
-`scripts/cut_video.py` still cuts the older seven segments (hook/cascade/lie/kill/code/learn/garden; the
-`garden` slot ends on night 3 + the Atlas view, which is where the close line goes). With `--tts` it speaks
-the paragraphs whose key matches a segment and skips the rest, so until `plan()` gets `ai`, `drift` and
-`red` segments (and `CODE_S` goes from 9 to 8), the `ai`/`drift`/`red` lines stay silent there. For the final
-video, either add those segments (`drift` has a commented slot; `red` needs the FREEZE beat from the
-`t3/build-red-fleet-attacker` branch in the recording) or lay the narration over the take by hand using the
-timings in the table above.
+`scripts/cut_video.py` cuts these ten beats by default (`--layout script`, the table's times; `--layout brief`
+keeps the older seven-segment cut). `--tts` speaks each tagged paragraph at the start of its segment. The
+new beats come from `record_demo` markers: **Claude, checked** needs an `AI_DRIVES` stack (`incident.ai`
+verdicts), **Schema drift** needs `record_demo --drift` (one bank-drift round after night 3), **Red fleet**
+needs a `RED_FLEET=1` stack from `t3/build-red-fleet-attacker` (an `agent_freeze` by a `red-*` striker, then
+the Nurse handoff). A beat the take lacks is cut from a fallback window with a plainer caption (`FALLBACK`
+in `cut_video.py`, flagged "(fallback)" in `--print-plan`); `--at red_freeze=212-220` points a beat at the
+right seconds of the raw video by hand.
 
 ```bash
-.venv/bin/python -m scripts.record_demo --base http://127.0.0.1:8700      # ~3-5 min; runs demo_check
+.venv/bin/python -m scripts.record_demo --base http://127.0.0.1:8700 --drift   # ~4-6 min; runs demo_check
 .venv/bin/python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json --print-plan
 .venv/bin/python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json \
-    --out ~/projects/legacy-siege-media/legacy-siege-60s.mp4 [--voiceover vo.mp3 | --tts] [--layout doc] [--no-code]
+    --out ~/projects/legacy-siege-media/legacy-siege-60s.mp4 [--voiceover vo.mp3 | --tts] [--at BEAT=A-B] [--no-code]
 ```
 
 - Output goes to `~/projects/legacy-siege-media/` (not the repo): `raw-<ts>.webm` (1920×1080) and

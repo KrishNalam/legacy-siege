@@ -3,14 +3,21 @@
     python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json
     python -m scripts.cut_video beats.json --out legacy-siege-60s.mp4 --voiceover vo.mp3
     python -m scripts.cut_video beats.json --print-plan          # show the source windows / speeds, cut nothing
-    python -m scripts.cut_video beats.json --layout doc          # the design doc's cut (see plan())
+    python -m scripts.cut_video beats.json --layout brief        # the older 7-segment cut (also: doc)
+    python -m scripts.cut_video beats.json --at red_freeze=212-220   # point a beat at a raw-video window
     python -m scripts.cut_video beats.json --tts                 # offline narration from docs/video-script.md
     python -m scripts.cut_video beats.json --no-code             # skip the CODE segment
 
 Needs a full ffmpeg on PATH (libx264, drawtext, aac). Each beat's source window is sped up (setpts) to fit
 its slot, so waiting stretches go fast but nothing is dropped. Captions name the mechanism on screen.
 
-CODE segment (default on, `--no-code` to drop): 9 s of syntax-highlighted code cards (scripts/code_cards.py,
+Layouts: "script" (default) follows docs/video-script.md, 10 segments
+hook/cascade/ai/lie/kill/code/learn/drift/red/garden = 5/5/9/5/6/8/6/5/6/5 s; "brief" and "doc" are the
+older 7-segment cuts. A beat the recording has no event for (Claude's card needs AI_DRIVES, the drift beat
+`record_demo --drift`, the FREEZE beat RED_FLEET=1) falls back to a fixed window around another beat with a
+plainer caption (marked "fallback" in the plan); `--at BEAT=START-END` points it at real footage instead.
+
+CODE segment (default on, `--no-code` to drop): 8 s (9 s in the old layouts) of syntax-highlighted code cards (scripts/code_cards.py,
 Pillow is fetched with `uv run --no-project --with pillow` if the venv has none) between the kill and the
 learning beats, because the rules want the video to show the code as well as the functionality. The other
 beats give up their seconds, so the total stays exactly --length.
@@ -42,7 +49,22 @@ GREEN = "0x00ED64"
 FPS = 30
 KEEP_TAIL = 1.5   # a beat's key moment sits at least this long before its t_end (see record_demo.derive_beats)
 MIN_SPEED = 0.85  # slowest playback allowed; below it a beat's slot shrinks instead
-CODE_S = 9.0      # length of the CODE segment
+CODE_S = 9.0      # length of the CODE segment in the old layouts (brief, doc)
+SCRIPT_CODE_S = 8.0  # ... and in the default "script" layout (docs/video-script.md, 30–38 s)
+LAYOUTS = ("script", "brief", "doc")
+# beat -> fallback when the log has no such beat: (anchor beat, "start"|"end", from, to (s around the edge), caption)
+FALLBACK = {
+    "ai_checked": ("cascade_trace", "end", -3.0, 6.0,
+                   "Claude diagnoses and proposes the fix; the P1–P6 safety checks decide whether it runs"),
+    "schema_drift": ("night2_resolved", "end", 0.0, 6.0,  # the green estate after round 2 (unused in "script")
+                     "Schema drift: a renamed feed field is diffed in MongoDB, mapped, verified, remembered"),
+    "red_freeze": ("kill_takeover", "end", -8.0, -1.0,
+                   "Red strikers observe → think → strike → reflect; a frozen agent's lease expires, a Nurse takes over"),
+}
+
+
+def code_s(layout: str) -> float:
+    return SCRIPT_CODE_S if layout == "script" else CODE_S
 VO_LEAD = 0.3     # narration starts this long after its segment does
 
 
@@ -53,13 +75,39 @@ def fmt_s(v) -> str:
         return "?"
 
 
-def plan(log: dict, layout: str = "brief", cards: list[dict] | None = None) -> list[dict]:
+def _beat(log: dict, name: str) -> dict:
+    return next((b for b in log.get("beats") or [] if b["name"] == name), {})
+
+
+def script_captions(log: dict) -> dict[str, str]:
+    """Captions for the "script" layout, with the take's own numbers where the beat log carries them."""
+    ai, ov = _beat(log, "ai_checked"), _beat(log, "ai_overruled")
+    dr, ru, red = _beat(log, "schema_drift"), _beat(log, "drift_reused"), _beat(log, "red_freeze")
+    rule = f"{ov.get('op') or 'unsafe op'} → {ov.get('rule') or 'P3 blast radius'}"
+    field = f"{dr.get('from') or 'balance'} → {dr.get('to') or 'acct_bal'}"
+    who, victim = red.get("by") or "Red striker", red.get("agent") or "a worker"
+    took = f" in {fmt_s(red['takeover_s'])}" if red.get("takeover_s") is not None else ""
+    return {
+        "hook2": "12 AI agents defend a legacy bank. AI attackers try to break it.",
+        "ai": ("Claude's plan passed P1–P6 → CLAUDE'S PLAN RUNS" if ai.get("decision") == "ai_plan"
+               else "Claude ranks hypotheses + proposes a plan; P1–P6 safety checks judge every op"),
+        "overruled": f"Unsafe idea overruled: {rule}",
+        "drift": f"unix feed schema changed: {field} → MAPPING LEARNED"
+                 + (f" (v{dr['version']})" if dr.get("version") else ""),
+        "reused": "Same change again → MAPPING REUSED from MongoDB, no Claude call",
+        "red": f"{who} FREEZEs {victim} → its lease expires → a Nurse takes over{took}",
+    }
+
+
+def plan(log: dict, layout: str = "script", cards: list[dict] | None = None) -> list[dict]:
     """The edit: segments of (slot seconds, kicker, [pieces]); each piece = (beat name, seconds, caption).
 
-    `cards` = the usable code cards (code_cards.usable()); with any, a CODE segment of CODE_S seconds is
-    inserted after the kill and the other beats shrink so the total stays 60 s (else the old timings):
-      layout "brief" (default), hook/cascade/lie/kill/code/learn/garden = 7/8/9/9/9/9/9 s (was 7/10/9/10/-/12/12),
-                  ends on night 3 + the Atlas view (matches docs/video-script.md).
+    `cards` = the usable code cards (code_cards.usable()); with any, a CODE segment of code_s(layout) seconds
+    is inserted after the kill and the other beats shrink so the total stays 60 s (else the old timings):
+      layout "script" (default): docs/video-script.md, hook/cascade/ai/lie/kill/code/learn/drift/red/garden =
+                  5/5/9/5/6/8/6/5/6/5 s (without code 6/6/10/6/7/-/7/6/7/5).
+      layout "brief": hook/cascade/lie/kill/code/learn/garden = 7/8/9/9/9/9/9 s (was 7/10/9/10/-/12/12),
+                  ends on night 3 + the Atlas view (the cut before the 10-beat script).
       layout "doc": the design doc's cut, 5/12/8/11/9/9/6 s (was 5/15/10/15/-/10/5).
     A "card:<key>" piece is a code card, not footage.
     """
@@ -82,10 +130,29 @@ def plan(log: dict, layout: str = "brief", cards: list[dict] | None = None) -> l
     def t(with_code: float, without: float) -> float:
         return with_code if code else without
 
+    cs = code_s(layout)
     seg_code = ([{"key": "code", "kicker": "UNDER THE HOOD · THE REAL CODE",
-                  "pieces": [(f"card:{c['key']}", round(CODE_S / len(cards), 3), c["caption"]) for c in cards]}]
+                  "pieces": [(f"card:{c['key']}", round(cs / len(cards), 3), c["caption"]) for c in cards]}]
                 if code else [])
     hook = {"key": "hook", "kicker": "LEGACY SIEGE · MONGODB IS THE SPINE", "title": True}
+    if layout == "script":
+        cap.update(script_captions(log))
+        return [
+            {**hook, "pieces": [("night1_attack", t(5.0, 6.0), cap["hook2"])]},
+            {"key": "cascade", "kicker": "1 · CASCADE", "pieces": [("cascade_trace", t(5.0, 6.0), cap["cascade"])]},
+            {"key": "ai", "kicker": "2 · CLAUDE, CHECKED", "pieces": [
+                ("ai_checked", t(5.5, 6.0), cap["ai"]), ("ai_overruled", t(3.5, 4.0), cap["overruled"])]},
+            {"key": "lie", "kicker": "3 · THE LYING SYSTEM", "pieces": [("lie_caught", t(5.0, 6.0), cap["lie"])]},
+            {"key": "kill", "kicker": "4 · REAL SIGKILL", "pieces": [("kill_takeover", t(6.0, 7.0), cap["kill"])]},
+            *seg_code,
+            {"key": "learn", "kicker": "5 · THE HIVE LEARNS", "pieces": [
+                ("night2_recall", t(4.5, 5.0), learn), ("night2_resolved", t(1.5, 2.0), learn)]},
+            {"key": "drift", "kicker": "6 · SCHEMA DRIFT", "pieces": [
+                ("schema_drift", t(3.0, 3.5), cap["drift"]), ("drift_reused", t(2.0, 2.5), cap["reused"])]},
+            {"key": "red", "kicker": "7 · RED FLEET", "pieces": [("red_freeze", t(6.0, 7.0), cap["red"])]},
+            {"key": "garden", "kicker": "MONGODB IS THE HIVE'S MEMORY", "pieces": [
+                ("night3", 2.0, "Every frame is a MongoDB change stream"), ("atlas", 3.0, cap["atlas"])]},
+        ]
     if layout == "doc":
         return [
             {**hook, "pieces": [("night1_attack", 5.0, cap["hook"])]},
@@ -115,24 +182,53 @@ def plan(log: dict, layout: str = "brief", cards: list[dict] | None = None) -> l
     ]
 
 
-def resolve(log: dict, total: float, layout: str = "brief", cards: list[dict] | None = None) -> list[dict]:
-    """Map pieces to source windows; missing beats give their seconds to the rest, scaled to `total`.
-    Code cards keep their seconds; only the footage pieces are scaled and retimed."""
+def window(beats: dict, name: str, dur: float) -> tuple[float, float, str] | None:
+    """Fallback source window for a beat the log lacks: (a, b, caption) around its anchor beat, else None."""
+    fb = FALLBACK.get(name)
+    anchor = fb and beats.get(fb[0])
+    if not anchor:
+        return None
+    edge = anchor["t_start"] if fb[1] == "start" else anchor["t_end"]
+    a, b = max(0.0, edge + fb[2]), min(dur, edge + fb[3])
+    return (round(a, 2), round(b, 2), fb[4]) if b - a >= 1.0 else None
+
+
+def resolve(log: dict, total: float, layout: str = "script", cards: list[dict] | None = None,
+            at: dict[str, tuple[float, float]] | None = None) -> list[dict]:
+    """Map pieces to source windows, scaled to `total`. Code cards keep their seconds; only the footage pieces
+    are scaled and retimed. `at` = {beat: (start, end)} overrides the log. A missing beat uses its FALLBACK
+    window (caption marked as such); without one its seconds go to the segment's other pieces, and a segment
+    with no footage at all gives its seconds to the rest of the cut."""
     beats = {b["name"]: b for b in log["beats"]}
+    for name, (a, b) in (at or {}).items():
+        beats[name] = {**beats.get(name, {}), "name": name, "t_start": a, "t_end": b, "override": True}
     dur = float(log.get("video_duration_s") or 1e9)
     pieces = []
     for seg in plan(log, layout, cards):
+        spare, mine = 0.0, []
         for i, (name, secs, cap) in enumerate(seg["pieces"]):
             if name.startswith("card:"):
                 pieces.append({"seg": seg["key"], "kicker": seg["kicker"], "title": False, "beat": name,
                                "card": name[5:], "slot": secs, "caption": cap, "speed": 1.0})
                 continue
             b = beats.get(name)
-            if not b:
+            fallback = False
+            if b:
+                a0, b0 = b["t_start"], b["t_end"]
+            elif (w := window(beats, name, dur)):
+                a0, b0, cap = w
+                fallback = True
+                print(f"  ! beat '{name}' missing from the log, fallback window {a0:.1f}-{b0:.1f} s", file=sys.stderr)
+            else:
                 print(f"  ! beat '{name}' missing from the log, skipped", file=sys.stderr)
+                spare += secs
                 continue
-            pieces.append({"seg": seg["key"], "kicker": seg["kicker"], "title": seg.get("title") and i == 0,
-                           "beat": name, "slot": secs, "caption": cap, "a": b["t_start"], "b": b["t_end"]})
+            mine.append({"seg": seg["key"], "kicker": seg["kicker"], "title": bool(seg.get("title") and i == 0),
+                         "beat": name, "slot": secs, "caption": cap, "a": a0, "b": b0, "fallback": fallback})
+        if mine and spare:  # keep the segment (and its narration) on the script's timeline
+            for p in mine:
+                p["slot"] += spare * p["slot"] / sum(q["slot"] for q in mine)
+        pieces += mine
     everything, pieces = pieces, [p for p in pieces if "card" not in p]
     scale = (total - sum(p["slot"] for p in everything if "card" in p)) / sum(p["slot"] for p in pieces)
     for p in pieces:
@@ -238,6 +334,21 @@ def esc(path: Path) -> str:
     return str(path).replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
 
 
+def parse_at(specs: list[str]) -> dict[str, tuple[float, float]]:
+    """--at BEAT=START-END (seconds into the raw video) -> {beat: (start, end)}."""
+    out = {}
+    for spec in specs or []:
+        try:
+            name, rng = spec.split("=", 1)
+            a, b = (float(x) for x in rng.split("-", 1))
+        except ValueError:
+            raise SystemExit(f"--at {spec!r}: expected BEAT=START-END, e.g. red_freeze=212.5-220") from None
+        if b <= a:
+            raise SystemExit(f"--at {spec!r}: END must be after START")
+        out[name.strip()] = (a, b)
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("beats", type=Path, help="beats-<ts>.json written by scripts.record_demo")
@@ -248,11 +359,14 @@ def main() -> int:
                     help="no recording? narrate docs/video-script.md with an offline TTS engine (ignored with --voiceover)")
     ap.add_argument("--tts-engine", choices=narration.ENGINES, help="default: piper, else espeak, else flite")
     ap.add_argument("--code", action=argparse.BooleanOptionalAction, default=True,
-                    help="9 s of code cards (swarm/leases.py, verify.py, schema.py) after the kill beat (default on)")
+                    help="8 s (old layouts 9 s) of code cards (swarm/leases.py, verify.py, schema.py) after the kill")
     ap.add_argument("--vo-gain", type=float, default=1.0)
     ap.add_argument("--length", type=float, default=60.0)
-    ap.add_argument("--layout", choices=["brief", "doc"], default="brief",
-                    help="brief: 7/8/9/9/9/9/9 s with the code segment, ends on Atlas (default); doc: the design doc's cut")
+    ap.add_argument("--layout", choices=LAYOUTS, default="script",
+                    help="script: docs/video-script.md, 10 segments (default); brief: the older 7/8/9/9/9/9/9 s cut, "
+                         "ends on Atlas; doc: the design doc's cut")
+    ap.add_argument("--at", action="append", metavar="BEAT=START-END",
+                    help="use this raw-video window for a beat (repeatable), e.g. a FREEZE the monitor missed")
     ap.add_argument("--crf", type=int, default=20)
     ap.add_argument("--print-plan", action="store_true")
     a = ap.parse_args()
@@ -264,13 +378,14 @@ def main() -> int:
     cards = code_cards.usable() if a.code else []
     if a.code and not cards:
         print("  ! no code card source found, cutting without the code segment", file=sys.stderr)
-    pieces = resolve(log, a.length, a.layout, cards)
+    pieces = resolve(log, a.length, a.layout, cards, parse_at(a.at))
     t = 0.0
     for p in pieces:
         p["at"] = round(t, 3)
         t += p["slot"]
         src = "code card".ljust(24) if "card" in p else f"src {p['a']:7.1f}-{p['b']:7.1f}  ×{p['speed']:<5}"
-        print(f"  {p['at']:5.1f}-{t:5.1f}s  {p['beat']:<16} {src}  {p['caption']}")
+        mark = "  (fallback)" if p.get("fallback") else ""
+        print(f"  {p['at']:5.1f}-{t:5.1f}s  {p['beat']:<16} {src}  {p['caption']}{mark}")
     if a.print_plan:
         return 0
     with tempfile.TemporaryDirectory(prefix="cut-", dir=out.parent) as td:

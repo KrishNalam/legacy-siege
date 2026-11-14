@@ -3,6 +3,7 @@
     .venv/bin/python -m scripts.record_demo                       # → ~/projects/legacy-siege-media/raw-<ts>.webm + beats-<ts>.json
     .venv/bin/python -m scripts.record_demo --base http://127.0.0.1:8770 --out /some/dir
     .venv/bin/python -m scripts.record_demo --keep                # leave the upgraded estate on screen afterwards
+    .venv/bin/python -m scripts.record_demo --drift               # + one schema-drift round before the Atlas view
 
 The stack must already be running (`run.py`), and MONGODB_URI / WORLD_DB / SWARM_DB must point at the same
 databases as that stack (the beat monitor reads MongoDB directly, exactly like scripts.demo_check).
@@ -13,6 +14,13 @@ Night 2 → Approve ×2 → Night 3), opens the Atlas view, and closes the brows
 as usual, so the beat log also says whether the take is a valid demo. A monitor thread polls MongoDB
 every 0.25 s and timestamps each moment (cascade, diagnosis, ACK ≠ APPLIED, SIGKILL, handoff, recall,
 upgrade deployed / proven …). All times in the beat log are seconds into the raw video.
+
+Beats for the 10-beat script (docs/video-script.md), stamped whenever the stack produces them:
+  ai_checked / ai_overruled  incident.ai (kind second_opinion) decided: Claude's plan runs / an op overruled (AI_DRIVES)
+  schema_drift / drift_reused  sentinel "feed schema changed" → schema_mappings history entry (new / reused);
+                             `--drift` plays bank-drift after night 3 so the take has one
+  red_freeze                 a chaos_events agent_freeze fired by a red-* striker → the next Nurse handoff (RED_FLEET=1)
+Missing ones are cut from a fallback window (scripts.cut_video FALLBACK) or pointed at by hand with --at.
 
 Then cut it: `.venv/bin/python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json`.
 """
@@ -32,6 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # also runnable as a plain script
 from common import config  # noqa: E402
+from scripts.beatlog import script_beats  # noqa: E402
 from scripts.demo_check import Demo, Report, log  # noqa: E402
 
 MEDIA = Path.home() / "projects" / "legacy-siege-media"
@@ -76,6 +85,7 @@ class Monitor(threading.Thread):
         self.d, self.c = demo, clock
         self.stop = threading.Event()
         self.run_id: str | None = None
+        self.since = datetime.now(timezone.utc)  # ignore thoughts / mappings older than the take
 
     def run(self) -> None:
         while not self.stop.is_set():
@@ -127,6 +137,46 @@ class Monitor(threading.Thread):
                 c.event("approval_decided", once=f"dec:{apr['_id']}", id=apr["_id"], kind=apr.get("kind"))
         for u in s.upgrade_requests.find({}, {"status": 1}):
             c.event(f"upgrade_{u['status']}", once=f"upg:{u['_id']}:{u['status']}", id=u["_id"])
+        self.poll_script_beats()
+
+    def poll_script_beats(self) -> None:
+        """Run-independent moments for the 10-beat script: Claude's checked plan, schema drift, Red FREEZE."""
+        s, w, c = self.d.s, self.d.w, self.c
+        for inc in s.incidents.find({"ai.kind": "second_opinion", "ai.status": {"$in": ["thinking", "done"]}},
+                                    {"run_id": 1, "ai.status": 1, "ai.decision": 1, "ai.decision_reason": 1,
+                                     "ai.verdicts": 1}):
+            ai, iid = inc["ai"], inc["_id"]
+            c.event("ai_thinking", once=f"ai:{iid}", incident=iid, run=inc.get("run_id"))
+            if ai.get("status") == "done" and ai.get("decision"):
+                bad = [v for v in ai.get("verdicts") or [] if v.get("verdict") != "accepted"]
+                c.event("ai_decided", once=f"aid:{iid}", incident=iid, run=inc.get("run_id"),
+                        decision=ai["decision"], reason=(ai.get("decision_reason") or "")[:120])
+                if bad:
+                    c.event("ai_overruled", once=f"aio:{iid}", incident=iid, op=bad[0].get("op"),
+                            target=bad[0].get("target"), rule=bad[0].get("rule"))
+        for th in s.thoughts.find({"agent": {"$regex": "^sentinel"}, "text": {"$regex": "feed schema changed"},
+                                   "ts": {"$gt": self.since}}, {"text": 1}):
+            c.event("drift_noticed", once=f"drift:{th['_id']}", text=th["text"][:120])
+        for m in s.schema_mappings.find({}, {"history": 1}):
+            for h in m.get("history") or []:
+                ts = h.get("ts")
+                if ts and (ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)) > self.since:
+                    c.event("mapping_reused" if h.get("reused") else "mapping_learned",
+                            once=f"map:{m['_id']}:{h.get('version')}:{ts}", frm=h.get("from"), to=h.get("to"),
+                            version=h.get("version"), incident=h.get("incident"))
+        for ev in w.chaos_events.find({"fault": "agent_freeze"}, {"status": 1, "result": 1, "by": 1, "who": 1}):
+            by = ev.get("by") or ev.get("who")
+            c.event("red_freeze", once=f"frz:{ev['_id']}", id=ev["_id"], by=by)
+            if ev.get("status") in ("ok", "failed"):
+                c.event("red_thaw", once=f"thaw:{ev['_id']}", id=ev["_id"], by=by, ok=ev["status"] == "ok",
+                        agent=(ev.get("result") or {}).get("agent"))
+        for th in s.thoughts.find({"agent": {"$regex": "^red-"}, "text": {"$regex": " REFLECT "},
+                                   "ts": {"$gt": self.since}}, {"agent": 1}):
+            c.event("red_reflect", once=f"rr:{th['_id']}", agent=th["agent"])
+        for inc in s.incidents.find({"handoffs.0": {"$exists": True}}, {"handoffs": 1}):
+            for i, h in enumerate(inc["handoffs"]):
+                c.event("takeover", once=f"to:{inc['_id']}:{i}", incident=inc["_id"], frm=h.get("from"),
+                        to=h.get("to"), takeover_s=h.get("takeover_s"))
 
 
 class RecDemo(Demo):
@@ -156,6 +206,19 @@ class RecDemo(Demo):
         self.clock.event("night_start", scenario="bank-night-3")
         super().night3(watch_s)
         self.clock.event("night_end", scenario="bank-night-3")
+
+    def drift(self, timeout: float) -> bool:
+        """One schema-drift round (bank-drift: unix renames balance → acct_bal) for the drift beat. Not one of
+        demo_check's scored beats, so it only logs; scripts.drift_check is the real check."""
+        self.clock.event("night_start", scenario="bank-drift")
+        self.wait("good sample", lambda: self.s.schema_samples.find_one({"_id": "good:unix:xfer_manifest"}), 30)
+        started = datetime.now(timezone.utc)
+        self.post("/api/scenario/bank-drift")
+        inc, secs = self.wait("drift resolved", lambda: self.s.incidents.find_one(
+            {"fault_class": "schema_drift", "active": False, "opened_at": {"$gt": started}}), timeout)
+        log(f"drift round: {inc and inc['_id']} {inc and inc.get('status')} after {secs:.0f}s")
+        self.clock.event("night_end", scenario="bank-drift")
+        return bool(inc)
 
 
 # ---------------------------------------------------------------------------------------------- beats
@@ -200,6 +263,7 @@ def derive_beats(events: list[dict], offset: float) -> list[dict]:
         t(first("upgrade_proven"), 2) or t(first("upgrade_deployed"), 6))
     add("night3", t(n3), t(n3_end))
     add("atlas", t(first("atlas_open")), t(first("atlas_close")))
+    beats += script_beats(events, t)
     beats.sort(key=lambda b: b["t_start"])
     return beats
 
@@ -227,6 +291,8 @@ def main() -> int:
     ap.add_argument("--atlas-s", type=float, default=9, help="seconds on the Atlas view")
     ap.add_argument("--no-reset", action="store_true")
     ap.add_argument("--keep", action="store_true", help="don't full-reset (Gardener revert) after recording")
+    ap.add_argument("--drift", action="store_true",
+                    help="after night 3, play bank-drift once so the take has the schema-drift beat")
     a = ap.parse_args()
 
     from playwright.sync_api import sync_playwright
@@ -263,6 +329,8 @@ def main() -> int:
                     if n2 and d.gardener(a.night_timeout):
                         d.night3(a.night3_watch)
                         ok = True
+                        if a.drift:
+                            d.drift(a.night_timeout)
             page.wait_for_timeout(1500)
             clock.event("atlas_open")
             page.click("#btn-atlas")
