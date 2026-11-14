@@ -256,19 +256,29 @@ def build_graph(agent: Agent):
                 raw = policy.fix_plan(state["fault_class"], state.get("params") or {})
             if not raw:
                 return escalate(config, inc_id, f"no fix plan for {state['fault_class']}")
+            drove = None
+            if not state.get("hit") and second_opinion.drives():
+                # AI_DRIVES: Claude reasons over the evidence; its plan runs only if it passes every guardrail.
+                # (A usable recall hit skips this: a fresh playbook already says what to do.)
+                drove = second_opinion.decide(agent.id, inc, state, raw, state["root"], state["fault_class"],
+                                              say=lambda t: say(inc_id, t, system=state["root"], pause=False))
+                raw = drove["plan"]
             plan_steps = [{
                 "step_id": f"{inc_id}-s{i}", "n": i, "desc": s["desc"], "system": s["system"], "op": s["op"],
                 "params": s["params"], "destructive": bool(s["destructive"] or (s["system"], s["op"]) in policy.DESTRUCTIVE),
                 "task_id": None, "status": "planned", "action_id": None, "attempts": [], "agent": None,
-                "evidence": None, "approval_id": None, "ts": now()} for i, s in enumerate(raw, 1)]
+                "evidence": None, "approval_id": None, "ts": now(), "source": s.get("source", "policy"),
+                **({"ai_why": s["ai_why"]} if s.get("ai_why") else {})} for i, s in enumerate(raw, 1)]
             fenced(config, inc_id, {"$set": {
                 "steps": plan_steps, "status": "fixing", "root_cause_system": state["root"],
                 "fault_class": state["fault_class"], "root_cause": state.get("root_cause"),
                 "metrics.diagnosis_s": state.get("diag_s", 0.0), "metrics.hops": len(state.get("path") or [])}})
             # Claude's independent second opinion, judged against this plan in a background thread (never awaited)
-            second_opinion.start(agent.id, inc, state, plan_steps, state["root"], state["fault_class"])
+            if drove is None:
+                second_opinion.start(agent.id, inc, state, plan_steps, state["root"], state["fault_class"])
             desc = "; ".join(f"{s['op']}{' (needs approval)' if s['destructive'] else ''}" for s in plan_steps)
-            say(inc_id, f"Plan, {len(plan_steps)} steps: {desc}.", system=state["root"])
+            who = "Claude's plan" if drove and drove["decision"] == "ai_plan" else "Plan"
+            say(inc_id, f"{who}, {len(plan_steps)} steps: {desc}.", system=state["root"])
         return {}
 
     def next_group(st: list[dict]) -> list[dict]:
@@ -474,6 +484,7 @@ def drive(agent: Agent, graph, inc_id: str, generation: int) -> dict | None:
 
 def run(agent: Agent) -> None:
     graph = build_graph(agent)
+    second_opinion.prewarm()  # no-op unless an AI switch is on and a key is set
     def tick():
         # Take an incident the queen assigned to me — or any unassigned one if the queen is slow/absent.
         inc = leases.claim(col("incidents"), {

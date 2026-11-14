@@ -64,20 +64,38 @@ PREREQ_WHY = {
 SYSTEM_PROMPT = (
     "You are the on-call SRE lead for a bank's legacy estate (mainframe -> unix middleware -> web portal; each "
     "system depends on the one before it). Customers are seeing wrong balances right now and leadership wants them "
-    "fixed as fast as possible. From the numbered evidence only, give the root cause and the FASTEST recovery plan "
-    "you believe is safe, in order, using only ops from the catalog. Cite the evidence ids you rely on. Be terse: "
-    "hypothesis is one sentence under 30 words; each 'why' under 12 words; at most 6 ops; confidence 0 to 1.")
+    "fixed as fast as possible. Reason from the numbered evidence only: rank 2 root-cause hypotheses (most likely "
+    "first, each with its supporting evidence ids and why), choose the root system, then give the FASTEST recovery "
+    "plan you believe is safe, in order, using only ops from the catalog. Cite the evidence ids you rely on. Be very "
+    "terse: every why under 10 words; hypothesis under 20 words; at most 6 ops; confidence 0-1.")
 
 
 def enabled() -> bool:
+    """Background second opinion (advisory)."""
     return config.AI_SECOND_OPINION and llm.llm_available()
+
+
+def drives() -> bool:
+    """Claude's validated plan runs (synchronous, at plan time)."""
+    return config.AI_DRIVES and llm.llm_available()
+
+
+def prewarm() -> None:
+    if enabled() or drives():
+        llm.prewarm()
 
 
 def _schema() -> dict:
     return {
         "type": "object", "additionalProperties": False,
-        "required": ["root_system", "fault_class", "hypothesis", "cites", "confidence", "proposed_ops"],
+        "required": ["hypotheses", "root_system", "fault_class", "hypothesis", "cites", "confidence", "proposed_ops"],
         "properties": {
+            "hypotheses": {"type": "array", "items": {
+                "type": "object", "additionalProperties": False, "required": ["system", "fault_class", "evidence", "why"],
+                "properties": {"system": {"type": "string", "enum": list(config.SYSTEM_IDS)},
+                               "fault_class": {"type": "string", "enum": sorted(policy.WEAKNESS) + ["other"]},
+                               "evidence": {"type": "array", "items": {"type": "string"}},
+                               "why": {"type": "string"}}}},
             "root_system": {"type": "string", "enum": list(config.SYSTEM_IDS)},
             "fault_class": {"type": "string", "enum": sorted(policy.WEAKNESS) + ["other"]},
             "hypothesis": {"type": "string"},
@@ -126,12 +144,13 @@ def build_prompt(ev: dict, evidence: list[dict], catalog: dict) -> str:
     lines = ["EVIDENCE"]
     if ev["affected"]:
         lines.append(f"(affected systems: {', '.join(ev['affected'])}; examined: {' -> '.join(ev['path']) or 'none'})")
-    lines += [f"{e['id']} [{e['src']}] {e['text']}" for e in evidence]
+    lines += [f"{e['id']} {llm.fence(e['src'], e['text'], 160)}" for e in evidence]  # system text = data
     lines.append("\nOPS CATALOG (target.op {params} — description)")
     for sys in config.SYSTEM_IDS:
         for o in catalog.get(sys) or []:
-            p = ", ".join(f"{k}={v}" for k, v in (o.get("params") or {}).items())
-            lines.append(f"- {sys}.{o['op']} {{{p}}} — {str(o.get('desc') or '')[:90]}"
+            op = llm.clean(o.get("op"), 40)
+            p = llm.clean(", ".join(f"{k}={v}" for k, v in (o.get("params") or {}).items()), 80)
+            lines.append(f"- {sys}.{op} {{{p}}} — {llm.fence(sys + ' ops', o.get('desc') or '', 90)}"
                          + (" [DESTRUCTIVE]" if o.get("destructive") else ""))
     return "\n".join(lines)
 
@@ -170,7 +189,14 @@ def normalize(out: dict, evidence_ids: set[str] | None = None) -> dict:
     cites = [str(c).strip().upper() for c in out.get("cites") or [] if str(c).strip()]
     if evidence_ids is not None:  # a cite must point at a line we actually showed
         cites = [c for c in cites if c in evidence_ids]
-    return {"root_system": _norm(out.get("root_system")), "fault_class": _norm(out.get("fault_class")),
+    hyps = []
+    for h in (out.get("hypotheses") or [])[:3]:
+        if isinstance(h, dict):
+            ev = [str(c).strip().upper() for c in h.get("evidence") or []]
+            hyps.append({"system": _norm(h.get("system")), "fault_class": _norm(h.get("fault_class")),
+                         "evidence": [c for c in ev if evidence_ids is None or c in evidence_ids][:5],
+                         "why": str(h.get("why") or "").strip()[:160]})
+    return {"hypotheses": hyps, "root_system": _norm(out.get("root_system")), "fault_class": _norm(out.get("fault_class")),
             "hypothesis": str(out.get("hypothesis") or "").strip()[:300], "confidence": conf,
             "cites": list(dict.fromkeys(cites))[:8], "ops": ops}
 
@@ -319,9 +345,140 @@ def bump_tally(verdicts: list[dict]) -> dict:
     return {k: int(doc.get(k) or 0) for k in ("proposed", "accepted", "overruled", "incidents")}
 
 
-# ---------------------------------------------------------------------------------------------- thread
+# ---------------------------------------------------------------------------------------------- consult
+def _gather(left) -> tuple[dict, dict, dict]:
+    """Ops catalog, read-backs and recent logs per system, within the time left (fallbacks on any error)."""
+    catalog, readback, logs = {}, {}, {}
+    sysc = Systems(timeout=1.5)
+    try:
+        for s in config.SYSTEM_IDS:
+            fast = left() > 2.5
+            for name, fn, fallback in (("ops", sysc.ops, static_catalog()[s]), ("state", sysc.state, None),
+                                       ("logs", lambda x: sysc.logs(x, limit=LOG_LINES), [])):
+                try:
+                    val = fn(s) if fast else fallback
+                except Exception:
+                    val = fallback
+                {"ops": catalog, "state": readback, "logs": logs}[name][s] = val or fallback
+    finally:
+        sysc.close()
+    return catalog, readback, logs
+
+
+def consult(ev: dict, plan: list[dict], root: str, fault_class: str, budget_s: float, llm_timeout: float,
+            task: str) -> dict:
+    """Evidence snapshot → guarded Claude call → judge. Returns the `ai` fields (status done|offline)."""
+    t0 = time.monotonic()
+    left = lambda: budget_s - (time.monotonic() - t0)  # noqa: E731
+    catalog, readback, logs = _gather(left)
+    evidence_at = now()
+    evidence = number_evidence(ev, logs)
+    out, meta = llm.guarded_json(task, SYSTEM_PROMPT, build_prompt(ev, evidence, catalog), _schema(),
+                                 max_tokens=1100, timeout=max(0.5, min(llm_timeout, left())))
+    latency = int((time.monotonic() - t0) * 1000)
+    if out is None:
+        return {"status": "offline", "latency_ms": latency, "guard": meta["outcome"],
+                "error": {"timeout": f"no answer within {llm_timeout:.1f}s", "schema": "answer failed schema validation",
+                          "bad_json": "answer was not valid JSON", "refusal": "model declined",
+                          "truncated": "answer was cut off"}.get(meta["outcome"], "LLM call failed")}
+    prop = normalize(out, {e["id"] for e in evidence})
+    verdict = judge(prop, plan, root, fault_class, readback)
+    cited = set(prop["cites"]) | {c for h in prop["hypotheses"] for c in h["evidence"]}
+    return {"status": "done", "guard": "ok", "hypothesis": prop["hypothesis"], "hypotheses": prop["hypotheses"],
+            "cites": prop["cites"], "confidence": prop["confidence"], "latency_ms": latency,
+            "proposed_ops": [{k: o[k] for k in ("op", "target", "params", "risk", "why")} for o in prop["ops"]],
+            **verdict, "root_system": prop["root_system"], "fault_class": prop["fault_class"],
+            "policy": {"root_system": root, "fault_class": fault_class},
+            "evidence": [e for e in evidence if e["id"] in cited], "evidence_at": evidence_at, "done_at": now()}
+
+
+def _finish(agent_id: str, inc_id: str, mine: dict, ai: dict) -> dict | None:
+    """Store the verdict, bump the tally (+ LLM fallbacks), return the stored doc or None if superseded."""
+    if col("incidents").update_one(mine, {"$set": {"ai": ai}}).matched_count != 1:
+        return None
+    try:
+        tally = bump_tally(ai.get("verdicts") or []) if ai["status"] == "done" else None
+        g = col("stats").find_one({"_id": "llm_guard"}) or {}
+        allc = g.get("all") or {}
+        tally = {**(tally or {k: 0 for k in ("proposed", "accepted", "overruled", "incidents")}),
+                 "llm_calls": int(allc.get("calls") or 0),
+                 "llm_fallbacks": int(sum(v for k, v in allc.items() if k not in ("ok", "calls")))}
+        col("incidents").update_one(mine, {"$set": {"ai.tally": tally}})
+        ai["tally"] = tally
+    except Exception:
+        pass
+    return ai
+
+
+# ---------------------------------------------------------------------------------------------- AI drives
+def hypothesis_lines(ai: dict) -> list[str]:
+    out = []
+    for n, h in enumerate(ai.get("hypotheses") or [], 1):
+        cites = f" [{', '.join(h['evidence'])}]" if h.get("evidence") else ""
+        out.append(f"Claude H{n}{' (most likely)' if n == 1 else ''}: {h['system']}/{h['fault_class']} — {h['why']}{cites}")
+    return out
+
+
+def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: str, fault_class: str,
+           say=lambda text: None) -> dict:
+    """AI_DRIVES: ask Claude synchronously (hard cap AI_DRIVE_TIMEOUT_S). If its plan passes every guardrail it
+    is the plan that runs; otherwise the rules plan runs and `ai.decision_reason` says why. Never raises.
+    Returns {"plan": [steps for the scout], "decision": "ai_plan"|"rules_plan", "reason": str}."""
+    rules = [dict(s, source="policy") for s in rules_plan]
+    try:
+        inc_id, opened_at = inc["_id"], inc["opened_at"]
+        rid = uuid.uuid4().hex[:12]
+        base = {"kind": KIND, "model": config.LLM_MODEL, "request_id": rid, "started_at": now(), "drives": True}
+        col("incidents").update_one({"_id": inc_id, "opened_at": opened_at},
+                                    {"$set": {"ai": {**base, "status": "thinking"}}})
+        mine = {"_id": inc_id, "opened_at": opened_at, "ai.request_id": rid}
+        say(f"Asking Claude to reason over the evidence (hard limit {config.AI_DRIVE_TIMEOUT_S:.1f}s); "
+            f"its plan runs only if it passes every guardrail.")
+        plan_n = [dict(s, n=i) for i, s in enumerate(rules_plan, 1)]
+        with pymongo.timeout(config.AI_DRIVE_TIMEOUT_S + 5):
+            ai = {**base, **consult(findings_of(inc, state), plan_n, root, fault_class,
+                                    budget_s=config.AI_DRIVE_TIMEOUT_S + 1.0, llm_timeout=config.AI_DRIVE_TIMEOUT_S,
+                                    task="ai_drive")}
+        if ai["status"] != "done":
+            decision, reason = "rules_plan", f"Claude unavailable ({ai['error']}); rules plan runs"
+        else:
+            for line in hypothesis_lines(ai):
+                say(line)
+            ops = " → ".join(f"{o['op']}@{o['target']}" for o in ai["proposed_ops"]) or "nothing"
+            say(f"Claude proposes: {ops} (confidence {ai['confidence'] if ai['confidence'] is not None else '?'})")
+            bad = [v for v in ai["verdicts"] if v["verdict"] != "accepted"]
+            if not ai["root_agrees"]:
+                decision, reason = "rules_plan", (f"Claude chose {ai['root_system']}/{ai['fault_class']} but the "
+                                                  f"evidence walk proves {root}/{fault_class}; rules plan runs")
+            elif bad:
+                decision, reason = "rules_plan", f"overruled {bad[0]['op']} → {bad[0]['rule']}: {bad[0]['reason']}; rules plan runs"
+            elif ai["missed_ops"]:
+                decision, reason = "rules_plan", (f"Claude's plan is incomplete (misses "
+                                                  f"{', '.join(m['op'] for m in ai['missed_ops'])}); rules plan runs")
+            elif not ai["verdicts"]:
+                decision, reason = "rules_plan", "Claude proposed no ops; rules plan runs"
+            else:
+                decision, reason = "ai_plan", "Claude's plan passed P1–P6; executing it, the Guard verifies every step"
+        ai.update(decision=decision, decision_reason=reason)
+        _finish(agent_id, inc_id, mine, ai)
+        say(f"Guardrail: {reason}.")
+        if decision == "ai_plan":
+            by_n = {v["plan_n"]: (v, o) for v, o in zip(ai["verdicts"], ai["proposed_ops"])}
+            plan = []
+            for s in plan_n:  # Claude's ops, in Claude's (validated) order == the chain; exact params from read-back
+                v, o = by_n[s["n"]]
+                plan.append({**{k: s[k] for k in ("system", "op", "params", "desc", "destructive")},
+                             "source": "ai", "ai_why": llm.clean(o.get("why"), 140)})
+            return {"plan": plan, "decision": decision, "reason": reason}
+        return {"plan": rules, "decision": decision, "reason": reason}
+    except Exception as e:
+        _log(agent_id, f"AI drive failed, rules plan runs: {type(e).__name__}: {e}")
+        return {"plan": rules, "decision": "rules_plan", "reason": f"AI step failed ({type(e).__name__})"}
+
+
+# ---------------------------------------------------------------------------------------------- background
 def start(agent_id: str, inc: dict, state: dict, plan_steps: list[dict], root: str, fault_class: str) -> bool:
-    """Fire-and-forget. Returns at once; never raises into the caller."""
+    """Fire-and-forget advisory second opinion. Returns at once; never raises into the caller."""
     if not enabled():
         return False
     got = False
@@ -353,7 +510,6 @@ def _run(agent_id: str, inc_id: str, opened_at, ev: dict, plan: list[dict], root
 
 
 def _opinion(agent_id: str, inc_id: str, opened_at, ev: dict, plan: list[dict], root: str, fault_class: str) -> None:
-    t0 = time.monotonic()
     rid = uuid.uuid4().hex[:12]
     mine = {"_id": inc_id, "opened_at": opened_at, "ai.request_id": rid}  # a reset may reuse the INC id
     base = {"kind": KIND, "model": config.LLM_MODEL, "request_id": rid, "started_at": now()}
@@ -362,51 +518,16 @@ def _opinion(agent_id: str, inc_id: str, opened_at, ev: dict, plan: list[dict], 
                                         {"$set": {"ai": {**base, "status": "thinking"}}})
         if r.matched_count != 1:
             return
-        left = lambda: DEADLINE_S - (time.monotonic() - t0)  # noqa: E731
-        catalog, readback, logs = {}, {}, {}
-        sysc = Systems(timeout=2.0)
-        try:
-            for s in config.SYSTEM_IDS:  # read-backs get at most ~half the budget; the LLM keeps the rest
-                fast = left() > DEADLINE_S / 2
-                for name, fn, fallback in (("ops", sysc.ops, static_catalog()[s]), ("state", sysc.state, None),
-                                           ("logs", lambda x: sysc.logs(x, limit=LOG_LINES), [])):
-                    try:
-                        val = fn(s) if fast else fallback
-                    except Exception:
-                        val = fallback
-                    {"ops": catalog, "state": readback, "logs": logs}[name][s] = val or fallback
-        finally:
-            sysc.close()
-        evidence_at = now()
-        evidence = number_evidence(ev, logs)
-        out = llm.complete_json(SYSTEM_PROMPT, build_prompt(ev, evidence, catalog), _schema(), max_tokens=1000,
-                                timeout=min(LLM_TIMEOUT_S, left() - 1)) if left() > 4 else None
-        if left() < 0:  # answered after the deadline: too late to show as live analysis
-            out = None
-        latency = int((time.monotonic() - t0) * 1000)
-        if out is None:
-            col("incidents").update_one(mine, {"$set": {"ai": {**base, "status": "offline", "latency_ms": latency,
-                                                               "error": "no answer (timeout, refusal or error)"}}})
-            _log(agent_id, f"{inc_id} second opinion offline after {latency} ms")
+        ai = {**base, **consult(ev, plan, root, fault_class, DEADLINE_S, LLM_TIMEOUT_S, task="second_opinion")}
+        stored = _finish(agent_id, inc_id, mine, ai)
+        if stored is None:
             return
-        prop = normalize(out, {e["id"] for e in evidence})
-        verdict = judge(prop, plan, root, fault_class, readback)
-        ai = {**base, "status": "done", "hypothesis": prop["hypothesis"], "cites": prop["cites"],
-              "confidence": prop["confidence"], "latency_ms": latency,
-              "proposed_ops": [{k: o[k] for k in ("op", "target", "params", "risk", "why")} for o in prop["ops"]],
-              **verdict, "root_system": prop["root_system"], "fault_class": prop["fault_class"],
-              "policy": {"root_system": root, "fault_class": fault_class},
-              "evidence": [e for e in evidence if e["id"] in set(prop["cites"])], "evidence_at": evidence_at,
-              "done_at": now()}
-        if col("incidents").update_one(mine, {"$set": {"ai": ai}}).matched_count == 1:
-            try:
-                tally = bump_tally(verdict["verdicts"])
-                col("incidents").update_one(mine, {"$set": {"ai.tally": tally}})
-            except Exception:
-                pass
-            text = summary(ai, root, fault_class)
-            events.think(agent_id, "scout", text, incident=inc_id, system=root, kind="thought")
-            _log(agent_id, f"(ai {latency} ms) {text}")
+        if ai["status"] != "done":
+            _log(agent_id, f"{inc_id} second opinion offline after {ai['latency_ms']} ms ({ai['guard']})")
+            return
+        text = summary(ai, root, fault_class)
+        events.think(agent_id, "scout", text, incident=inc_id, system=root, kind="thought")
+        _log(agent_id, f"(ai {ai['latency_ms']} ms) {text}")
     except Exception as e:
         _log(agent_id, f"{inc_id} second opinion failed: {type(e).__name__}: {e}")
         try:
