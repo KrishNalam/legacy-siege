@@ -370,3 +370,11 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   a deleted agent doc (dynamic retire) becomes `retired` for 60 s, then is removed. Full reset clears it.
   War room: snapshot `roster`, change stream `coll:"roster"`, `GET /api/roster` → `{enabled, counts, agents}`;
   compact card `warroom/static/js/roster.js` (`installRoster(cardEl)`, `rosterRows()`), hidden while empty.
+- **Runner decisions (W35; additive, `RUNNER_DECIDES=1`, default off).** Off = `runner.fire` unchanged.
+  - **Admission.** On, a fire with `extra.by` = `red-*` goes through `chaos.decider.admit`. A held or denied fire returns
+    `{status:"hold"|"deny", result:{ok:false,error}}`, and no CHX event is written.
+  - **Decision log.** Each decision is a `world.chaos_events` doc in W34's shared log (`chaos.decisions`):
+    `{kind:"decision", by:"runner", decision:pick|execute|hold|deny|spawn, origin:striker|commander|planner|poison|seeded,
+    choice:{fault,target,by,request}, caps, reason, event}`. Executed CHX events carry `runner_decision`.
+  - **Board state** lives on `world.red_agents {_id:"runner", night, strikes, spawns, last_strike_at, requests[]}`.
+  - **Seeded steps** are always executed and logged.

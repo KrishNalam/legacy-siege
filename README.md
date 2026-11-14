@@ -264,6 +264,22 @@ With W16's defence on (`SWARM_RECOVERY=1 FAILURE_MEMORY=1`) the next recall pick
 ("Rejected memory RED-POISON:PB-0001 … retiring it"), and the Hive re-plans and learns a clean playbook. Batch-abort and
 schema-drift repairs are never poisoned (the Hive re-derives those from today's facts anyway).
 
+**Runner decisions (`RUNNER_DECIDES=1`, off by default).** The Runner stops being a dumb door. Every Red fire
+(Strikers, Commander steps, Planner requests) is admitted first: `execute`, `hold` (nothing fired, retry later) or
+`deny`. The stage caps keep autoplay moving:
+- a night budget (`RUNNER_MAX_PER_NIGHT`, 3) and spacing between strikes (`RUNNER_GAP_S`, 20);
+- no system fault while an incident is open;
+- agent faults only hit workers;
+- demo nights (`RUNNER_PROTECTED_SCENARIOS`, bank-night-1/2) take agent attacks only;
+- `RUNNER_QUIET_SCENARIOS` (bank-night-3) takes no Red at all;
+- no strikes mid-upgrade, or during autoplay's green gap.
+
+With `RED_FLEET=1` a Runner loop also picks ONE candidate per tick: a queued Planner request
+(`chaos.decider.propose`), a memory poison of what the Hive just learned, or a replay of tonight's seeded attack.
+It then spawns the owning Striker (agent-victim faults, `RUNNER_MAX_SPAWNS` 1/night) or executes the fault directly.
+Every decision is a `kind:"decision", by:"runner"` doc in `world.chaos_events` plus a `runner` feed line.
+`RUNNER_LLM=1` lets Claude pick among the vetted candidates.
+
 ## Rehearse: `scripts/demo_check.py`
 
 With the stack running:
