@@ -12,13 +12,13 @@ from swarm.tests.conftest import reset_runtime, start_swarm, run_until_resolved,
 @pytest.fixture
 def engineer(db, monkeypatch):
     monkeypatch.setenv('PLATFORM_ENGINEERS', '1')
-    for name in ('tools', 'tool_runs', 'lessons', 'platform_signals'):
+    for name in ('tools', 'tool_runs', 'lessons', 'platform_signals', 'gardener_requests'):
         db[name].delete_many({})
     lines = []
     agent = SimpleNamespace(systems=SimpleNamespace(version=lambda _: 1),
                             think=lambda text, **kw: lines.append(text), id='platform-1')
     yield agent, lines
-    for name in ('tools', 'tool_runs', 'lessons', 'platform_signals'):
+    for name in ('tools', 'tool_runs', 'lessons', 'platform_signals', 'gardener_requests'):
         db[name].delete_many({})
 
 
@@ -102,6 +102,11 @@ def test_live_engineer_build_worker_use_guard_success(engineer, db, fake, dynami
         incident = run_until_resolved(2, timeout=90)
         tool = wait_for(lambda: db.tools.find_one({'successes': 1}), 10)
         assert tool['uses'] == 1 and tool['success_rate'] == 1
+        request = db.gardener_requests.find_one({'kind': 'tool', 'status': 'open'})
+        assert request['payload']['tool_id'] == tool['_id'] and request['from'] == 'platform-1'
+        assert db.messages.find_one({'to': 'scouts', 'kind': 'tool', 'body.payload.tool_id': tool['_id']})
+        assert db.tasks.find_one({'incident': incident['_id'], 'tool_ids': tool['_id']})
+        assert db.agents.find_one({'platform_tools': tool['_id']})
         assert all(st['status'] == 'verified' and st.get('judged_by') == 'guard-1' for st in incident['steps'])
         assert db.thoughts.find_one({'text': {'$regex': 'Platform engineer built tool'}})
         assert db.thoughts.find_one({'text': {'$regex': 'Worker used tool'}})
@@ -131,3 +136,24 @@ def test_repeated_slow_verified_steps_build_tool(engineer, db):
     platform.build(agent)
     assert db.tools.find_one()['built_from'][0]['count'] == 2
     db.incidents.delete_one({'_id': 'INC-SLOW'})
+
+
+def test_delivery_replays_after_publish_crash_and_revokes(engineer, db):
+    from swarm import tool_delivery
+    agent, _ = engineer
+    seed()
+    platform.build(agent)
+    tool = db.tools.find_one()
+    db.messages.delete_many({'kind': 'tool'})
+    db.gardener_requests.delete_many({'kind': 'tool'})
+    platform.build(agent)  # registry already exists: recover missed delivery
+    platform.build(agent)  # no duplicate delivery
+    assert db.gardener_requests.count_documents({'kind': 'tool'}) == 1
+    db.agents.insert_one({'_id': agent.id, 'role': 'platform', 'status': 'idle'})
+    assert tool_delivery.refresh(agent) == [tool['_id']]
+    db.tools.update_one({'_id': tool['_id']}, {'$set': {'status': 'retired'}})
+    platform.build(agent)
+    assert tool_delivery.refresh(agent, 'waggle_bus') == []
+    assert db.gardener_requests.count_documents({'kind': 'tool'}) == 2
+    assert db.messages.find_one({'kind': 'tool', 'body.payload.status': 'retired'})
+    db.agents.delete_one({'_id': agent.id})

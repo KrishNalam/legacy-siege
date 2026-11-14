@@ -136,6 +136,8 @@ def ensure() -> None:
         _ensure(s, "tools")
         _ensure(s, "tool_runs")
         _ensure(s, "platform_signals")
+        _ensure(s, "gardener_requests")
+        s.gardener_requests.create_index([("status", ASCENDING), ("ts", ASCENDING)])
         s.tools.create_index([("status", ASCENDING), ("fault_class", ASCENDING)])
         s.tool_runs.create_index([("incident", ASCENDING)])
 
@@ -177,6 +179,7 @@ def reset() -> None:
             s[n].delete_many({})
         except OperationFailure:
             pass
+    s.gardener_requests.delete_many({"kind": "tool"})
     s.platform_signals.delete_many({})
     s.tools.delete_many({})
     s.tool_runs.delete_many({})

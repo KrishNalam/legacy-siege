@@ -326,3 +326,9 @@ A rejected tool is retired permanently for that system version; normal policy re
 Full reset clears tools; next-round reset keeps them, and version mismatches prevent reuse.
 The thought feed narrates tool creation, selection, use and retirement. Reported savings are
 plan assembly decisions reused; no operations or verification steps are skipped.
+Platform Sentinels deliver the catalogue to Scouts via `swarm.messages` (`to:scouts`,
+`kind:tool`); Scouts keep a change-stream receiver active during Worker/approval waits
+and pass matching refs in `tasks.tool_ids`. New Scouts also receive a current snapshot.
+Gardener delivery uses W19's `swarm.gardener_requests`, `kind:tool`, `status:open`,
+with the same `payload:{tool_id,version,status,ops,preconditions,...}` envelope; W23 owns
+consuming that request in the upgrade pipeline. Delivery never authorizes a stale or retired tool.

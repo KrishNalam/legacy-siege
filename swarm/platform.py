@@ -82,11 +82,18 @@ def build(agent):
                     f"{len(ops)} whitelisted ops, every step still Guard-verified.", kind='learn', pause=False,
                     system=ls['system'])
 
+    from .tool_delivery import publish
+    for tool in col('tools').find({}).limit(100):
+        publish(tool, agent.id)
 
-def lookup(fault, params, version_fn):
+
+def lookup(fault, params, version_fn, received=None):
     if not enabled() or fault not in SUPPORTED:
         return None
-    for tool in col('tools').find({'status': 'active', 'fault_class': fault}).limit(20):
+    query = {'status': 'active', 'fault_class': fault}
+    if received is not None:
+        query['_id'] = {'$in': received}
+    for tool in col('tools').find(query).limit(20):
         pre = tool['preconditions']
         if pre != {'system': SUPPORTED[fault], 'system_version': version_fn(SUPPORTED[fault]),
                    'fault_class': fault, 'requires_current_diagnosis': True} or not valid(tool['ops'], fault):
