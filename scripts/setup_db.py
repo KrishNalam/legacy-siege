@@ -120,6 +120,10 @@ def ensure() -> None:
     s.upgrade_requests.create_index([("system", ASCENDING), ("fault_class", ASCENDING)], unique=True,
                                     name="one_upgrade_per_weakness")
     s.playbooks.create_index([("system", ASCENDING), ("stale", ASCENDING), ("system_version", ASCENDING)])
+    # failure memory (swarm/lessons.py, FAILURE_MEMORY=1): attempts that failed verification, version-tagged
+    from swarm.lessons import INDEXES as LESSON_INDEXES, LESSON_SCHEMA  # noqa: PLC0415
+    _ensure(s, "lessons", LESSON_SCHEMA)
+    s.lessons.create_indexes([IndexModel(keys, **opts) for keys, opts in LESSON_INDEXES])
 
     # Atlas Vector Search over playbooks ("honey"), pre-filterable by system/class/staleness
     existing = {i["name"] for i in s.playbooks.list_search_indexes()}
@@ -155,6 +159,7 @@ def reset() -> None:
             s[n].delete_many({})
         except OperationFailure:
             pass
+    s.lessons.delete_many({})  # failure memory goes with the playbooks on a full reset (kept on next_round)
 
 
 if __name__ == "__main__":
