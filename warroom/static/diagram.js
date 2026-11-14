@@ -286,6 +286,9 @@ const TAG = { queen: "COORDINATOR", scout: "INVESTIGATOR", worker: "FIXER", guar
   sentinel: "LOOKOUT", gardener: "WRITES CODE FIXES", waggle: "MESSENGER" };
 const SYSROLE = { portal: "THE BANK WEBSITE", unix: "MOVES THE FILES", mainframe: "THE LEDGER (1987)" };
 const U = (s) => esc(String(s ?? "")).toUpperCase();
+const SHORT_OPS = { quarantine_record: "Set aside the bad record", restart_batch: "Restart the batch", rerun_transfer: "Re-send the files",
+  refresh_cache: "Refresh balances", map_field: "Use the new field name" };
+const sop = (o) => SHORT_OPS[o] || Op(o);
 const PERSONA = { batch_abort: "SABOTEUR", disk_fill: "SABOTEUR", cron_stop: "SABOTEUR", session_leak: "SABOTEUR",
   agent_kill: "ASSASSIN", lying_success: "LIAR", slow_apply: "LIAR", false_log: "LIAR",
   sqli_exploit: "HACKER", config_exploit: "HACKER", credential_exploit: "HACKER", schema_drift: "DRIFTER" };
@@ -367,23 +370,7 @@ function sysModel(s, inc, lieSys, lieFresh) {
 }
 
 // geometry
-const seatBox = (p) => ({ x: p[0], y: p[1], w: AW, h: AH });
 const sysBox = (s) => ({ x: SYSXY[s][0], y: SYSXY[s][1], w: SW, h: SH });
-function curve(a, b, k = 0) {
-  // a, b boxes: connect the nearest sides with a soft S-curve
-  const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 }, bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
-  const dx = bc.x - ac.x, dy = bc.y - ac.y;
-  if (Math.abs(dy) > Math.abs(dx) * 0.35 && Math.abs(dy) > 60) {
-    const sx = ac.x + Math.max(-a.w / 2 + 14, Math.min(a.w / 2 - 14, dx * 0.15)) + k;
-    const ex = bc.x + Math.max(-b.w / 2 + 16, Math.min(b.w / 2 - 16, -dx * 0.12)) + k;
-    const sy = dy > 0 ? a.y + a.h : a.y, ey = dy > 0 ? b.y - 6 : b.y + b.h + 6;
-    const m = (sy + ey) / 2;
-    return { d: `M${sx} ${sy} C${sx} ${m} ${ex} ${m} ${ex} ${ey}`, mx: (sx + ex) / 2, my: m };
-  }
-  const sx = dx > 0 ? a.x + a.w : a.x, ex = dx > 0 ? b.x - 8 : b.x + b.w + 8;
-  const sy = ac.y + k, ey = bc.y + k, m = (sx + ex) / 2;
-  return { d: `M${sx} ${sy} C${m} ${sy} ${m} ${ey} ${ex} ${ey}`, mx: m, my: (sy + ey) / 2 };
-}
 
 // ------------------------------------------------------------------ attack → defence pairs
 function defenceFor(e, nightIncs) {
@@ -677,7 +664,7 @@ function miniChain(inc) {
 const tickMark = (s) => s.status === "verified" ? '<b class="g">✓</b>' : s.status === "failed" ? '<b class="r">X</b>' : ["sent", "unknown"].includes(s.status) ? "<b>›</b>" : '<b class="dim">·</b>';
 
 function renderOverview() {
-  const rid = runId(), since = (runStartedAt() || 0) - 5000;
+  const since = (runStartedAt() || 0) - 5000;
   const inc = focusIncident(), live = inc?.active ? inc : null;
   const ds = duels(), lt = lastThoughts(since);
   const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"));
@@ -691,7 +678,7 @@ function renderOverview() {
   const r = rounds(), liveR2 = [...state.incidents.values()].find((i) => i.active && i.round === 2);
   const t1 = r[1]?.ttr, t2 = r[2]?.ttr ?? (liveR2 ? (serverNow() - ts(liveR2.opened_at)) / 1000 : null);
   const mx = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / mx) * 200);
-  const look = (k, n) => `<div class="look"><span>${n}</span>LOOK INSIDE +</div>`;
+  const look = (_k, n) => `<div class="look"><span>${n}</span>LOOK INSIDE +</div>`;
   const B = BOXR;
   const lieFresh = state.thoughts.some((t) => t.kind === "reject" && serverNow() - ts(t.ts) < 12000);
   const killFresh = ds.some((d) => d.e.fault === "agent_kill" && d.e.result?.agent && serverNow() - ts(d.e.done_at || d.e.ts) < 20000);
@@ -932,7 +919,6 @@ function render() {
 
 on("snapshot", () => { render(); refreshScore(); });
 on("change", (m, prev) => {
-  if (m.coll === "schema_mappings" && m.doc?.source && m.doc?.previous) driftMappings.set(m.key, m.doc);
   if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") refreshScore();
   render();
 });
