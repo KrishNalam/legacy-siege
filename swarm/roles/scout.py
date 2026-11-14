@@ -185,8 +185,8 @@ def build_graph(agent: Agent):
         fenced(config, inc_id, {"$set": {"recall": {
             "query": q, "filter": flt, "hits": summary, "used": usable is not None, "model": flt.get("embedding_model"),
             "threshold": shared.RECALL_THRESHOLD, "num_candidates": recall.NUM_CANDIDATES, "limit": recall.LIMIT,
-            "ts": now(), **({"memory_rejected": [r["playbook_id"] for r in summary if r.get("rejected")]}
-                            if vetoed else {})}}})
+            "ts": now(), **({"memory_rejected": rej, "rejected": rej[0]} if (rej := [
+                r["playbook_id"] for r in summary if r.get("rejected")]) else {})}}})
         inc = inc_doc(inc_id)
         for line in vetoed:
             say(inc_id, line, kind="reject", system=inc["system"], pause=False)

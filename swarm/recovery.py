@@ -107,7 +107,7 @@ def vet_recall(incident: str, hits: list[dict], summary: list[dict], usable: dic
     if not enabled() or not lessons.enabled():
         return usable, []
     sig = lambda s: (s.get('system'), s.get('op'), s.get('params') or {})
-    lines, rejected = [], set()
+    lines, rejected, restored = [], set(), []
     for row in summary:
         if not row.get('usable') or row.get('fault_class') not in DYNAMIC_FACT_CLASSES:
             continue
@@ -130,9 +130,40 @@ def vet_recall(incident: str, hits: list[dict], summary: list[dict], usable: dic
                               pb.get('system_version'))
         row.update(usable=False, stale=True, rejected=True)
         rejected.add(pb['_id'])
-        lines.append(f"Rejected memory {pb['_id']}: {evidence}. Its fix doesn't match what the Guard verified; "
-                     "retiring it as stale and planning from today's read-back instead.")
+        good = _verified_twin(pb, verified, sig, row)
+        if good:  # the repair the Guard really verified in that incident is still on file: trust it again
+            col('playbooks').update_one({'_id': good['_id']}, {'$set': {
+                'stale': False, 'restored_at': now(), 'restored_by': agent,
+                'restored_reason': f"matches the steps the Guard verified in {pb['incident']}"}})
+            restored.append({**good, 'stale': False, 'score': row['score'], 'restored_from': pb['_id']})
+            lines.append(f"Rejected memory {pb['_id']}: {evidence}. Its fix doesn't match what the Guard verified; "
+                         f"retiring it as stale. Restored {good['_id']}, the repair the Guard verified in "
+                         f"{pb['incident']}, and using that instead.")
+        else:
+            lines.append(f"Rejected memory {pb['_id']}: {evidence}. Its fix doesn't match what the Guard verified; "
+                         "retiring it as stale and planning from today's read-back instead.")
     if usable is not None and usable['_id'] in rejected:
         ok = {r['playbook_id'] for r in summary if r.get('usable')}
         usable = next((h for h in hits if h['_id'] in ok), None)
+        if usable is None and restored:
+            usable = restored[0]
+            summary.append({'playbook_id': usable['_id'], 'score': usable['score'], 'stale': False,
+                            'fault_class': usable.get('fault_class'), 'system': usable.get('system'),
+                            'system_version': usable.get('system_version'), 'current_version':
+                            next((r.get('current_version') for r in summary if r['playbook_id'] == usable['restored_from']), None),
+                            'usable': True, 'restored': True})
     return usable, lines
+
+
+def _verified_twin(bad: dict, verified: list, sig, row: dict) -> dict | None:
+    """Another playbook learned from the SAME incident whose fix is exactly what the Guard verified there and
+    that no Hive decision retired (no ``stale_reason``: a version bump or a rejection always records one).
+    Same system version as today, so it is as usable as the rejected one would have been."""
+    from common.db import col
+
+    for pb in col('playbooks').find({'incident': bad.get('incident'), '_id': {'$ne': bad['_id']},
+                                     'stale_reason': {'$exists': False}}, {'embedding': 0}):
+        if (pb.get('system_version') == row.get('current_version')
+                and [sig(s) for s in pb.get('fix') or []] == verified):
+            return pb
+    return None
