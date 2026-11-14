@@ -68,6 +68,8 @@ function applyChange(m) {
     const arr = (state.logs[doc.system] ||= []); arr.push(doc); if (arr.length > 6) arr.shift();
   } else if (coll === "stats" && key === "current") {
     prev = state.current; state.current = doc;
+  } else if (coll === "stats" && key === "gardener_pause") {
+    prev = state.gardenerPause; state.gardenerPause = doc;
   } else if (coll === "checkpoints" && doc) {
     state.lastCheckpoint = doc;
   }

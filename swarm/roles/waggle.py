@@ -119,6 +119,7 @@ def run(agent: Agent) -> None:
             with swarm().watch(PIPELINE, full_document="updateLookup", resume_after=token,
                                max_await_time_ms=500) as stream:
                 while not agent.stop.is_set():
+                    agent.pause_point()
                     ev = stream.try_next()
                     if ev is None:
                         continue
@@ -171,6 +172,7 @@ def run_prioritiser(agent):
             with swarm().watch(pipeline, full_document='updateLookup', resume_after=token,
                                max_await_time_ms=500) as stream:
                 while not agent.stop.is_set():
+                    agent.pause_point()
                     lines, start = [], time.monotonic()
                     for _ in range(256):
                         ev = stream.try_next()

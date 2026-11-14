@@ -25,7 +25,7 @@ import threading
 import time
 from typing import TypedDict
 
-from common import config, llm
+from common import config, llm, pause
 from common.db import now, world
 from common.events import think
 
@@ -560,6 +560,9 @@ class Commander:
         self._say("Red Commander online: plans campaigns of vetted faults for the Strikers; Hive and Systems "
                   "Scouts report in.")
         while not self._stop.is_set():
+            # GARDENER_PAUSE=1: no campaigns while the Gardener upgrades a system (lease: auto-resume if it dies)
+            if pause.wait_while_paused(self._stop.is_set, on_pause=self._paused):
+                continue
             try:
                 self.step()
             except Exception:
@@ -569,6 +572,13 @@ class Commander:
             self._set(status="stopped", last_seen=now())
         except Exception:
             pass
+
+    def _paused(self, d: dict) -> None:
+        """The Commander and its two Scouts (they run inside its step) all show paused."""
+        hold = f"Gardener upgrading {d.get('system')}"
+        self._set(status="paused", hold=hold, last_seen=now())
+        world().red_agents.update_many({"_id": {"$in": [SCOUT_HIVE, SCOUT_SYSTEMS]}},
+                                       {"$set": {"status": "paused", "last_seen": now()}})
 
     def stop(self, *_):
         self._stop.set()

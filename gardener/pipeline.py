@@ -31,7 +31,7 @@ from pathlib import Path
 import httpx
 from pymongo import ReturnDocument
 
-from common import config
+from common import config, pause
 from common.db import col, next_id, now, txn
 from common.events import think
 from common.llm import complete
@@ -48,6 +48,7 @@ PROVE_FAULT = "batch_abort"
 PROVE_WINDOW_S = config.PROVE_WINDOW_S  # env PROVE_WINDOW_S (default 30)
 WATCHED_SYSTEMS = ["mainframe", "unix", "portal"]
 TERMINAL = {"proven", "rejected"}
+PAUSE_MIN_S = float(os.environ.get("GARDENER_PAUSE_MIN_S") or 4)  # long enough to see on screen
 
 
 class Rejected(Exception):
@@ -438,20 +439,27 @@ def deploy(upg_id: str) -> dict:
     except PatchError as e:
         reject(upg_id, str(e), system)
 
-    if patcher.sha256(patch.path.read_text()) != patcher.sha256(patch.patched):
-        backup = Path(upg["backup"]) if upg.get("backup") else _backup(system, patch.original)
-        col("upgrade_requests").update_one({"_id": upg_id}, {"$set": {"backup": str(backup)}})
-        _write_atomic(patch.path, patch.patched)
-        say(f"{upg_id}: wrote {patch.rel} (backup {backup.name}); hot-reloading", system)
-    try:
-        resp = reload_system(system)
-    except Exception as e:  # reload failed: put the original back so the estate never runs unreviewed code
-        _write_atomic(patch.path, patch.original)
+    # GARDENER_PAUSE=1: every agent (swarm + Red fleet) holds still while the file is swapped and reloaded.
+    # A lease, renewed while we work: if this process dies here, everyone resumes within the lease.
+    with pause.hold(AGENT, system, upg_id, f"Gardener upgrading {system}", min_s=PAUSE_MIN_S) as paused:
+        if paused:
+            say(f"Gardener upgrading {system} — all agents paused", system)
+        if patcher.sha256(patch.path.read_text()) != patcher.sha256(patch.patched):
+            backup = Path(upg["backup"]) if upg.get("backup") else _backup(system, patch.original)
+            col("upgrade_requests").update_one({"_id": upg_id}, {"$set": {"backup": str(backup)}})
+            _write_atomic(patch.path, patch.patched)
+            say(f"{upg_id}: wrote {patch.rel} (backup {backup.name}); hot-reloading", system)
         try:
-            reload_system(system)
-        except Exception:
-            pass
-        reject(upg_id, f"reload failed ({e}); original restored", system)
+            resp = reload_system(system)
+        except Exception as e:  # reload failed: put the original back so the estate never runs unreviewed code
+            _write_atomic(patch.path, patch.original)
+            try:
+                reload_system(system)
+            except Exception:
+                pass
+            reject(upg_id, f"reload failed ({e}); original restored", system)
+    if paused:
+        say(f"{upg_id}: {system} upgraded — all agents resumed", system)
     vb, va = resp.get("version_before"), resp.get("version_after")
     ts = now()
     receipt = {
