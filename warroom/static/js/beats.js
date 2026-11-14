@@ -29,7 +29,8 @@ export function installBeats(stage, panels, caption) {
       else caption(`Chaos strikes: ${doc.fault}`, `→ ${doc.target}${doc.manual ? " (manual)" : doc.scenario ? ` · ${doc.scenario}` : ""}`, C.red);
     } else if (doc.fault === "agent_kill" && doc.result?.agent && !prev?.result?.agent) {
       stage.strikeAgent(doc.result.agent, "SIGKILL");
-      caption(`SIGKILL → ${doc.result.agent}`, "real process killed mid-step · its ticket drops · the lease will expire", C.red);
+      caption(`SIGKILL → ${doc.result.agent}`, doc.result.role === "queen" ? "real process killed · no goodbye · the queen lease will expire"
+        : "real process killed mid-step · its ticket drops · the lease will expire", C.red);
     } else if (doc.fault === "agent_kill" && doc.result && !doc.result.ok && !prev?.result) {
       stage.hunt = null;  // stop the reticle: nobody is going to be killed
       if (doc.result.how === "gave_up") caption("Kill skipped: no worker mid-step", `gave up after ${Math.round(doc.result.waited_s ?? 0)} s · nobody was killed`, C.ink2);
@@ -140,6 +141,9 @@ export function installBeats(stage, panels, caption) {
       if (doc.system) { stage.burst(doc.system, C.red); stage.stamp(doc.system, "ACK ≠ APPLIED", C.red, { sub: "said applied:true · state unchanged", dur: 4.5 }); }
       caption("ACK ≠ APPLIED", `${doc.agent || "guard"}: ${doc.text}`, C.red);
     }
+    if (doc.kind === "handoff" && state.agents.get(doc.agent)?.role === "queen") {
+      caption(`Queen failover: ${doc.agent} takes the crown`, doc.text, C.pink);
+    }
   });
 
   // ------------------------------------------------ agents: deaths
@@ -147,7 +151,8 @@ export function installBeats(stage, panels, caption) {
     panels.renderTopbar();
     if (!doc || !prev) return;
     if (doc.status === "dead" && prev.status !== "dead") {
-      caption(`${doc._id} is down`, `${doc.task ? `ticket ${doc.task} dropped · ` : ""}lease expires, a nurse will pick it up`, C.red);
+      caption(`${doc._id} is down`, doc.role === "queen" ? "queen lease expires · the standby queen takes the crown"
+        : `${doc.task ? `ticket ${doc.task} dropped · ` : ""}lease expires, a nurse will pick it up`, C.red);
     }
   });
 
