@@ -66,7 +66,7 @@ class Caps:
     tick_s: float = 3.0
     max_spawns: int = 1           # Striker processes the Runner may start per night
     quiet: tuple[str, ...] = ("bank-night-3",)                    # no Red at all (R1 finding 4)
-    protected: tuple[str, ...] = ("bank-night-1", "bank-night-2")  # no seeded replays (round-2 timing)
+    protected: tuple[str, ...] = ("bank-night-1", "bank-night-2")  # agent attacks only, no replays (round-2 timing)
 
     @classmethod
     def from_env(cls) -> "Caps":
@@ -186,6 +186,9 @@ def _rules(fault: str, params: dict, st: dict, caps: Caps, campaign: bool = Fals
     if not campaign and _age(st["last_red"]) < caps.gap_s:   # a Commander campaign keeps its own step gap
         return "hold", f"spacing strikes: last Red strike {_age(st['last_red']):.0f}s ago (< {caps.gap_s:g}s)"
     f = faults.FAULTS.get(fault)
+    if f is not None and f.kind == "system" and st["scenario"] in caps.protected:
+        return "deny", (f"{st['scenario']} is a demo night: Red hits the agents, not the estate (an extra incident "
+                        "would skew the round-2 timing)")
     if f is not None and f.kind == "system" and st["open_incidents"]:
         return "hold", (f"{st['open_incidents']} incident(s) still open: a second system fault mid-repair strands "
                         "the Hive (R1 #3), wait for green")

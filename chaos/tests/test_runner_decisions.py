@@ -85,8 +85,10 @@ def test_caps_budget_gap_quiet_incident_and_victims(systems, on, monkeypatch):
 
     _night("bank-night-3")
     assert _red_fire()["status"] == "deny"
+    _night("bank-night-1")                                                             # demo night: agents only
+    assert "demo night" in _red_fire()["result"]["error"]
     verdicts = [d["decision"] for d in _decisions()]
-    assert verdicts.count("execute") == 3 and verdicts.count("deny") == 3 and verdicts.count("hold") == 2
+    assert verdicts.count("execute") == 3 and verdicts.count("deny") == 4 and verdicts.count("hold") == 2
     assert run_id
 
 

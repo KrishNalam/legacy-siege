@@ -55,6 +55,7 @@ class Attacker:
         self.fallback_count = 0
         self._pending = None
         self._restored = False
+        self._runner_wait = (0.0, "")   # RUNNER_DECIDES: (monotonic until, why) after the Runner held/denied me
 
     # -------------------------------------------------------------- planning
     def plan(self, snap: dict) -> tuple[dict | None, str, str | None]:
@@ -100,6 +101,8 @@ class Attacker:
         order = commander.my_order(self.p.id, snap) if commander.enabled() else None
         if order:
             return {"snap": snap, "order": order, "hold": self._order_gate(snap, order)}
+        if time.monotonic() < self._runner_wait[0]:
+            return {"snap": snap, "hold": self._runner_wait[1]}
         return {"snap": snap, "hold": ("observing Hive defence" if self._pending else core.gate(snap, self.cfg, self.p.stagger_s))}
 
     def _order_gate(self, snap: dict, order: dict) -> str | None:
@@ -173,6 +176,8 @@ class Attacker:
             think(self.p.id, core.ROLE, f"{self.p.name}: the Runner {ev['status']}s my {s['fault']}: "
                                         f"{(ev.get('result') or {}).get('error', '')[len('Runner ' + ev['status'] + ': '):]}",
                   kind="reject")
+            if not order:   # back off a full cooldown (>= 10 s) so a held Striker doesn't re-ask every poll
+                self._runner_wait = (time.monotonic() + max(self.cfg.cooldown_s, 10.0), f"the Runner said {ev['status']}")
             if order and ev["status"] == "hold":   # keep the campaign step: retry next tick (the 90 s step timeout still applies)
                 world().red_agents.update_one({"_id": self.p.id, "order.campaign": order["campaign"],
                                                "order.step": order["step"]}, {"$set": {"order.status": "assigned"}})
