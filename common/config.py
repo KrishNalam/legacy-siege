@@ -63,6 +63,9 @@ AI_SECOND_OPINION = os.environ.get("AI_SECOND_OPINION", "").strip().lower() in (
 # Claude reasons at plan time and its plan RUNS when it passes every guardrail (else the rules plan runs). Off by default.
 AI_DRIVES = os.environ.get("AI_DRIVES", "").strip().lower() in ("1", "true", "yes", "on")
 AI_DRIVE_TIMEOUT_S = _f("AI_DRIVE_TIMEOUT_S", 6.0)  # Haiku answers in ~3-4.5 s under load
+# MongoDB spine extras (W25): change-stream pre-images + lease chain-of-custody trail (swarm/custody.py),
+# $jsonSchema validators on tasks/approvals/upgrade_requests/playbooks, war-room spine analytics. Off by default.
+MONGO_SPINE = os.environ.get("MONGO_SPINE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def pace(seconds: float) -> float:

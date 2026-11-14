@@ -10,7 +10,8 @@ import subprocess
 import sys
 import time
 
-from . import core
+from .. import faults
+from . import commander, core
 from .personas import PERSONAS
 
 
@@ -25,6 +26,11 @@ def _idle(reason: str) -> None:
 
 
 def run_agent(agent_id: str) -> None:
+    if agent_id == commander.COMMANDER_ID:
+        c = commander.Commander()
+        signal.signal(signal.SIGTERM, c.stop)
+        signal.signal(signal.SIGINT, c.stop)
+        return c.run()
     from .agent import Attacker
 
     a = Attacker(PERSONAS[agent_id])
@@ -52,6 +58,10 @@ def run_fleet(ids: list[str]) -> None:
     signal.signal(signal.SIGINT, stop)
     for i in ids:
         launch(i)
+    cmd = None
+    if commander.enabled():   # Commander + 2 Scouts: a thread in this supervisor, no extra process
+        cmd = commander.start_thread()
+        print("red fleet: Red Commander + Hive/Systems Scouts online", flush=True)
     while not stopping:
         time.sleep(1)
         for i in ids:
@@ -62,6 +72,8 @@ def run_fleet(ids: list[str]) -> None:
                 continue   # crash-looping: leave that attacker down, keep the rest of the fleet
             restarts[i] = recent + [time.monotonic()]
             launch(i)
+    if cmd:
+        cmd.stop()
     deadline = time.monotonic() + 5
     for p in procs.values():
         try:
@@ -73,7 +85,7 @@ def run_fleet(ids: list[str]) -> None:
 def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s redfleet %(name)s %(message)s")
     ap = argparse.ArgumentParser(prog="python -m chaos.redfleet")
-    ap.add_argument("--agent", choices=sorted(PERSONAS))
+    ap.add_argument("--agent", choices=sorted(PERSONAS) + [commander.COMMANDER_ID])
     a = ap.parse_args()
     if not core.enabled():
         print("red fleet is off (set RED_FLEET=1 to enable)", flush=True)
@@ -85,6 +97,8 @@ def main() -> None:
         return run_agent(a.agent)
     raw = os.environ.get("RED_FLEET_AGENTS", "").strip()
     ids = [i.strip() for i in raw.split(",") if i.strip() in PERSONAS] if raw else list(PERSONAS)
+    # no process for a Striker whose whole kit is switched off (e.g. the Memory Striker without CHAOS_POISON_MEMORY)
+    ids = [i for i in ids if any(faults.FAULTS[f].enabled() for f in PERSONAS[i].faults)]
     run_fleet(ids)
 
 

@@ -61,6 +61,79 @@ AGENT_SCHEMA = {
 }
 
 
+# ---- MONGO_SPINE=1 (W25): validators on the lease/approval/upgrade/memory collections. validationLevel
+# "moderate": inserts and updates of valid docs are checked; pre-existing docs are left alone. Enums come from
+# a grep of every writer (swarm/, gardener/, warroom/, chaos/); upgrade_requests statuses stay open (W19/W23).
+TASK_SCHEMA = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["_id", "incident", "kind", "specialty", "status", "generation"],
+        "properties": {
+            "status": {"enum": ["open", "claimed", "done", "failed"]},
+            "generation": {"bsonType": ["int", "long"], "minimum": 0},  # the fencing token
+            "owner": {"bsonType": ["string", "null"]},
+            "lease_until": {"bsonType": ["date", "null"]},
+            "step_ids": {"bsonType": "array", "items": {"bsonType": "string"}},
+        },
+    }
+}
+APPROVAL_SCHEMA = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["_id", "kind", "status", "ts"],
+        "properties": {
+            "kind": {"enum": ["step", "upgrade"]},
+            "status": {"enum": ["pending", "approved", "denied"]},
+            # a decision always names who decided (beekeeper / autoplay / reset)
+        },
+        "anyOf": [{"properties": {"status": {"enum": ["pending"]}}},
+                  {"required": ["decided_by", "decided_at"],
+                   "properties": {"decided_by": {"bsonType": "string"}, "decided_at": {"bsonType": "date"}}}],
+    }
+}
+UPGRADE_SCHEMA = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["_id", "system", "status"],
+        "properties": {"system": {"bsonType": "string"}, "status": {"bsonType": "string"},
+                       "evidence": {"bsonType": ["array", "null"]}},
+    }
+}
+PLAYBOOK_SCHEMA = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": ["_id", "system", "fault_class", "embedding", "embedding_model", "stale", "system_version"],
+        "properties": {
+            # a vector of the wrong size is silently skipped by the vector index; reject it at the door instead
+            "embedding": {"bsonType": "array", "minItems": config.EMBED_DIM, "maxItems": config.EMBED_DIM},
+            "embedding_model": {"bsonType": "string"},
+            "stale": {"bsonType": "bool"},
+            "system_version": {"bsonType": ["int", "long"]},
+        },
+    }
+}
+SPINE_VALIDATORS = {"tasks": TASK_SCHEMA, "approvals": APPROVAL_SCHEMA, "upgrade_requests": UPGRADE_SCHEMA,
+                    "playbooks": PLAYBOOK_SCHEMA}
+# change-stream pre-images: every update keeps the document as it was, so the custody watcher (swarm/custody.py)
+# can show "before -> after" for each lease change. Not on agents (heartbeats every few seconds = churn).
+PRE_IMAGE_COLLECTIONS = ["tasks", "incidents", "approvals"]
+
+
+def ensure_spine(s) -> None:
+    """MONGO_SPINE=1 extras on the swarm DB. Idempotent; MongoDB 6.0+ (local atlas-local 8.0 and Atlas)."""
+    for name, validator in SPINE_VALIDATORS.items():
+        _ensure(s, name)
+        s.command("collMod", name, validator=validator, validationLevel="moderate")
+    for name in PRE_IMAGE_COLLECTIONS:
+        s.command("collMod", name, changeStreamPreAndPostImages={"enabled": True})
+    _ensure(s, "custody")
+    s.custody.create_indexes([
+        IndexModel([("doc_id", ASCENDING), ("seq", DESCENDING)], name="chain_per_doc", unique=True),
+        IndexModel([("incident", ASCENDING), ("ts", ASCENDING)]),
+        IndexModel([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h"),
+    ])
+
+
 def _ensure(db, name, validator=None):
     try:
         if validator:
@@ -139,6 +212,8 @@ def ensure() -> None:
     from swarm.lessons import INDEXES as LESSON_INDEXES, LESSON_SCHEMA  # noqa: PLC0415
     _ensure(s, "lessons", LESSON_SCHEMA)
     s.lessons.create_indexes([IndexModel(keys, **opts) for keys, opts in LESSON_INDEXES])
+    if config.MONGO_SPINE:
+        ensure_spine(s)
 
     # Atlas Vector Search over playbooks ("honey"), pre-filterable by system/class/staleness
     existing = {i["name"] for i in s.playbooks.list_search_indexes()}
@@ -169,11 +244,12 @@ def reset() -> None:
     faults.thaw_overdue(all_=True)
     faults.clear_planted_memory()
     w, s = world(), swarm()
-    for n in ["systems", "system_state", "system_logs", "op_receipts", "chaos_events", "runs"]:
+    for n in ["systems", "system_state", "system_logs", "op_receipts", "chaos_events", "runs", "red_agents"]:
         w[n].delete_many({})
     for n in ["incidents", "tasks", "agents", "thoughts", "messages", "ledger", "playbooks", "approvals",
               "schema_samples", "schema_mappings",
-              "upgrade_requests", "stats", "counters", "checkpoints", "checkpoint_writes", "spawn_requests"]:
+              "upgrade_requests", "stats", "counters", "checkpoints", "checkpoint_writes", "spawn_requests",
+              "custody", "roster"]:
         try:
             s[n].delete_many({})
         except OperationFailure:

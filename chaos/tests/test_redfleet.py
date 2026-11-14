@@ -14,6 +14,11 @@ from chaos.redfleet.agent import Attacker
 from common import config
 from common.db import now, swarm, world
 
+@pytest.fixture(autouse=True)
+def fleet_switch(monkeypatch):
+    monkeypatch.setenv("RED_FLEET", "1")
+
+
 P = PERSONAS
 
 
@@ -78,8 +83,8 @@ def test_refuses_live_dbs(monkeypatch):
     assert core.live_db_refusal() is None
 
 
-def test_five_personas_cover_the_library():
-    assert set(P) == {"red-saboteur", "red-assassin", "red-liar", "red-hacker", "red-drifter"}
+def test_personas_cover_the_library():
+    assert set(P) == {"red-saboteur", "red-assassin", "red-liar", "red-hacker", "red-drifter", "red-memory"}
     from chaos import faults
     covered = {f for p in P.values() for f in p.faults}
     assert covered <= set(faults.FAULTS) and covered == set(faults.FAULTS)
@@ -204,6 +209,7 @@ def _open_night(scenario="free-play"):
 
 
 def _no_llm(monkeypatch):
+    monkeypatch.setenv("RED_FLEET", "1")
     from chaos.redfleet import agent as agent_mod
     monkeypatch.setattr(agent_mod.llm, "llm_available", lambda: False)
 
@@ -294,3 +300,12 @@ def test_outcome_reads_existing_victim_incident_and_guard_ledger(systems):
     world().chaos_events.insert_one(event)
     runner.refresh_outcomes()
     assert world().chaos_events.find_one({'_id':event['_id']})['outcome']['guard_caught'] is True
+
+
+def test_outcome_counts_a_rejected_recalled_repair_as_a_guard_catch(systems):
+    from chaos.redfleet.learning import outcome
+    event = {'_id': 'CHX-poison', 'fault': 'poison_memory', 'target': 'swarm', 'status': 'ok', 'ts': now()}
+    swarm().incidents.insert_one({'_id': 'INC-0002', 'opened_at': now(), 'status': 'fixing', 'steps': [],
+                                  'recall': {'used': True, 'rejected': 'RED-POISON:PB-0001'}})
+    observed = outcome(event)
+    assert observed['guard_caught'] is True and observed['incidents'][0]['memory_rejected'] == 'RED-POISON:PB-0001'

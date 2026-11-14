@@ -22,9 +22,11 @@ def outcome(event: dict) -> dict:
                      'failed_attempts': list(swarm().ledger.find({'incident': inc['_id'], 'status': 'failed', 'updated_at': {'$gte': event['ts']}},
                           {'_id': 0, 'action_id': 1, 'evidence': 1}).limit(5)),
                      'handoffs': inc.get('handoffs', []),
+                     'memory_rejected': (inc.get('recall') or {}).get('rejected'),
                      'recovery_s': max(0, (resolved - event['ts']).total_seconds()) if resolved else None})
     failed = [f for row in rows for f in row.get('failed_attempts', [])]
-    caught = True if any('ACK ≠ APPLIED' in str(f.get('evidence', '')) for f in failed) else None
+    caught = True if (any('ACK ≠ APPLIED' in str(f.get('evidence', '')) for f in failed)
+                      or any(r.get('memory_rejected') for r in rows)) else None   # read-back lie, or a recalled repair rejected
     recovered = [r['recovery_s'] for r in rows if r.get('recovery_s') is not None]
     return {'observed_at': now(), 'attack_status': event.get('status'), 'incidents': rows,
             'guard_caught': caught, 'recovery_s': max(recovered) if recovered and all(r.get('status') == 'resolved' for r in rows) else None,
