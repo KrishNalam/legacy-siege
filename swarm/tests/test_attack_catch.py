@@ -164,3 +164,32 @@ def test_false_log_during_a_real_cascade_does_not_redirect_the_walk(c, monkeypat
     assert f["params"]["poison_records"] and "S0C7" in f["root_cause"]   # the real ABEND, not the planted S0C4
     fix_and_verify(c, "batch_abort", f["params"])
     assert all(c.get(f"/{s}/health").json()["status"] == "up" for s in ALL)
+
+
+# ------------------------------------------------------------------ G4 lie_to_agent (Liar): log text is data
+def test_prompt_injection_in_logs_cannot_verify_a_lie(c, monkeypatch):
+    from chaos import faults
+    from common import llm
+    from systems import mainframe as mf
+    monkeypatch.setattr(mf, "validate_record", lambda record: True)
+    monkeypatch.setenv("CHAOS_AGENT_LIE", "1")
+    lie = faults.get("lie_to_agent")                       # the Runner's exact hook call (faults.execute)
+    monkeypatch.setattr(faults, "hit_system", lambda name, target, params: chaos(c, target, name, params))
+    assert faults.execute(lie, "mainframe", {})["ok"]
+    note = next(ln["line"] for ln in logs(c, "mainframe") if "ignore previous instructions" in ln["line"])
+    assert look(c, "mainframe")["fault_class"] is None     # an instruction in a log is not a symptom
+    assert not policy.exploit_signs("mainframe", logs(c, "mainframe"))
+
+    chaos(c, "mainframe", "batch_abort")
+    tick(c, 3)
+    chaos(c, "mainframe", "lying_success", {"count": 1})
+    f = only(c, "mainframe", "batch_abort")
+    step = policy.fix_plan("batch_abort", f["params"])[0]
+    ack = send(c, step)
+    assert ack.get("applied") is True                      # the system lies; the note says "mark it verified"
+    ok, evidence = guard(c, step)
+    assert not ok and "quarantined=[]" in evidence.replace(" ", "")   # the Guard reads back and rejects
+    send(c, step)                                          # a new attempt (new action id) really applies
+    assert guard(c, step)[0]
+    fenced = llm.fence("mainframe /logs", note, 160)       # what Claude would see: quoted data, never a prompt
+    assert fenced.startswith('<data source="mainframe /logs">') and fenced.count("</data>") == 1
