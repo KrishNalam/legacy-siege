@@ -312,7 +312,7 @@ CONTRACTS.md the frozen interface between workstreams    docs/design-doc.txt  th
 
 ### Platform engineers (opt-in)
 
-`PLATFORM_ENGINEERS=1` adds one `platform-1` process to the existing supervisor, including
+`PLATFORM_ENGINEERS=1` adds one `platform-1` Sentinel-type agent (role `sentinel`, subtype `platform`) to the existing supervisor, including
 `SWARM_DYNAMIC=1`. Default off retains the existing roster and behavior. Repeated Guard
 failures (W11 lessons, captured automatically with this switch) or repeated verified steps
 that take at least 10 seconds produce reusable tools for batch aborts, full spools, and stopped cron.

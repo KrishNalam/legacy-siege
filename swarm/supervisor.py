@@ -42,7 +42,7 @@ DYNAMIC_ROSTER = [
     ("guard", "guard-1"), ("waggle", "waggle-1"), ("sentinel", "sentinel-1"),
     ("nurse", "nurse-1"), ("nurse", "nurse-2"),
 ]
-SELF_RESPAWN = {"guard", "sentinel", "waggle", "queen", "nurse", "platform"}
+SELF_RESPAWN = {"guard", "sentinel", "waggle", "queen", "nurse"}
 
 
 def dynamic() -> bool:
@@ -54,7 +54,7 @@ def roster() -> list[tuple[str, str]]:
     raw = os.environ.get("SWARM_ROSTER", "").strip()
     if not raw:
         from swarm.platform import enabled
-        return list(DYNAMIC_ROSTER if dynamic() else ROSTER) + ([("platform", "platform-1")] if enabled() else [])
+        return list(DYNAMIC_ROSTER if dynamic() else ROSTER) + ([("sentinel", "platform-1")] if enabled() else [])  # Sentinel-type, subtype platform
     return [tuple(x.split(":", 1)) for x in raw.split(",") if ":" in x]  # type: ignore[misc]
 
 

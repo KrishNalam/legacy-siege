@@ -221,6 +221,9 @@ RECURRING = [
 
 
 def run(agent: Agent) -> None:
+    if agent.id.startswith("platform-"):  # platform engineers are Sentinel-type agents (PLATFORM_ENGINEERS)
+        from . import platform as platform_role
+        return platform_role.run(agent)
     detect, reap, upgrade = build_graphs(agent)
     sysc = agent.systems
     streak: dict[str, int] = {}

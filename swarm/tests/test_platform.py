@@ -33,12 +33,12 @@ def test_switch_and_roster(db, monkeypatch):
     monkeypatch.delenv('PLATFORM_ENGINEERS', raising=False)
     monkeypatch.delenv('SWARM_ROSTER', raising=False)
     assert not platform.enabled()
-    assert not any(r == 'platform' for r, _ in supervisor.roster())
+    assert not any(i.startswith('platform-') for _, i in supervisor.roster())
     assert platform.lookup('batch_abort', {}, lambda _: 1) is None
     monkeypatch.setenv('PLATFORM_ENGINEERS', '1')
     for dynamic in ('0', '1'):
         monkeypatch.setenv('SWARM_DYNAMIC', dynamic)
-        assert supervisor.roster().count(('platform', 'platform-1')) == 1
+        assert supervisor.roster().count(('sentinel', 'platform-1')) == 1
 
 
 def test_tool_rebind_safety_and_retirement(engineer, db):
@@ -149,7 +149,7 @@ def test_delivery_replays_after_publish_crash_and_revokes(engineer, db):
     platform.build(agent)  # registry already exists: recover missed delivery
     platform.build(agent)  # no duplicate delivery
     assert db.gardener_requests.count_documents({'kind': 'tool'}) == 1
-    db.agents.insert_one({'_id': agent.id, 'role': 'platform', 'status': 'idle'})
+    db.agents.insert_one({'_id': agent.id, 'role': 'sentinel', 'subtype': 'platform', 'status': 'idle'})
     assert tool_delivery.refresh(agent) == [tool['_id']]
     db.tools.update_one({'_id': tool['_id']}, {'$set': {'status': 'retired'}})
     platform.build(agent)

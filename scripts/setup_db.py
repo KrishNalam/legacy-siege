@@ -54,7 +54,7 @@ AGENT_SCHEMA = {
         "bsonType": "object",
         "required": ["_id", "role", "status"],
         "properties": {
-            "role": {"enum": ["queen", "scout", "worker", "guard", "waggle", "sentinel", "nurse", "gardener", "platform"]},
+            "role": {"enum": ["queen", "scout", "worker", "guard", "waggle", "sentinel", "nurse", "gardener"]},
             "status": {"enum": ["idle", "working", "standby", "dead"]},
         },
     }

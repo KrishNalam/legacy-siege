@@ -13,7 +13,7 @@ import sys
 
 from .harness import Agent, log
 
-ROLES = {"queen", "scout", "worker", "guard", "waggle", "sentinel", "nurse", "platform"}
+ROLES = {"queen", "scout", "worker", "guard", "waggle", "sentinel", "nurse"}
 
 
 def specialty_of(agent_id: str) -> str | None:
