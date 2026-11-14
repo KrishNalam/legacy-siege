@@ -26,7 +26,7 @@ from pymongo.errors import DuplicateKeyError
 from common.db import col, next_id, now
 from common.events import say
 
-from .. import leases, policy, schema, settings
+from .. import leases, policy, recovery, schema, settings
 from ..harness import Agent, checkpointer, log
 from .. import lessons
 
@@ -123,6 +123,14 @@ def build_graphs(agent: Agent):
                 continue
             agent.think(f"Opened {doc['_id']}: {doc['symptoms'][0]}.", kind="action", incident=doc["_id"],
                         system=head, pause=False)
+            if recovery.enabled() and not security:  # visible final recovery after an escalation
+                prev = col("incidents").find_one({"status": "failed", "affected": {"$in": list(seg)}},
+                                                 {"failure": 1}, sort=[("closed_at", -1)])
+                if prev and not col("incidents").find_one({"_id": {"$gt": prev["_id"], "$ne": doc["_id"]},
+                                                           "affected": {"$in": list(seg)}}, {"_id": 1}):
+                    agent.think(f"Not over: {prev['_id']} was escalated ({(prev.get('failure') or 'failed')[:90]}) and "
+                                f"{', '.join(seg)} still unhealthy, so {doc['_id']} starts over with a fresh "
+                                f"diagnosis and plan.", kind="action", incident=doc["_id"], system=head, pause=False)
             return {"incident": doc["_id"], "action": "opened"}
         return {"action": "none"}
 

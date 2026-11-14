@@ -19,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from common.db import col, now, txn
 
-from .. import diagnosis, leases, schema, settings, steps, verify
+from .. import diagnosis, leases, recovery, schema, settings, steps, verify
 from ..policy import fmt_op
 from ..harness import Agent, checkpointer, main_loop, retrying
 from ..http import SystemsUnavailable
@@ -108,8 +108,8 @@ def build_graph(agent: Agent):
         for s in mine:
             if s["status"] == "verified":
                 continue
-            if s["status"] == "failed" and len(s.get("attempts") or []) >= settings.MAX_ATTEMPTS:
-                agent.think(f"{s['step_id']} failed {settings.MAX_ATTEMPTS} attempts; giving the task back to the scout.",
+            if s["status"] == "failed" and len(s.get("attempts") or []) >= recovery.budget(s):
+                agent.think(f"{s['step_id']} failed {len(s.get('attempts') or [])} attempts; giving the task back to the scout.",
                             incident=task["incident"], system=s["system"], pause=False)
                 return {"step": None, "outcome": "failed"}
             return {"step": s["step_id"], "outcome": "working"}
@@ -129,6 +129,19 @@ def build_graph(agent: Agent):
                 reconcile_sent(agent, task, gen, step)
             return {}
         n = len(step.get("attempts") or []) + 1
+        if (n > 1 and step["status"] == "failed" and step.get("action_id") and recovery.enabled()
+                and step.get("resubmitted") != step["action_id"]):  # once per attempt: never a resubmit loop
+            # Reconcile before retry: the last attempt may have landed late (slow_apply) after the Guard gave up.
+            # Then the effect is already there: hand that attempt back to the Guard instead of sending again.
+            applied, facts = verify.check(step["op"], step.get("params") or {}, sysc.state, probe=sysc.probe,
+                                          sent_at=step.get("sent_at"))
+            if applied and steps.resubmit(task, me, gen, step):
+                agent.set(status="working", target=step["system"], phase="awaiting_verify",
+                          incident=task["incident"], task=task["_id"])
+                agent.think(f"Before retrying: {step['system']} already shows {step['op']} took effect ({facts}); "
+                            f"{step['action_id']} landed late. Handing it back to the Guard, not sending it again.",
+                            kind="action", incident=task["incident"], system=step["system"], pause=False)
+                return {}
         aid = steps.attempt_id(step["step_id"], n)
         # failure memory: this system lied about this op before -> the retry goes straight out
         fast = n > 1 and bool(step.get("distrust_ack")) and lessons.enabled()
