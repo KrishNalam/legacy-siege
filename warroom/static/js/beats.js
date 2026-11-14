@@ -80,6 +80,14 @@ export function installBeats(stage, panels, caption) {
       stage.burst(doc.root_cause_system, C.red, "root cause");
       caption(`Root cause: ${doc.root_cause_system}`, doc.root_cause || doc.fault_class || "", C.red);
     }
+    // AI second opinion landed (first observed completion: change-stream lookups can skip "thinking")
+    if (doc.ai?.status === "done" && prev.ai?.status !== "done") {
+      const bad = (doc.ai.overruled_ops || []);
+      const who = doc.owner || "scout-1";
+      const p = stage.posOfAgent(who); if (p) stage.float(p.x, p.y - 44, "Claude: second opinion", C.violet, 13, 3);
+      caption(doc.ai.agrees_with_policy ? "AI second opinion: agrees" : `AI second opinion: ${bad.length} op${bad.length === 1 ? "" : "s"} overruled`,
+        bad.length ? `${bad[0].op}: ${bad[0].reason}` : `Claude reached the same plan independently · policy still decides`, "#b388ff");
+    }
     // recall ($vectorSearch) — golden path from the playbooks cell to the scout
     if (doc.recall && !prev.recall) {
       const hit = (doc.recall.hits || [])[0];

@@ -96,7 +96,7 @@ export class Panels {
     if (!inc) {
       $("#inc-id").textContent = "no incident"; $("#inc-status").textContent = "idle"; $("#inc-status").className = "pill green";
       body.innerHTML = '<div class="empty">All systems green. The Hive is waiting in the honeycomb.</div>';
-      this.stepEls.clear(); this.renderedIncident = null; this.renderRecall(null); return;
+      this.stepEls.clear(); this.renderedIncident = null; this.renderRecall(null); this.renderAI(null); return;
     }
     const cur = state.current;
     if (!inc.active && cur?.run_id && inc.run_id && inc.run_id !== cur.run_id) {
@@ -106,7 +106,7 @@ export class Panels {
       body.innerHTML = `<div class="quiet"><div class="q-big">${attacks.length ? "Attacked, still green" : "All systems green"}</div>
         <div class="q-sub">${esc(cur.run_id)} · night ${esc(cur.round ?? "?")} · ${attacks.length} attack${attacks.length === 1 ? "" : "s"} (${esc([...new Set(attacks.map((c) => c.fault))].join(", ") || "none yet")}) · 0 incidents</div>
         <div class="q-last">last incident ${esc(inc._id)} · ${esc(inc.status)}${inc.metrics?.ttr_s != null ? ` · TTR ${fmtS(inc.metrics.ttr_s)}` : ""}</div></div>`;
-      this.quiet = true; this.stepEls.clear(); this.renderedIncident = null; this.renderRecall(null); return;
+      this.quiet = true; this.stepEls.clear(); this.renderedIncident = null; this.renderRecall(null); this.renderAI(null); return;
     }
     this.quiet = false;
     $("#inc-id").textContent = inc._id;
@@ -167,6 +167,7 @@ export class Panels {
     });
     for (const [id, li] of this.stepEls) if (!keep.has(id)) { li.remove(); this.stepEls.delete(id); }
     this.renderRecall(inc);
+    this.renderAI(inc);
   }
 
   stamp(stepId) {
@@ -187,6 +188,7 @@ export class Panels {
 
   tickTimers() {
     const inc = currentIncident(), el = $("#inc-timer");
+    if (inc?.ai?.status === "thinking" && !this.quiet) this.renderAI(inc);
     if (!inc || this.quiet) { el.textContent = ""; return; }
     const start = ts(inc.opened_at);
     if (inc.status === "resolved" || !inc.active) {
@@ -215,6 +217,46 @@ export class Panels {
           <span class="tag ${usable ? "ok" : h.stale ? "no" : ""}">${h.stale ? "stale" : usable ? "usable" : `v${h.system_version ?? "?"}`}</span></div>`;
       }).join("") : '<div class="recall-none">0 hits: first time the Hive has seen this. It has to walk the chain.</div>'}</div>`;
     $("#recall-body").querySelectorAll("[data-pb]").forEach((el) => el.addEventListener("click", () => this.onInspect({ db: "swarm", coll: "playbooks", id: el.dataset.pb })));
+  }
+
+  // ---------------------------------------------------------------- AI second opinion (incidents.ai)
+  // Claude proposes a root cause + op plan from the Hive's evidence; the deterministic policy and fresh
+  // read-backs dispose. Nothing Claude says is executed. Absent field (no key) → card hidden.
+  renderAI(inc) {
+    const card = $("#ai-card"), ai = inc?.ai;
+    if (!ai) { card.hidden = true; this.aiKey = null; return; }
+    card.hidden = false;
+    const age = (serverNow() - ts(ai.started_at)) / 1000;
+    const status = ai.status === "thinking" && age > 30 ? "offline" : ai.status;
+    const ops = ai.proposed_ops || [], bad = ops.filter((o) => o.verdict !== "agree"), missed = ai.missed_ops || [];
+    const key = `${inc._id}|${ai.request_id}|${status}|${ops.length}`;
+    if (this.aiKey === key) return;
+    this.aiKey = key;
+    $("#ai-model").textContent = `${ai.model || "claude"}${ai.latency_ms != null ? ` · ${(ai.latency_ms / 1000).toFixed(1)}s` : ""}`;
+    const pill = $("#ai-verdict");
+    if (status === "thinking") { pill.textContent = "Claude is thinking…"; pill.className = "pill violet pulse"; }
+    else if (status !== "done") { pill.textContent = "offline"; pill.className = "pill"; }
+    else if (ai.agrees_with_policy) { pill.textContent = "agrees ✓"; pill.className = "pill green"; }
+    else { pill.textContent = `${ops.length - bad.length} ✓ · ${bad.length} ✗${missed.length ? ` · ${missed.length} added` : ""}`; pill.className = `pill ${bad.length ? "red" : "blue"}`; }
+    const flow = '<div class="ai-flow"><b>Claude proposes</b> → <i>policy + read-back check</i> → <i>Guard verifies</i> · nothing Claude says is executed</div>';
+    if (status !== "done") {
+      $("#ai-body").innerHTML = flow + `<div class="ai-off">${status === "thinking" ? "Asking Claude for an independent diagnosis from the evidence the Hive gathered…" : "No answer (timeout or error). The Hive carries on: policy decides every op anyway."}</div>`;
+      return;
+    }
+    const pol = ai.policy || {};
+    const root = ai.root_agrees
+      ? `<span class="ok">✓</span><span>root cause ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">same as policy</span>`
+      : `<span class="bad">✗</span><span>Claude: ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">policy: ${esc(pol.root_system || "?")} · ${esc(pol.fault_class || "?")}</span>`;
+    const label = (o) => `${esc(o.op)} <i>@ ${esc(o.system)}</i>`;
+    // agreed + policy-added ops as one wrap of chips; each overruled op gets its own row with the reason
+    const chips = ops.filter((o) => o.verdict === "agree").map((o) => `<span class="ai-chip ok" title="${esc(o.why || "")}">✓ ${label(o)}${o.gated ? '<b>approval first</b>' : ""}</span>`)
+      .concat(missed.map((m) => `<span class="ai-chip add" title="Claude didn't propose it; the policy plan includes it">+ ${label(m)}<b>policy adds</b></span>`)).join("");
+    const rows = bad.map((o) => `<li class="ai-op overruled"><span class="mk">✗</span><span class="nm">${label(o)}</span><span class="tg">overruled</span><span class="why">${esc(o.reason || "refused by policy")}</span></li>`).join("");
+    $("#ai-body").innerHTML = `${flow}
+      ${ai.hypothesis ? `<div class="ai-hyp" title="${esc(ai.hypothesis)}">“${esc(ai.hypothesis)}”</div>` : ""}
+      <div class="ai-root">${root}</div>
+      ${chips ? `<div class="ai-chips">${chips}</div>` : ""}
+      ${rows ? `<ol class="ai-ops">${rows}</ol>` : ""}${!ops.length ? '<div class="ai-off">Claude proposed no ops.</div>' : ""}`;
   }
 
   // ---------------------------------------------------------------- learning meter (aggregation pipeline)
