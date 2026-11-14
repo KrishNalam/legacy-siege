@@ -275,12 +275,18 @@ def build_graph(agent: Agent):
                 drove = second_opinion.decide(agent.id, inc, state, raw, state["root"], state["fault_class"],
                                               say=lambda t: say(inc_id, t, system=state["root"], pause=False))
                 raw = drove["plan"]
+            from .. import platform
+            tool_hit = platform.lookup(state['fault_class'], state.get('params') or {}, sysc.version)
+            if tool_hit and (drove is None or raw == policy.fix_plan(state['fault_class'], state.get('params') or {})):
+                tool, raw = tool_hit
+                raw = [{**s, 'tool_id': tool['_id']} for s in raw]
+                say(inc_id, f"Scout selected platform tool {tool['name']} ({tool['source']}).", kind="recall", pause=False)
             plan_steps = [{
                 "step_id": f"{inc_id}-s{i}", "n": i, "desc": s["desc"], "system": s["system"], "op": s["op"],
                 "params": s["params"], "destructive": bool(s["destructive"] or (s["system"], s["op"]) in policy.DESTRUCTIVE),
                 "task_id": None, "status": "planned", "action_id": None, "attempts": [], "agent": None,
                 "evidence": None, "approval_id": None, "ts": now(),
-                **{k: s[k] for k in ("source", "ai_why") if s.get(k)}} for i, s in enumerate(raw, 1)]
+                **{k: s[k] for k in ("source", "ai_why", "tool_id") if s.get(k)}} for i, s in enumerate(raw, 1)]
             fenced(config, inc_id, {"$set": {
                 "steps": plan_steps, "status": "fixing", "root_cause_system": state["root"],
                 "fault_class": state["fault_class"], "root_cause": state.get("root_cause"),
