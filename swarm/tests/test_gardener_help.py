@@ -50,6 +50,26 @@ def test_repeat_hands_off_once_and_starts_or_requeues_upgrade(db, monkeypatch):
     assert gh.answer_repeat({"_id": "x", "system": "unix", "fault_class": None, "problem": "lies"})["kind"] == "none"
 
 
+def test_repeat_counts_resolved_incidents_once_per_night(db, monkeypatch):
+    """RV1b: Red re-strikes within one night and failed incidents must not reach 3 and start an upgrade early."""
+    _clear(db)
+    monkeypatch.setenv("GARDENER_HELP", "1")
+    monkeypatch.delenv("SWARM_COMMS", raising=False)
+    base = {"system": "portal", "root_cause_system": "mainframe", "fault_class": "batch_abort",
+            "symptoms": ["mainframe down"], "opened_at": now()}
+    db.incidents.insert_many([{**base, "_id": f"INC-{i}", "status": "resolved", "run_id": "RUN-0001"} for i in range(3)]
+                             + [{**base, "_id": "INC-F", "status": "failed", "run_id": "RUN-0002"},
+                                {**base, "_id": "INC-4", "status": "resolved", "run_id": "RUN-0002"}])
+    monkeypatch.setattr(sentinel, "say", Mock())
+    agent = SimpleNamespace(id="sentinel-1", think=Mock())
+    sentinel.note_repeated_problems(agent)
+    assert db.gardener_requests.count_documents({}) == 0 and db.upgrade_requests.count_documents({}) == 0
+    db.incidents.insert_one({**base, "_id": "INC-5", "status": "resolved", "run_id": "RUN-0003"})
+    sentinel.note_repeated_problems(agent)
+    reqs = list(db.gardener_requests.find())
+    assert len(reqs) == 1 and reqs[0]["count"] == 3
+
+
 def test_help_answers_playbook_params_then_lying_runbook(db, monkeypatch):
     _clear(db)
     db.playbooks.insert_one({"_id": "PB-0001", "system": "mainframe", "system_version": 1, "stale": False,

@@ -422,12 +422,20 @@ def note_repeated_problems(agent):
     handoff = gardener_help.enabled()
     if not (comms.enabled() or handoff):
         return
-    groups = {}
-    for inc in col('incidents').find({}, {'root_cause_system': 1, 'system': 1, 'fault_class': 1, 'symptoms': 1}):
+    groups, runs = {}, {}
+    # Only resolved incidents, one count per night (run_id): failed incidents and Red re-strikes within one night
+    # must not push a problem to 3 and start an upgrade before UPGRADE_AFTER / distinct nights would (RV1b).
+    for inc in col('incidents').find({'status': 'resolved'},
+                                     {'root_cause_system': 1, 'system': 1, 'fault_class': 1, 'symptoms': 1, 'run_id': 1}):
         sig = lessons.problem_signature(inc)
         g = groups.setdefault('incident:' + sig, {'system': inc.get('root_cause_system') or inc.get('system'),
             'problem': inc.get('fault_class') or '; '.join(inc.get('symptoms') or [])[:160], 'evidence': [], 'count': 0,
             'fault_class': inc.get('fault_class') if inc.get('fault_class') not in (None, 'unknown') else None})
+        night = inc.get('run_id') or inc['_id']
+        seen = runs.setdefault('incident:' + sig, set())
+        if night in seen:
+            continue
+        seen.add(night)
         g['count'] += 1
         g['evidence'].append(inc['_id'])
     for ls in col('lessons').find({'count': {'$gte': 3}, 'stale': False}):
