@@ -12,7 +12,7 @@ from common.db import now, swarm, world
 
 
 def _decisions(**q) -> list[dict]:
-    return list(world().chaos_events.find({"type": "runner_decision", **q}).sort("ts", 1))
+    return list(world().chaos_events.find({"kind": "decision", "by": "runner", **q}).sort("ts", 1))
 
 
 def _night(scenario: str = "free-play", age_s: float = 300) -> str:
@@ -46,12 +46,13 @@ def test_off_by_default_fire_is_unchanged(systems, monkeypatch):
 def test_every_red_fire_is_admitted_and_logged(systems, on):
     _night()
     ev = _red_fire()
-    assert ev["status"] == "ok" and ev["runner_decision"].startswith("RDC-")
+    assert ev["status"] == "ok" and ev["runner_decision"].startswith("DEC-")
     d = world().chaos_events.find_one({"_id": ev["runner_decision"]})
-    assert d["verdict"] == "execute" and d["event"] == ev["_id"] and d["source"] == "striker"
+    assert d["decision"] == "execute" and d["event"] == ev["_id"] and d["origin"] == "striker"
     assert d["choice"] == {"fault": "disk_fill", "target": "unix", "by": "red-saboteur"} and d["reason"]
-    assert "fault" not in d and "by" not in d and "status" not in d   # fault readers skip decision docs
+    assert d["kind"] == "decision" and "fault" not in d and "target" not in d   # fault readers skip decision docs
     assert world().chaos_events.count_documents({"fault": {"$exists": True}}) == 1
+    assert [e["_id"] for e in runner.refresh_outcomes()] == [ev["_id"]]          # outcome readers skip it too
     feed = [t["text"] for t in swarm().thoughts.find({"agent": "runner"})]
     assert any(d["_id"] in t and "execute disk_fill on unix" in t for t in feed)
     # manual buttons and seeded steps are never admitted
@@ -84,7 +85,7 @@ def test_caps_budget_gap_quiet_incident_and_victims(systems, on, monkeypatch):
 
     _night("bank-night-3")
     assert _red_fire()["status"] == "deny"
-    verdicts = [d["verdict"] for d in _decisions()]
+    verdicts = [d["decision"] for d in _decisions()]
     assert verdicts.count("execute") == 3 and verdicts.count("deny") == 3 and verdicts.count("hold") == 2
     assert run_id
 
@@ -102,9 +103,9 @@ def test_concurrent_strikers_cannot_both_take_the_last_slot(systems, on, monkeyp
 
 def test_seeded_steps_always_execute_and_are_logged(systems, on):
     run_id = runner.run_scenario("bank-night-1", block=True)
-    seeded = _decisions(source="seeded")
+    seeded = _decisions(origin="seeded")
     assert [d["choice"]["fault"] for d in seeded] == ["lying_success", "batch_abort"]
-    assert all(d["verdict"] == "execute" and d["run_id"] == run_id for d in seeded)
+    assert all(d["decision"] == "execute" and d["run_id"] == run_id for d in seeded)
 
 
 def _wait(pred, timeout=10.0):
@@ -123,9 +124,9 @@ def test_loop_picks_planner_request_and_executes_it(systems, on):
     assert loop.tick() is None                      # nothing to decide: no log spam
     rid = decider.propose("session_leak", "portal", by="red-planner", why="portal is the weak spot")
     d = loop.tick()
-    assert d["verdict"] == "execute" and d["choice"]["request"] == rid
-    pick = _decisions(verdict="pick")[-1]
-    assert pick["source"] == "planner" and pick["candidates"][0]["request"] == rid
+    assert d["decision"] == "execute" and d["choice"]["request"] == rid
+    pick = _decisions(decision="pick")[-1]
+    assert pick["origin"] == "planner" and pick["candidates"][0]["request"] == rid
     ev = _wait(lambda: world().chaos_events.find_one({"fault": "session_leak", "status": "ok"}))
     assert ev["by"] == decider.RUNNER_ID and ev["runner_decision"] == d["_id"] and ev["red"]["planner"] == "planner"
     req = world().red_agents.find_one({"_id": "runner"})["requests"][0]
@@ -139,7 +140,7 @@ def test_loop_poisons_learned_memory(systems, on, monkeypatch):
     swarm().playbooks.insert_one({"_id": "PB-0001", "fault_class": "disk_fill", "system": "unix", "stale": False,
                                   "created_at": now(), "fix": [{"op": "purge_spool", "system": "unix"}]})
     d = decider.RunnerLoop().tick()
-    assert d["verdict"] == "execute" and d["source"] == "poison" and d["route"] == "execute"
+    assert d["decision"] == "execute" and d["origin"] == "poison" and d["route"] == "execute"
     _wait(lambda: swarm().playbooks.find_one({"_id": "RED-POISON:PB-0001"}))
     assert _wait(lambda: world().chaos_events.find_one({"fault": "poison_memory", "status": "ok"}))
     assert not [c for c in decider.candidates(decider.state(), decider.Caps.from_env()) if c["source"] == "poison"]
@@ -150,7 +151,7 @@ def test_loop_replays_seeded_attack_only_on_unprotected_nights(systems, on):
     assert decider.RunnerLoop().tick() is None      # protected: round-2 timing stays honest
     _night("bank-drift")
     d = decider.RunnerLoop().tick()
-    assert d["source"] == "seeded" and d["choice"]["fault"] == "schema_drift" and d["verdict"] == "execute"
+    assert d["origin"] == "seeded" and d["choice"]["fault"] == "schema_drift" and d["decision"] == "execute"
     _wait(lambda: world().chaos_events.find_one({"fault": "schema_drift", "by": decider.RUNNER_ID}))
     assert decider.RunnerLoop().tick() is None      # once per night
 
@@ -162,12 +163,12 @@ def test_loop_spawns_striker_for_agent_victims_and_respects_spawn_budget(systems
                         world().red_agents.update_one({"_id": "runner"}, {"$inc": {"spawns": 1}})))
     decider.propose("agent_kill", "swarm", {"selector": {"role": "worker", "phase": "step_sent"}}, by="red-planner")
     d = decider.RunnerLoop().tick()
-    assert d["verdict"] == "spawn" and d["persona"] == "red-assassin" and spawned == ["red-assassin"]
+    assert d["decision"] == "spawn" and d["persona"] == "red-assassin" and spawned == ["red-assassin"]
     assert world().chaos_events.count_documents({"fault": "agent_kill"}) == 0   # the Striker fires, admitted later
     decider.propose("agent_kill", "swarm", {"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0},
                     by="red-planner")
     d2 = decider.RunnerLoop().tick()
-    assert d2["verdict"] == "execute" and "spawn budget spent" in d2["reason"] and spawned == ["red-assassin"]
+    assert d2["decision"] == "execute" and "spawn budget spent" in d2["reason"] and spawned == ["red-assassin"]
 
 
 def test_held_request_stays_queued_and_runs_when_clear(systems, on):
@@ -175,10 +176,10 @@ def test_held_request_stays_queued_and_runs_when_clear(systems, on):
     swarm().incidents.insert_one({"_id": "INC-0001", "active": True, "status": "fixing", "opened_at": now()})
     decider.propose("disk_fill", "unix")
     loop = decider.RunnerLoop()
-    assert loop.tick()["verdict"] == "hold"
+    assert loop.tick()["decision"] == "hold"
     assert world().red_agents.find_one({"_id": "runner"})["requests"][0]["status"] == "held"
     swarm().incidents.update_one({"_id": "INC-0001"}, {"$set": {"active": False, "status": "resolved"}})
-    assert loop.tick()["verdict"] == "execute"
+    assert loop.tick()["decision"] == "execute"
 
 
 def test_claude_pick_is_mocked_and_must_be_on_the_menu(systems, on, monkeypatch):

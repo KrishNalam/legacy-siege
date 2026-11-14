@@ -108,7 +108,7 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
     if red and decider.enabled() and not extra.get("runner_decision"):   # RUNNER_DECIDES=1: admit every Red fire
         planner = (extra.get("red") or {}).get("campaign") and "commander"
         decision = decider.admit(f.name, target, params, extra["by"], source=planner or "striker")
-        if decision["verdict"] != "execute":
+        if decision["decision"] != "execute":
             return decider.refused(decision, f.name, target, params)
         extra = {**extra, "runner_decision": decision["_id"]}
     source = "red-fleet" if red else ("manual" if manual else "scenario")

@@ -12,8 +12,9 @@ On, the Runner stops being a dumb door and decides:
   faults need a Striker's victim choice at strike time) or ``execute`` it directly.
 * Seeded scenario steps are always executed on schedule (logged, never held: they are the demo contract).
 
-Every decision is one ``world.chaos_events`` doc ``{type: "runner_decision", verdict, source, choice, reason,
-caps, ...}`` (no ``fault``/``by``/``status`` fields, so fault readers skip it) plus a feed line from ``runner``.
+Every decision is one ``world.chaos_events`` doc in W34's shared decision log (``chaos.decisions``:
+``{kind:"decision", by:"runner", decision:<verdict>, origin:<source>, choice, reason, caps, event}``; fault readers
+skip ``kind:"decision"``) plus a feed line from ``runner``.
 Rule-based by default; ``RUNNER_LLM=1`` lets Claude pick among the vetted candidates (never invent one).
 """
 from __future__ import annotations
@@ -34,13 +35,12 @@ from common import config
 from common.db import next_id, now, swarm, world
 from common.events import think
 
-from . import faults
+from . import decisions, faults
 
 log = logging.getLogger("chaos.decider")
 
 RUNNER_ID = "red-runner"     # the Runner signs its own strikes as a red-* attacker (counts toward the caps)
 BOARD_ID = "runner"           # its row on world.red_agents: reservations, requests, spawns
-DECISION = "runner_decision"
 AGENT_VICTIM = ("agent_kill", "agent_freeze")
 SOURCE_RANK = {"planner": 3, "poison": 2, "seeded": 1}
 UPGRADE_BUSY = ("planning", "testing", "awaiting_approval", "deploying", "deployed")
@@ -87,7 +87,7 @@ def state() -> dict:
         from .runner import current_run
         run = current_run()
     started = (run or {}).get("started_at")
-    q = {"run_id": (run or {}).get("_id"), "by": {"$regex": "^red-"}}
+    q = {"run_id": (run or {}).get("_id"), "by": {"$regex": "^red-"}, **decisions.NOT_DECISION}
     if started:
         q["ts"] = {"$gte": started}
     red = list(w.chaos_events.find(q, {"ts": 1, "fault": 1, "by": 1}).sort("ts", -1)) if run else []
@@ -119,14 +119,13 @@ _said: dict[str, float] = {}
 
 def record(verdict: str, source: str, reason: str, choice: dict | None = None, st: dict | None = None,
            caps: Caps | None = None, **more) -> dict:
-    """One decision -> one chaos_events doc + (rate-limited) one feed line. Returns the doc."""
+    """One decision -> one shared decision-log doc (W34's ``chaos.decisions``: ``kind:"decision"``, ``by:"runner"``,
+    ``decision:<verdict>``, ``origin:<source>``) + a rate-limited feed line. Returns the doc."""
     st = st or state()
     caps = caps or Caps.from_env()
     choice = {k: v for k, v in (choice or {}).items() if k in ("fault", "target", "by", "request", "params")}
-    doc = {"_id": next_id("RDC", db=world()), "type": DECISION, "ts": now(), "run_id": st["run_id"],
-           "round": st["round"], "scenario": st["scenario"], "verdict": verdict, "source": source,
-           "choice": choice, "reason": reason, "caps": _caps_view(st, caps), "event": None, **more}
-    world().chaos_events.insert_one(doc)
+    doc = decisions.log_decision(BOARD_ID, verdict, run_id=st["run_id"], reason=reason, verdict=verdict,
+                                 origin=source, choice=choice, caps=_caps_view(st, caps), event=None, **more)
     what = f"{choice.get('fault')} on {choice.get('target')}" if choice.get("fault") else "nothing"
     route = f" via {more['route']}" if more.get("route") else ""
     key = f"{verdict}|{source}|{choice.get('fault')}|{choice.get('by')}|{reason}"
@@ -218,8 +217,8 @@ def admit(fault: str, target: str | None, params: dict | None, by: str, source: 
 def refused(decision: dict, fault: str, target: str | None, params: dict | None) -> dict:
     """What runner.fire returns for a held/denied strike: looks like a missed event, no CHX was written."""
     return {"_id": decision["_id"], "fault": fault, "target": target, "params": params or {},
-            "status": decision["verdict"] if decision["verdict"] != "execute" else "held", "ts": decision["ts"],
-            "result": {"ok": False, "error": f"Runner {decision['verdict']}: {decision['reason']}"},
+            "status": decision["decision"] if decision["decision"] != "execute" else "hold", "ts": decision["ts"],
+            "result": {"ok": False, "error": f"Runner {decision['decision']}: {decision['reason']}"},
             "runner_decision": decision["_id"]}
 
 
@@ -386,11 +385,11 @@ class RunnerLoop:
         else:
             d = admit(c["fault"], c["target"], c["params"], c["by"], source=c["source"], st=st, caps=self.caps,
                       route="execute", why=rwhy, **extra)
-            if d["verdict"] == "execute":
+            if d["decision"] == "execute":
                 threading.Thread(target=self._fire, args=(c, d, st), daemon=True, name="runner-fire").start()
         if c.get("request"):
-            _set_request(c["request"], {"execute": "executed", "spawn": "spawned"}.get(d["verdict"], d["verdict"]
-                                                                                       if d["verdict"] != "hold" else "held"), d["_id"])
+            _set_request(c["request"], {"execute": "executed", "spawn": "spawned"}.get(d["decision"], d["decision"]
+                                                                                       if d["decision"] != "hold" else "held"), d["_id"])
         return d
 
     def _fire(self, c: dict, d: dict, st: dict) -> None:
