@@ -118,7 +118,7 @@ button { font: inherit; color: inherit; }
 .band { position: absolute; left: -6px; top: -20px; background: var(--red); color: #fff; font-size: 10px; line-height: 15px; padding: 0 .8ch; letter-spacing: .05em; }
 .band.ck { background: var(--ink); color: var(--paper); }
 .band.mem { background: var(--amber); color: #111; }
-.stamp { position: absolute; right: -14px; bottom: -14px; border: 2px solid var(--red); color: var(--red); background: var(--paper); font-size: 13px; line-height: 20px; padding: 0 .8ch; transform: rotate(-6deg); letter-spacing: .04em; }
+.stamp { position: absolute; left: 118px; top: 64px; z-index: 2; white-space: nowrap; border: 2px solid var(--red); color: var(--red); background: var(--paper); font-size: 13px; line-height: 20px; padding: 0 .8ch; transform: rotate(-6deg); letter-spacing: .04em; }
 .stamp.fresh { animation: stamp .35s steps(4, end); }
 @keyframes stamp { from { transform: rotate(-6deg) scale(2.2); opacity: 0; } }
 

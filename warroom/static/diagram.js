@@ -400,10 +400,12 @@ function defenceFor(e, nightIncs) {
   if (["lying_success", "slow_apply", "false_log"].includes(e.fault)) {
     const rj = state.thoughts.find((t) => t.kind === "reject" && ts(t.ts) >= t0 && (!t.system || t.system === e.target));
     const st = nightIncs.flatMap((i) => i.steps || []).find((s) => s.system === e.target && (s.attempts || []).length > 1);
-    if (rj || st) return { c: "ok", t: `GUARD CAUGHT IT: “DONE” BUT NOTHING CHANGED${st?.status === "verified" ? " · REDONE ✓" : ""}` };
+    if (rj || st) return { c: "ok", t: `GUARD CAUGHT THE LIE${st?.status === "verified" ? " · REDONE, VERIFIED" : " (ACK ≠ APPLIED)"}` };
     return { c: "wait", t: "THE GUARD RE-CHECKS EVERY “DONE”" };
   }
-  const inc = nightIncs.find((i) => ts(i.opened_at) >= t0 - 3000 && (i.root_cause_system === e.target || (i.affected || []).includes(e.target) || i.system === e.target));
+  const after = nightIncs.filter((i) => ts(i.opened_at) >= t0 - 3000);
+  const inc = after.find((i) => i.root_cause_system === e.target || (i.affected || []).includes(e.target) || i.system === e.target)
+    || after.find((i) => !i.root_cause_system); // a cascade surfaces downstream first: the root is not known yet
   if (e.fault === "schema_drift") {
     if (inc?.status === "resolved") return { c: "ok", t: "NEW FIELD NAME LEARNED · EVERY AGENT USES IT" };
     return inc ? { c: "wait", t: "WORKING OUT THE NEW FIELD NAME…" } : { c: "wait", t: "LOOKING FOR WHAT CHANGED…" };
@@ -446,7 +448,8 @@ function stripLetter(t) {
   if (t.kind === "recall" && /^Recall hit/.test(x)) return ["R", "r"];
   if (t.kind === "learn" || /^Resolved /.test(x)) return ["M", "m"];
   if (t.kind === "approval" || /destructive|approval/.test(x)) return ["A", "a"];
-  if (/^Sending /.test(x) || t.kind === "action") return ["S", ""];
+  if (/^Sending /.test(x)) return ["S", ""];
+  if (/^Opened INC/.test(x)) return ["!", "k"];
   if (/\/health|^Hop \d|^Reading /.test(x)) return ["H", ""];
   return null;
 }
@@ -504,6 +507,22 @@ function renderBoard() {
   if (host.dataset.html !== html) { host.innerHTML = html; host.dataset.html = html; }
 }
 
+// keyed DOM patch: replace only the items whose markup changed (keeps stepped animations from restarting)
+function patch(host, items, svg = false) {
+  const have = new Map([...host.children].map((e) => [e.dataset.k, e]));
+  for (const it of items) {
+    const el = have.get(it.k);
+    have.delete(it.k);
+    if (el && el.dataset.h === it.html) continue;
+    const t = document.createElement("template");
+    t.innerHTML = svg ? `<svg xmlns="http://www.w3.org/2000/svg">${it.html}</svg>` : it.html.trim();
+    const n = svg ? t.content.firstElementChild.firstElementChild : t.content.firstElementChild;
+    n.dataset.k = it.k; n.dataset.h = it.html;
+    if (el) el.replaceWith(n); else host.appendChild(n);
+  }
+  for (const e of have.values()) e.remove();
+}
+
 let lieShownAt = 0;
 function renderDiagram() {
   // fit the sheet
@@ -522,9 +541,9 @@ function renderDiagram() {
   const lastRj = rejects[rejects.length - 1];
   const lieFresh = lastRj && serverNow() - ts(lastRj.ts) < 1500 && lastRj._id !== lieShownAt;
 
-  let nodes = "";
+  const nodes = []; // [{k, html}] patched by key so live elements (and their animations) survive re-renders
   // systems
-  for (const s2 of CHAIN) nodes += sysModel(s2, inc, lieSys, lieFresh);
+  for (const s2 of CHAIN) nodes.push({ k: `sys:${s2}`, html: sysModel(s2, inc, lieSys, lieFresh) });
   if (lieFresh) lieShownAt = lastRj._id;
   // agents
   const seatModels = {};
@@ -532,78 +551,84 @@ function renderDiagram() {
     const a = state.agents.get(id); if (!a) continue;
     const m = seatModel(a, since, lt, inc); seatModels[id] = m;
     const bar = Array.from({ length: 10 }, (_, i) => `<i class="${i < m.life ? "f" : ""}"></i>`).join("");
-    nodes += `<div class="seat ${m.cls}" data-id="${esc(id)}" style="left:${p[0]}px;top:${p[1]}px"><div class="who"><span>${U(m.name)}</span><span class="gl">${GLYPH[m.role] || "·"}</span></div>
-      <div class="rl">${TAG[m.role] || U(m.role)}</div><div class="bar" title="moves tonight">${bar}</div><div class="ph">${esc(m.ph)}</div><div class="tx">${esc(m.tx)}</div></div>`;
+    nodes.push({ k: `seat:${id}`, html: `<div class="seat ${m.cls}" data-id="${esc(id)}" style="left:${p[0]}px;top:${p[1]}px"><div class="who"><span>${U(m.name)}</span><span class="gl">${GLYPH[m.role] || "·"}</span></div>
+      <div class="rl">${TAG[m.role] || U(m.role)}</div><div class="bar" title="moves tonight">${bar}</div><div class="ph">${esc(m.ph)}</div><div class="tx">${esc(m.tx)}</div></div>` });
   }
   // attacker box: the personas who struck tonight
   const ds = duels();
-  const per = [...new Set(ds.map((d) => d.who))];
-  nodes += `<div class="side red" style="left:${ATK.x}px;top:${ATK.y}px;width:${ATK.w}px"><div class="hd"><span>THE ATTACKERS</span><small>US</small></div>
-    ${ds.length ? ds.slice(-4).map((d) => `<div class="ln"><span class="p">${esc(d.who)}</span> ${esc(d.atk)}</div>`).join("") : '<div class="ln dim">WAITING FOR NIGHT 1.</div><div class="ln dim">WE BREAK THE BANK;</div><div class="ln dim">THE AGENTS FIX IT.</div>'}
-    ${per.length ? "" : ""}</div>`;
+  nodes.push({ k: "atk", html: `<div class="side red" style="left:${ATK.x}px;top:${ATK.y}px;width:${ATK.w}px"><div class="hd"><span>THE ATTACKERS</span><small>US</small></div>
+    ${ds.length ? ds.slice(-4).map((d) => `<div class="ln"><span class="p">${esc(d.who)}</span> ${esc(d.atk)}</div>`).join("") : '<div class="ln dim">WAITING FOR NIGHT 1.</div><div class="ln dim">WE BREAK THE BANK;</div><div class="ln dim">THE AGENTS FIX IT.</div>'}</div>` });
   // memory box
   const pbs = [...state.playbooks.values()];
   const recallOn = live?.recall?.used || (inc?.recall?.used && inc?.status === "resolved");
   const saved = inc?.status === "resolved";
-  const cnt = state.counts || {};
   const dots = Array.from({ length: 48 }, (_, i) => `<i class="${i < Math.min(48, pbs.length * 6) ? "on" : ""}"></i>`).join("");
-  nodes += `<div class="side mem" style="left:${MEM.x}px;top:${MEM.y}px"><div class="hd"><span>MONGODB · MEMORY</span><small>${(state.opsPerSec || 0).toFixed(1)} W/S</small></div>
+  nodes.push({ k: "mem", html: `<div class="side mem" style="left:${MEM.x}px;top:${MEM.y}px"><div class="hd"><span>MONGODB · MEMORY</span><small>${(state.opsPerSec || 0).toFixed(1)} W/S</small></div>
     <div class="ln">${pbs.length} LESSON${pbs.length === 1 ? "" : "S"} SAVED${saved ? ' <span style="color:var(--amber)">+1 TONIGHT</span>' : ""}</div>
-    <div class="ln">${recallOn ? '<span style="color:var(--amber)">RECALLED BY VECTOR SEARCH</span>' : live ? "SEARCHED BY MEANING ($vectorSearch)" : "EVERY FIX IS REMEMBERED"}</div>
-    <div class="ln dim">${(cnt.thoughts ?? cnt["swarm.thoughts"] ?? state.thoughts.length).toLocaleString?.() ?? ""} THOUGHTS · ${state.agents.size} AGENTS</div><div class="dots">${dots}</div></div>`;
+    <div class="ln">${recallOn ? '<span style="color:var(--amber)">RECALLED BY VECTOR SEARCH</span>' : live ? "SEARCHED BY MEANING" : "EVERY FIX IS REMEMBERED"}</div>
+    <div class="ln dim">${state.thoughts.filter((t) => ts(t.ts) >= since).length} THOUGHTS TONIGHT</div><div class="dots">${dots}</div></div>` });
 
-  // wires
-  let w = "";
-  const lbl = (c, txt, cls = "") => `<text class="wl ${cls}" x="${c.mx}" y="${c.my - 4}" text-anchor="middle">${esc(txt)}</text>`;
-  // the dependency chain (double rule) with "depends on" labels
+  // wires: orthogonal, in the two corridors above and below the chain, so they never run under a card
+  const W = []; // [{k, html}]
+  const CT = 266, CB = 436; // corridor y (top / bottom); each wire takes its own lane
+  let lt0 = 0, lb0 = 0;
+  const laneT = () => CT + 5 * (lt0++ % 4), laneB = () => CB - 5 * (lb0++ % 4);
+  const path = (k, d, cls, label, lx, ly, anchor = "start") => W.push({ k, html: `<g><path class="w ${cls}" d="${d}"/>${label ? `<text class="wl ${cls.replace(/\bon\b/, "")} ${cls.includes("on") ? "on" : ""}" x="${lx}" y="${ly}" text-anchor="${anchor}">${esc(label)}</text>` : ""}</g>` });
+  // the dependency chain (double rule)
   for (let i = 0; i < CHAIN.length - 1; i++) {
     const a = sysBox(CHAIN[i]), b = sysBox(CHAIN[i + 1]);
     const blames = state.systems.get(CHAIN[i])?.blames === CHAIN[i + 1] && live;
     const y = a.y + a.h / 2, x1 = a.x + a.w + 6, x2 = b.x - 8;
-    w += `<path class="w dbl ${blames ? "red" : ""}" d="M${x1} ${y} L${x2} ${y}"/><path class="w dbl-in" d="M${x1} ${y} L${x2} ${y}"/>`;
-    w += `<text class="wl ${blames ? "red" : ""}" x="${(x1 + x2) / 2}" y="${y - 8}" text-anchor="middle">${blames ? "BLAMES" : "NEEDS"}</text>`;
+    W.push({ k: `chain:${i}`, html: `<g><path class="w dbl ${blames ? "red" : ""}" d="M${x1} ${y} L${x2} ${y}"/><path class="w dbl-in" d="M${x1} ${y} L${x2} ${y}"/><text class="wl ${blames ? "red" : ""}" x="${(x1 + x2) / 2}" y="${y - 8}" text-anchor="middle">${blames ? "BLAMES" : "NEEDS"}</text></g>` });
   }
-  // attacker → systems / victims
-  const atkBox = { x: ATK.x, y: ATK.y, w: ATK.w, h: 104 };
-  const hitSys = new Set(ds.filter((d) => d.e.fault !== "agent_kill" && SYSXY[d.e.target]).map((d) => d.e.target));
-  let k = -8;
-  // attack wires arc over the chain and land on the top of the system they hit
-  for (const s2 of hitSys) {
-    const b = sysBox(s2), sx = ATK.x + ATK.w, sy = ATK.y + 16 + k, ex = b.x + 22 + k, ey = b.y - 8;
-    const ok = (state.systems.get(s2)?.status || "up") === "up" && !(live && live.root_cause_system === s2);
-    w += `<path class="w red ${ok ? "" : "on"}" d="M${sx} ${sy} C${sx + 140} ${sy} ${ex} ${ey - 120} ${ex} ${ey}"/>`; k += 10;
-  }
-  if (hitSys.size) w += `<text class="wl red" x="${ATK.x + ATK.w + 14}" y="${ATK.y + 8}">ATTACKS</text>`;
-  for (const d of ds) {
-    const v = d.e.fault === "agent_kill" && d.e.result?.agent; if (!v || !seats[v]) continue;
-    const c = curve(atkBox, seatBox(seats[v])); w += `<path class="w red on" d="${c.d}"/>` + lbl(c, "KILL", "red");
-  }
-  // agents → the system they are on
+  // agents → the system they are on (top seats drop to the system's top, bottom seats rise to its bottom)
+  const atSys = {};
   for (const [id, m] of Object.entries(seatModels)) {
     if (!m.sys || m.cls.startsWith("idle") || m.cls.startsWith("dead")) continue;
-    const c = curve(seatBox(seats[id]), sysBox(m.sys));
-    const col = m.cls.includes("caught") ? "red" : m.cls.includes("ok") ? "grn" : "";
-    w += `<path class="w on ${col}" d="${c.d}"/>` + lbl(c, m.ph.split(" · ")[0], `on ${col}`);
+    const p = seats[id], b = sysBox(m.sys), top = p[1] < b.y;
+    const n = (atSys[`${m.sys}${top}`] = (atSys[`${m.sys}${top}`] || 0) + 1);
+    const sx = p[0] + AW / 2, ex = b.x + 40 + (n - 1) * 26;
+    const col = m.cls.includes("caught") ? "red" : m.cls.includes("ok") ? "grn" : m.cls.includes("saved") ? "amb" : "";
+    const d = top ? `M${sx} ${p[1] + AH - 2} L${sx} ${laneT()} L${ex} ${CT + 5 * ((lt0 - 1) % 4)} L${ex} ${b.y - 8}`
+      : `M${sx} ${p[1]} L${sx} ${laneB()} L${ex} ${CB - 5 * ((lb0 - 1) % 4)} L${ex} ${b.y + b.h + 8}`;
+    path(`ag:${id}:${m.sys}`, d, `on ${col}`);
   }
-  // takeovers: nurse → the dead agent's seat
+  // attacker → systems it hit: out of the box's right side, up into the top corridor, down onto the system
+  const hitSys = [...new Set(ds.filter((d) => d.e.fault !== "agent_kill" && SYSXY[d.e.target]).map((d) => d.e.target))];
+  hitSys.forEach((s2, i) => {
+    const b = sysBox(s2), sx = ATK.x + ATK.w, sy = ATK.y + 20 + 8 * i, cx = sx + 24 + 8 * i, cy = CT - 4 - 6 * i, ex = b.x + b.w - 24 - 8 * i;
+    const hurt = (state.systems.get(s2)?.status || "up") !== "up" || (live && live.root_cause_system === s2);
+    path(`atk:${s2}`, `M${sx} ${sy} L${cx} ${sy} L${cx} ${cy} L${ex} ${cy} L${ex} ${b.y - 8}`, `red ${hurt ? "on" : ""}`, i === 0 ? "ATTACKS" : "", cx + 6, cy - 4);
+  });
+  // attacker → killed agent
+  for (const d of ds) {
+    const v = d.e.fault === "agent_kill" && d.e.result?.agent; if (!v || !seats[v]) continue;
+    const p = seats[v], vx = p[0] + AW / 2 + 20, sx = ATK.x + 30;
+    const dd = p[1] > ATK.y ? `M${sx} ${ATK.y + 84} L${sx} ${CB + 6} L${vx} ${CB + 6} L${vx} ${p[1] - 2}` : `M${sx} ${ATK.y} L${sx} ${CT - 10} L${vx} ${CT - 10} L${vx} ${p[1] + AH - 2}`;
+    path(`kill:${d.id}`, dd, "red on", `KILLED ${U(agentName(v))}`, sx + 8, p[1] > ATK.y ? CB + 2 : CT - 14);
+  }
+  // takeovers: the nurse's job came from the dead agent's seat
   for (const h of nightIncidents().flatMap((i) => i.handoffs || [])) {
     if (!seats[h.from] || !seats[h.to]) continue;
-    const c = curve(seatBox(seats[h.to]), seatBox(seats[h.from]), 6);
-    w += `<path class="w amb on" d="${c.d}"/>` + lbl(c, "TOOK OVER ITS JOB", "amb");
+    const a = seats[h.from], b = seats[h.to], y = (a[1] > 300 ? a[1] + AH + 6 : a[1] - 8);
+    const x1 = a[0] + AW / 2 + 40, x2 = b[0] + AW / 2 - 20;
+    const yy = a[1] > 300 ? Math.min(FH, a[1] + AH + 4) : a[1] - 6;
+    path(`ho:${h.from}:${h.to}`, a[1] === b[1] ? `M${x1} ${a[1] + AH - 2} L${x1} ${yy + 6} L${x2} ${yy + 6} L${x2} ${b[1] + AH - 2}` : `M${x1} ${a[1]} L${x1} ${y} L${x2} ${y} L${x2} ${b[1]}`,
+      "amb on", "TOOK OVER ITS JOB", (x1 + x2) / 2, yy + 3, "middle");
   }
-  // memory: recall → scout, lesson saved
-  const memBox = { x: MEM.x, y: MEM.y, w: MEM.w, h: 104 };
+  // memory: recalled → the scout; lesson saved ← the fixed system
+  const memH = 96;
   if (recallOn) {
     const sc = inc.owner && seats[inc.owner] ? inc.owner : Object.keys(seats).find((i) => roleOf(i) === "scout");
-    if (sc) { const c = curve(memBox, seatBox(seats[sc])); w += `<path class="w amb on" d="${c.d}"/>` + lbl(c, "REMEMBERED", "amb"); }
+    if (sc) { const p = seats[sc], mx = MEM.x + 30, px = p[0] + AW / 2 + 30, y = CT - 10;
+      path(`recall:${inc._id}`, `M${mx} ${MEM.y} L${mx} ${y} L${px} ${y} L${px} ${p[1] + AH - 2}`, "amb on", "REMEMBERED: SKIP THE SEARCH", mx - 8, y - 4, "end"); }
   }
-  if (saved && inc.root_cause_system && SYSXY[inc.root_cause_system]) {
-    const c = curve(sysBox(inc.root_cause_system), memBox, 10); w += `<path class="w amb" d="${c.d}"/>` + lbl(c, "LESSON SAVED", "amb");
+  if (saved && SYSXY[inc.root_cause_system]) {
+    const b = sysBox(inc.root_cause_system), y = b.y + b.h + 20, mx = MEM.x + 60;
+    path(`saved:${inc._id}`, `M${b.x + b.w - 30} ${b.y + b.h + 6} L${b.x + b.w - 30} ${y} L${mx} ${y} L${mx} ${MEM.y + memH}`, "amb", "LESSON SAVED", mx - 8, y - 4, "end");
   }
-  const wsvg = $("#wires");
-  if (wsvg.dataset.html !== w) { wsvg.innerHTML = w; wsvg.dataset.html = w; }
-  const host = $("#nodes");
-  if (host.dataset.html !== nodes) { host.innerHTML = nodes; host.dataset.html = nodes; }
+  patch($("#wires"), W, true);
+  patch($("#nodes"), nodes);
 
   // headings
   const busyN = [...state.agents.values()].filter((a) => a.status === "working").length;
