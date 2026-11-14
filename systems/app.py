@@ -21,6 +21,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -58,13 +59,21 @@ def create_app(tick_s: float | None = None) -> FastAPI:
     tick_s = float(os.environ.get("SYSTEMS_TICK_S", 1.0)) if tick_s is None else tick_s
     estate = Estate()
 
+    # SYSTEMS_TICK_FIXED=1 (demo pace, default off): tick on a fixed cadence, i.e. sleep tick_s minus the time
+    # the tick itself took. Locally a tick takes milliseconds, so nothing changes; against a remote cluster a
+    # tick is several transactions (~2 s at 90 ms RTT) and the default "work, then sleep tick_s" makes every
+    # simulated second last ~3 s. A short floor still lets waiting HTTP threads take the estate lock.
+    fixed_rate = os.environ.get("SYSTEMS_TICK_FIXED", "").strip().lower() in ("1", "true", "yes", "on")
+    floor_s = min(0.2, tick_s)
+
     async def tick_loop() -> None:
         while True:
+            t0 = time.monotonic()
             try:
                 await asyncio.to_thread(estate.tick)
             except Exception:  # never let one bad tick kill the estate
                 log.exception("tick failed")
-            await asyncio.sleep(tick_s)
+            await asyncio.sleep(max(floor_s, tick_s - (time.monotonic() - t0)) if fixed_rate else tick_s)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
