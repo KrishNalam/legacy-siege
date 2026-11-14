@@ -46,7 +46,7 @@ async def build(hub: Hub) -> dict:
     incidents = {i["_id"]: i for i in recent + active}
     inc_ids = list(incidents)
     (systems, agents, tasks, thoughts, chaos, approvals_pending, approvals_recent, upgrades, ledger, playbooks,
-     logs, runs, current, counts, roster) = await asyncio.gather(
+     logs, runs, current, comms, counts, roster) = await asyncio.gather(
         _find(w.systems, sort=[("_id", ASCENDING)]),
         _find(s.agents, sort=[("_id", ASCENDING)]),
         _find(s.tasks, {"incident": {"$in": inc_ids}}),
@@ -60,6 +60,7 @@ async def build(hub: Hub) -> dict:
         _recent_logs(w),
         _find(w.runs, sort=[("started_at", ASCENDING)], limit=50),
         s.stats.find_one({"_id": "current"}),
+        s.stats.find_one({"_id": "comms"}),  # SWARM_COMMS=1 prioritiser totals; None when the switch is off
         hub.counts(),
         _find(s.roster, sort=[("_id", ASCENDING)]),  # Comms live roster (SWARM_COMMS=1; else empty)
     )
@@ -75,7 +76,7 @@ async def build(hub: Hub) -> dict:
         "approvals": list(approvals.values()), "upgrades": list(reversed(upgrades)),
         "ledger": list(reversed(ledger)), "playbooks": list(reversed(playbooks)),
         "logs": {g["_id"]: list(reversed(g["lines"])) for g in logs if g.get("_id")},
-        "runs": runs, "roster": roster, "current": current, "run": run, "counts": counts,
+        "runs": runs, "roster": roster, "current": current, "run": run, "counts": counts, "comms": comms,
         "meta": {"dbs": db_names(), "stream": "live" if hub.connected else "down",
                  "embed_model": config.VOYAGE_MODEL if config.VOYAGE_API_KEY else "local-hash-v1",
                  "server_time": datetime.now(timezone.utc)},
