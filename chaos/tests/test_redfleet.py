@@ -145,7 +145,8 @@ def test_gate():
     assert "Gardener" in gate(snap(upgrade_busy=1), c, 0, t)
     old, recent = t - timedelta(seconds=60), t - timedelta(seconds=5)
     assert "budget" in gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "ok"}] * 2), cfg(max_attacks=2), 0, t)
-    assert gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "ok"}] * 9), c, 0, t) is None   # no cap
+    assert "budget" in gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "ok"}] * 2), c, 0, t)  # default 2
+    assert gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "ok"}] * 9), cfg(max_attacks=0), 0, t) is None
     assert "in flight" in gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "firing"}]), c, 0, t)
     assert "cooling" in gate(snap(red_attacks=[{"fault": "a", "ts": recent, "status": "ok"}]), c, 0, t)
     assert "unfold" in gate(snap(night_started=t - timedelta(seconds=10)), c, 25, t)

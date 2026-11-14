@@ -27,8 +27,9 @@ def _csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 
 @dataclass
 class Settings:
-    """Krish waived caps and cooldowns: the defaults are pacing only (0 = no cap)."""
-    max_attacks: int = 0          # per agent per night; 0 = unlimited
+    """Pacing only. Default cap 2 strikes per agent per night so the estate can go green and autoplay
+    continues (R1 finding 2); RED_FLEET_MAX_ATTACKS=0 = unlimited."""
+    max_attacks: int = 2          # per agent per night; 0 = unlimited
     cooldown_s: float = 30.0      # per agent, between its own strikes (pacing, so the war room stays readable)
     first_strike_s: float = 0.0   # extra wait after a night starts (each persona adds its own stagger)
     poll_s: float = 2.0
@@ -42,7 +43,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         f = config.env_float
         return cls(
-            max_attacks=int(f("RED_FLEET_MAX_ATTACKS", 0)),
+            max_attacks=int(f("RED_FLEET_MAX_ATTACKS", 2)),
             cooldown_s=max(0.0, f("RED_FLEET_COOLDOWN_S", 30)),
             first_strike_s=max(0.0, f("RED_FLEET_FIRST_STRIKE_S", 0)),
             poll_s=max(0.5, f("RED_FLEET_POLL_S", 2)),
