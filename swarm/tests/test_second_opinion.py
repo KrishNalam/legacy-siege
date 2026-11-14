@@ -316,3 +316,41 @@ def test_never_clobbers_schema_mapping(inc, monkeypatch):
     so.start("scout-1", d, state, PLAN, "mainframe", "batch_abort")
     time.sleep(0.3)
     assert col("incidents").find_one({"_id": "INC-0099"})["ai"] == {"kind": "schema_mapping", "hypothesis": "w3"}
+
+
+
+def test_decide_respects_one_hard_deadline(inc, monkeypatch):
+    doc, state = inc
+    monkeypatch.setattr(so.config, "AI_DRIVE_TIMEOUT_S", 1.0)
+
+    def slow(*a, **k):
+        time.sleep(3)
+        return {"status": "done"}  # would be ignored: too late
+    monkeypatch.setattr(so, "consult", slow)
+    t = time.monotonic()
+    d = so.decide("scout-1", doc, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
+    assert time.monotonic() - t < 2.0 and d["decision"] == "rules_plan"
+    ai = col("incidents").find_one({"_id": "INC-0099"})["ai"]
+    assert ai["status"] == "offline" and ai["guard"] == "timeout"
+
+
+def test_redaction_before_truncation_and_quoted_credentials(monkeypatch):
+    from common import llm
+    monkeypatch.setenv("DB_PASSWORD", "abc<def123")
+    monkeypatch.setenv("SHORT_TOKEN", "hunt2")
+    ev = so.number_evidence({"symptoms": [], "path": [], "findings": {}}, {"unix": [
+        {"level": "WARN", "code": "X", "line": "x" * 150 + " login failed using abc<def123"},
+        {"level": "INFO", "code": "Y", "line": '{"password": "zebra77", "user": "op"} token hunt2'}]})
+    texts = " ".join(e["text"] for e in ev)
+    assert "abc" not in texts.replace("abc<def123", "") and "def1" not in texts
+    assert "zebra77" not in texts and "hunt2" not in texts
+    assert "abc‹def" not in llm.fence("u", "login abc<def123") and "[redacted]" in llm.fence("u", "login abc<def123")
+    assert llm.redact("flag=true count=1") == "flag=true count=1"  # harmless values untouched
+
+
+def test_stats_write_never_blocks(monkeypatch):
+    from common import llm
+    t = time.monotonic()
+    for _ in range(50):
+        llm._record("t", "timeout")
+    assert time.monotonic() - t < 0.2 and llm.guard_stats()["t.timeout"] >= 50

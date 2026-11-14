@@ -64,5 +64,8 @@ class Systems:
     def version(self, sys: str) -> int:
         return int(self.health(sys).get("version", 1))
 
+    def set_timeout(self, seconds: float) -> None:
+        self._c.timeout = httpx.Timeout(seconds)
+
     def close(self) -> None:
         self._c.close()

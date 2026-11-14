@@ -13,6 +13,7 @@ capacity, on timeout or on any error → no `ai` (or `ai.status == "offline"`): 
 """
 from __future__ import annotations
 
+import queue
 import threading
 import time
 import uuid
@@ -140,7 +141,8 @@ def number_evidence(ev: dict, logs: dict) -> list[dict]:
     for sys in config.SYSTEM_IDS:
         for ln in (logs.get(sys) or [])[-LOG_LINES:]:
             items.append((f"{sys} /logs", f"{ln.get('level', '')} {ln.get('code', '')} {ln.get('line', '')}".strip()))
-    return [{"id": f"E{i}", "src": src, "text": text[:160]} for i, (src, text) in enumerate(items, 1)]
+    # redact the FULL raw text first, then clean/truncate: this is both what Claude sees and what the card stores
+    return [{"id": f"E{i}", "src": src, "text": llm.clean(llm.redact(text), 160)} for i, (src, text) in enumerate(items, 1)]
 
 
 def build_prompt(ev: dict, evidence: list[dict], catalog: dict) -> str:
@@ -356,16 +358,20 @@ def bump_tally(verdicts: list[dict]) -> dict:
 def _gather(left) -> tuple[dict, dict, dict]:
     """Ops catalog, read-backs and recent logs per system, within the time left (fallbacks on any error)."""
     catalog, readback, logs = {}, {}, {}
-    sysc = Systems(timeout=1.5)
+    reserve = 2.5  # keep this much of the budget for Claude
+    sysc = Systems(timeout=1.0)
     try:
         for s in config.SYSTEM_IDS:
-            fast = left() > 2.5
             for name, fn, fallback in (("ops", sysc.ops, static_catalog()[s]), ("state", sysc.state, None),
                                        ("logs", lambda x: sysc.logs(x, limit=LOG_LINES), [])):
-                try:
-                    val = fn(s) if fast else fallback
-                except Exception:
-                    val = fallback
+                spare = left() - reserve
+                val = fallback
+                if spare > 0.05:  # checked before EVERY request, each bounded by what is left
+                    try:
+                        getattr(sysc, "set_timeout", lambda _t: None)(min(1.0, spare))
+                        val = fn(s)
+                    except Exception:
+                        val = fallback
                 {"ops": catalog, "state": readback, "logs": logs}[name][s] = val or fallback
     finally:
         sysc.close()
@@ -380,8 +386,11 @@ def consult(ev: dict, plan: list[dict], root: str, fault_class: str, budget_s: f
     catalog, readback, logs = _gather(left)
     evidence_at = now()
     evidence = number_evidence(ev, logs)
-    out, meta = llm.guarded_json(task, SYSTEM_PROMPT, build_prompt(ev, evidence, catalog), _schema(),
-                                 max_tokens=1100, timeout=max(0.5, min(llm_timeout, left())))
+    if left() < 1.0:
+        out, meta = None, {"outcome": "timeout"}
+    else:
+        out, meta = llm.guarded_json(task, SYSTEM_PROMPT, build_prompt(ev, evidence, catalog), _schema(),
+                                     max_tokens=1100, timeout=min(llm_timeout, left()))
     latency = int((time.monotonic() - t0) * 1000)
     if out is None:
         return {"status": "offline", "latency_ms": latency, "guard": meta["outcome"],
@@ -428,27 +437,44 @@ def hypothesis_lines(ai: dict) -> list[str]:
 
 def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: str, fault_class: str,
            say=lambda text: None) -> dict:
-    """AI_DRIVES: ask Claude synchronously (hard cap AI_DRIVE_TIMEOUT_S). If its plan passes every guardrail it
-    is the plan that runs; otherwise the rules plan runs and `ai.decision_reason` says why. Never raises.
+    """AI_DRIVES: ask Claude, with ONE hard deadline (AI_DRIVE_TIMEOUT_S) for evidence + inference. If its plan
+    passes every guardrail it is the plan that runs; otherwise, or when the deadline passes, the rules plan runs
+    and `ai.decision_reason` says why. A late answer is discarded. Never raises.
     Returns {"plan": [steps for the scout], "decision": "ai_plan"|"rules_plan", "reason": str}."""
     rules = [dict(s, source="policy") for s in rules_plan]
+    cap = config.AI_DRIVE_TIMEOUT_S
+    t0 = time.monotonic()
     try:
         inc_id, opened_at = inc["_id"], inc["opened_at"]
         rid = uuid.uuid4().hex[:12]
         base = {"kind": KIND, "model": config.LLM_MODEL, "request_id": rid, "started_at": now(), "drives": True}
-        r = col("incidents").update_one(  # never clobber another AI feature's doc (e.g. W3's schema_mapping)
-            {"_id": inc_id, "opened_at": opened_at, "$or": [{"ai": {"$exists": False}}, {"ai.kind": KIND}]},
-            {"$set": {"ai": {**base, "status": "thinking"}}})
+        with pymongo.timeout(1.0):
+            r = col("incidents").update_one(  # never clobber another AI feature's doc (e.g. W3's schema_mapping)
+                {"_id": inc_id, "opened_at": opened_at, "$or": [{"ai": {"$exists": False}}, {"ai.kind": KIND}]},
+                {"$set": {"ai": {**base, "status": "thinking"}}})
         if r.matched_count != 1:
             return {"plan": rules, "decision": "rules_plan", "reason": "another AI step already owns this incident"}
         mine = {"_id": inc_id, "opened_at": opened_at, "ai.request_id": rid}
-        say(f"Asking Claude to reason over the evidence (hard limit {config.AI_DRIVE_TIMEOUT_S:.1f}s); "
-            f"its plan runs only if it passes every guardrail.")
         plan_n = [dict(s, n=i) for i, s in enumerate(rules_plan, 1)]
-        with pymongo.timeout(config.AI_DRIVE_TIMEOUT_S + 5):
-            ai = {**base, **consult(findings_of(inc, state), plan_n, root, fault_class,
-                                    budget_s=config.AI_DRIVE_TIMEOUT_S + 1.0, llm_timeout=config.AI_DRIVE_TIMEOUT_S,
-                                    task="ai_drive")}
+        ev = findings_of(inc, state)
+        box: queue.Queue = queue.Queue(maxsize=1)
+
+        def work():  # evidence + Claude + judge; touches no incident state
+            try:
+                box.put(consult(ev, plan_n, root, fault_class, budget_s=cap - (time.monotonic() - t0),
+                                llm_timeout=cap, task="ai_drive"))
+            except Exception as e:  # noqa: BLE001
+                box.put({"status": "offline", "guard": "error", "error": type(e).__name__,
+                         "latency_ms": int((time.monotonic() - t0) * 1000)})
+        threading.Thread(target=work, name=f"ai-drive-{inc_id}", daemon=True).start()
+        say(f"Asking Claude to reason over the evidence (hard limit {cap:.1f}s); its plan runs only if it "
+            f"passes every guardrail.")
+        try:
+            got = box.get(timeout=max(0.1, cap - (time.monotonic() - t0)))
+        except queue.Empty:  # deadline: whatever arrives later is ignored
+            got = {"status": "offline", "guard": "timeout", "error": f"no decision within {cap:.1f}s",
+                   "latency_ms": int((time.monotonic() - t0) * 1000)}
+        ai = {**base, **got}
         if ai["status"] != "done":
             decision, reason = "rules_plan", f"Claude unavailable ({ai['error']}); rules plan runs"
         else:
@@ -470,7 +496,11 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
             else:
                 decision, reason = "ai_plan", "Claude's plan passed P1–P6; executing it, the Guard verifies every step"
         ai.update(decision=decision, decision_reason=reason)
-        _finish(agent_id, inc_id, mine, ai)
+        try:
+            with pymongo.timeout(1.5):  # bookkeeping is bounded too; the decision stands either way
+                _finish(agent_id, inc_id, mine, ai)
+        except Exception:
+            pass
         say(f"Guardrail: {reason}.")
         if decision == "ai_plan":
             by_n = {v["plan_n"]: (v, o) for v, o in zip(ai["verdicts"], ai["proposed_ops"])}
