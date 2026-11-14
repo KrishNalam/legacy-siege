@@ -246,7 +246,7 @@ fix steps land; `red-scout-systems`: weak systems, open vulns, which systems alr
 fallback) picks ONE campaign from the vetted combos feasible right now (`lie-then-freeze`, `lie-then-kill`,
 `false-log-then-kill`, `break-then-drift`, `kill-then-exploit`), assigns each step to a Striker on the board, and the
 Striker executes it from its own menu through `runner.fire` (event `red.campaign = {id, step, of, combo}`). After the
-last step it watches the Hive (`RED_COMMANDER_OBSERVE_S`, 20 s) and reflects (Guard catch, Nurse handoffs, recovery
+last step it watches the Hive (`RED_COMMANDER_OBSERVE_S`, 45 s) and reflects (Guard catch, Nurse handoffs, recovery
 time) into `chaos_events.red.campaign_reflection` and its lessons, which feed its next THINK. Knobs:
 `RED_COMMANDER_COOLDOWN_S` (45), `RED_COMMANDER_FIRST_S` (20), `RED_COMMANDER_STEP_GAP_S` (3),
 `RED_COMMANDER_STEP_TIMEOUT_S` (90, an unexecuted step calls the campaign off), `RED_COMMANDER_MAX` (0 = unlimited).
