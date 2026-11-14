@@ -387,3 +387,26 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   a deleted agent doc (dynamic retire) becomes `retired` for 60 s, then is removed. Full reset clears it.
   War room: snapshot `roster`, change stream `coll:"roster"`, `GET /api/roster` → `{enabled, counts, agents}`;
   compact card `warroom/static/js/roster.js` (`installRoster(cardEl)`, `rosterRows()`), hidden while empty.
+- **Red Planner (W34; additive, `RED_PLANNER=1`, default off, only with `RED_COMMANDER=1` + `RED_FLEET=1`).** Off = the
+  Commander is unchanged. On, before each Commander THINK the Planner (`chaos.redfleet.planner`, same thread):
+  - spawns 2 one-shot scouts and waits for their reports: `world.red_agents` `red-scout-swarm` (studies the Blue Hive)
+    and `red-scout-legacy` (studies the legacy estate) `{kind:"scout", status:"reported", spawned_by:"red-planner",
+    planning_id, findings, run_id, spawns}`;
+  - writes `red-planner {kind:"planner", status, brief:{planning_id, focus:guard|nurse|memory|intrusion|compound,
+    priority:high|normal, prefer[combo ids], reason, planner:claude|rule, scouts}}`. Claude may only pick a feasible
+    focus (else rules). The Commander gets the brief in its prompt and prefers those combos;
+  - campaigns, Striker `order`s and `chaos_events.red.campaign` gain `planning_id, priority, focus`;
+  - with `RUNNER_DECIDES=1` the campaign is handed to the Runner: one `chaos.decider.propose(fault, target, params,
+    by="red-planner", campaign={id, step, of, combo, ordered_by, planning_id, priority, focus}, prefer=spawn|execute)`
+    per step, no Striker orders; the Commander follows the requests (event = CHX with `red.request`). Runner off =
+    Striker orders as before;
+  - decision log (`chaos.decisions`): `{kind:"decision", by:"red-planner", decision:spawn|campaign_brief|propose|handoff,
+    planning_id, ...}`. Thoughts from agent `red-planner`, role `red`.
+- **Runner decisions (W35; additive, `RUNNER_DECIDES=1`, default off).** Off = `runner.fire` unchanged.
+  - **Admission.** On, a fire with `extra.by` = `red-*` goes through `chaos.decider.admit`. A held or denied fire returns
+    `{status:"hold"|"deny", result:{ok:false,error}}`, and no CHX event is written.
+  - **Decision log.** Each decision is a `world.chaos_events` doc in W34's shared log (`chaos.decisions`):
+    `{kind:"decision", by:"runner", decision:pick|execute|hold|deny|spawn, origin:striker|commander|planner|poison|seeded,
+    choice:{fault,target,by,request}, caps, reason, event}`. Executed CHX events carry `runner_decision`.
+  - **Board state** lives on `world.red_agents {_id:"runner", night, strikes, spawns, last_strike_at, requests[]}`.
+  - **Seeded steps** are always executed and logged.

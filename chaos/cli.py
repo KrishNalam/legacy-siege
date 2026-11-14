@@ -33,6 +33,10 @@ def _fmt_result(ev: dict) -> str:
 
 
 def _print_event(ev: dict) -> None:
+    if ev.get("kind") == "decision":   # a Red Planner / Runner decision, not an attack
+        console.print(f"[bold magenta]◆ {ev['_id']}[/] {ev.get('by')} {ev.get('decision')} "
+                      f"[dim]{ev.get('run_id') or ''}[/]  {ev.get('reason') or ''}")
+        return
     who = "manual" if ev.get("manual") else (ev.get("scenario") or "")
     console.print(f"[bold red]⚡ {ev['_id']}[/] {ev['fault']} → [bold]{ev['target']}[/] "
                   f"[dim]{json.dumps(ev['params'])} {ev.get('run_id') or ''} {who}[/]  {_fmt_result(ev)}")

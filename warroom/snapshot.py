@@ -51,7 +51,7 @@ async def build(hub: Hub) -> dict:
         _find(s.agents, sort=[("_id", ASCENDING)]),
         _find(s.tasks, {"incident": {"$in": inc_ids}}),
         _find(s.thoughts, sort=[("ts", DESCENDING)], limit=50),
-        _find(w.chaos_events, sort=[("ts", DESCENDING)], limit=20),
+        _find(w.chaos_events, {"kind": {"$ne": "decision"}}, [("ts", DESCENDING)], 20),
         _find(s.approvals, {"status": "pending"}, [("ts", ASCENDING)]),
         _find(s.approvals, sort=[("ts", DESCENDING)], limit=5),
         _find(s.upgrade_requests, sort=[("ts", DESCENDING)], limit=5),
