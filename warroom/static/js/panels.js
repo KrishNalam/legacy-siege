@@ -255,7 +255,7 @@ export class Panels {
       ? '<div class="ai-flow"><b>rules had no fix</b> → <i>Claude proposed a mapping</i> → <i>Guard verified by read-back</i></div>'
       : '<div class="ai-flow"><b>Claude proposes</b> → <i>guardrail + read-back check</i> → <i>Guard verifies</i> · nothing Claude says runs unchecked</div>';
     const t = ai.tally;
-    const tally = t ? `<div class="ai-tally">all incidents · ${esc(t.proposed)} proposed · <b class="ok">${esc(t.accepted)} accepted</b> · <b class="bad">${esc(t.overruled)} overruled</b>${t.llm_calls != null ? ` · LLM fallbacks ${esc(t.llm_fallbacks)}/${esc(t.llm_calls)}` : ""}</div>` : "";
+    const tally = t ? `<div class="ai-tally">tally ${esc(t.proposed)} proposed · <b class="ok">${esc(t.accepted)} ok</b> · <b class="bad">${esc(t.overruled)} overruled</b>${t.llm_calls != null ? ` · fallbacks ${esc(t.llm_fallbacks)}/${esc(t.llm_calls)} calls` : ""}</div>` : "";
     const decision = ai.decision_reason ? `<div class="ai-decision ${ai.decision === "ai_plan" ? "ok" : "bad"}">${esc(ai.decision_reason)}</div>` : "";
     if (status !== "done") {
       $("#ai-body").innerHTML = flow + decision + `<div class="ai-off">${status === "thinking" ? "Asking Claude for an independent diagnosis from the evidence the Hive gathered…" : `No answer (${esc(ai.error || "timeout or error")}). The Hive carries on: the rules plan decides.`}</div>` + tally;
@@ -278,7 +278,7 @@ export class Panels {
     const hyps = (ai.hypotheses || []).slice(0, 3).map((h, i) => `<li class="${i ? "" : "top"}" title="${esc(h.why || "")}"><b>H${i + 1}</b> ${esc(h.system)}/${esc(h.fault_class)} <span>${esc(h.why || "")}</span>${(h.evidence || []).length ? ` <i>${esc(h.evidence.join(" "))}</i>` : ""}</li>`).join("");
     $("#ai-body").innerHTML = `${flow}${decision}
       ${hyps ? `<ol class="ai-hyps">${hyps}</ol>` : ai.hypothesis ? `<div class="ai-hyp" title="${esc(ai.hypothesis)}">“${esc(ai.hypothesis)}”</div>` : ""}
-      ${cites ? `<div class="ai-cites"><span class="dim">cites</span>${cites}</div>` : ""}
+      ${cites && !hyps ? `<div class="ai-cites"><span class="dim">cites</span>${cites}</div>` : ""}
       ${root}
       ${chips ? `<div class="ai-chips">${chips}</div>` : ""}
       ${rows ? `<ol class="ai-ops">${rows}</ol>` : ""}${!vs.length ? '<div class="ai-off">Claude proposed no ops.</div>' : ""}
