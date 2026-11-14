@@ -65,6 +65,9 @@ function stepByAction(inc, aid) {
   for (const i of inc ? [inc] : state.incidents.values()) for (const s of i.steps || []) if ((s.attempts || []).includes(aid) || s.action_id === aid) return s;
   return null;
 }
+// a Guard/Scout "Rejected memory …" line is kind:reject too, but it caught a poisoned memory, not a lying system
+const isMemReject = (t) => /^Rejected memory/.test(String(t?.text || ""));
+const isLie = (t) => t?.kind === "reject" && !isMemReject(t);
 function translate(t) {
   const x = String(t.text || ""), k = t.kind, inc = state.incidents.get(t.incident);
   let m;
@@ -78,6 +81,7 @@ function translate(t) {
   if ((m = x.match(/^Root cause after (\d+) hops?.*?\[(\w+) on (\w+)\]/))) return { text: `Found it after ${m[1]} check${m[1] === "1" ? "" : "s"}: the real problem is the <b>${S(m[3])}</b> (${esc(FAULT[m[2]] || m[2])}).`, story: true };
   if ((m = x.match(/^Root cause.*?\[(\w+) on (\w+)\]/))) return { text: `The real problem is the <b>${S(m[2])}</b> (${esc(FAULT[m[1]] || m[1])}).`, story: true };
   if ((m = x.match(/^Plan, (\d+) steps?/))) return { text: `Made a ${m[1]}-step fix plan.`, story: true };
+  if (isMemReject(t)) return { text: `<b>Caught a poisoned memory</b>: the remembered fix didn’t match what the Guard verified. Retired it${/Restored /.test(x) ? " and restored the verified one" : ""}.`, story: true };
   if (k === "reject") { const s = t.system || stepByAction(inc, (x.match(/INC-\S+-a\d+/) || [])[0])?.system; return { text: `Re-checked the ${S(s || "system")} → <b>it LIED</b>: said “done”, nothing changed. Rejected.`, story: true }; }
   if ((m = x.match(/^Verified (\S+-a(\d+))/))) { const st = stepByAction(inc, m[1]); const n = +m[2]; return { text: `${n > 1 ? "Second try is real: " : "Confirmed: "}“${esc(op(st?.op))}” really happened on the ${S(st?.system || t.system || "system")} <span class="g">✓</span>`, story: true }; }
   if ((m = x.match(/^(\w+) on (\w+) is destructive/))) return { text: `“${esc(Op(m[1]))}” is risky. Asking a human first.`, story: true };
@@ -180,7 +184,7 @@ function nowLine() {
   if (apr) return apr.kind === "upgrade" ? `Waiting for <span class="a">your OK</span> to deploy the Gardener’s code fix.` : `Waiting for <span class="a">your OK</span>: a risky step needs a human.`;
   const inc = focusIncident();
   const rid = runId();
-  const recentReject = [...state.thoughts].reverse().find((t) => t.kind === "reject" && serverNow() - ts(t.ts) < 7000);
+  const recentReject = [...state.thoughts].reverse().find((t) => isLie(t) && serverNow() - ts(t.ts) < 7000);
   if (recentReject) return `The checker caught the ${esc(sn(recentReject.system || "mainframe"))} <b>lying</b>: it said “done”, nothing changed.`;
   const deadNow = [...state.agents.values()].find((a) => a.status === "dead" && a.role !== "nurse" && (a.task || a.incident));
   const lastHo = inc && (inc.handoffs || [])[inc.handoffs.length - 1];
@@ -337,7 +341,7 @@ function model() {
     who: `${MONKEY}<span>Chaos Monkey (us)</span>` });
   // 2 · cascade (the three systems)
   const path = inc?.diagnosis_path || [];
-  const lied = new Set(state.thoughts.filter((t) => t.kind === "reject" && inc && t.incident === inc._id).map((t) => t.system || "mainframe"));
+  const lied = new Set(state.thoughts.filter((t) => isLie(t) && inc && t.incident === inc._id).map((t) => t.system || "mainframe"));
   for (const s of (inc?.steps || [])) if ((s.attempts || []).length > 1 && s.status === "verified") lied.add(s.system);
   const sysBox = (s) => {
     const d = state.systems.get(s), st = d?.status || "?";
