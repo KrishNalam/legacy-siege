@@ -863,7 +863,7 @@ function renderLegacy() {
     return `<path class="w dbl ${bl ? "red" : ""}" d="M${x + 6} 400 L${x + 66} 400"/><path class="w dbl-in" d="M${x + 6} 400 L${x + 66} 400"/><text class="wl ${bl ? "red" : ""}" x="${x + 40}" y="390" text-anchor="middle">${bl ? "BLAMES" : "NEEDS"}</text>`;
   }).join("");
   const html = `<div class="zc"><svg class="wires" viewBox="0 0 1600 900" style="position:absolute;left:0;top:0;width:1600px;height:900px">${arrows}</svg>
-    <div class="zcol" style="left:60px;top:84px;width:1480px"><span class="dim">CASCADE&nbsp;&nbsp;</span>${esc((live ? nowLine().replace(/<[^>]+>/g, "") : "the website needs the unix server, which needs the mainframe").toUpperCase())}</div>
+    <div class="zcol" style="left:60px;top:86px;width:1480px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span class="dim">CASCADE&nbsp;&nbsp;</span>${esc((live ? nowLine().replace(/<[^>]+>/g, "") : "the website needs the unix server, which needs the mainframe").toUpperCase())}</div>
     ${cards}<div class="eta" data-eta="legacy-inside" style="left:60px;top:700px;width:1480px"></div></div>`;
   const host = $("#legacy-body");
   if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }

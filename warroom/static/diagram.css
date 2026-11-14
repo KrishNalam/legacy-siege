@@ -354,7 +354,7 @@ main > .l { z-index: 5; }
 .gsteps span.now { background: var(--amber); border-color: var(--amber); color: #111; animation: blink 1s steps(2, jump-none) infinite; }
 .pulse { filter: drop-shadow(0 0 4px currentColor); }
 /* inside Legacy */
-.lz { position: absolute; top: 120px; width: 440px; height: 560px; border: 1px solid var(--ink); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--ink); padding: 10px 2ch; font-size: 12px; line-height: 1.7; background: var(--paper); }
+.lz { position: absolute; top: 136px; width: 440px; height: 548px; border: 1px solid var(--ink); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--ink); padding: 10px 2ch; font-size: 12px; line-height: 1.7; background: var(--paper); }
 .lz.bad { border-color: var(--red); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--red); }
 .lz.warn { border-color: var(--warn); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--warn); }
 .lz h3 { margin: 0; font-size: 20px; letter-spacing: .08em; display: flex; justify-content: space-between; }
