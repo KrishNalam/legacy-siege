@@ -92,3 +92,22 @@ def test_sentinel2_pushes_known_fix_to_scout(db, monkeypatch):
     assert "known_fix" not in db.incidents.find_one({"_id": "INC-0003"})
     assert agent.think.call_count == 1 and "Sentinel #2 → scout-1" in agent.think.call_args.args[0]
     assert sentinel.known_fix_for([root], {"mainframe": 2}) is None  # learned on v1, mainframe is v2 now
+
+
+def test_sentinel_2_is_its_own_agent_only_with_switch(db, monkeypatch):
+    """Structure v3: GARDENER_HELP=1 adds sentinel-2 to the roster; sentinel-1 hands over the Sentinel #2 duties
+    only while sentinel-2 is alive (and takes them back when it dies)."""
+    from datetime import timedelta
+    from swarm import supervisor
+    monkeypatch.delenv("SWARM_ROSTER", raising=False)
+    monkeypatch.delenv("GARDENER_HELP", raising=False)
+    assert ("sentinel", "sentinel-2") not in supervisor.roster()
+    monkeypatch.setenv("GARDENER_HELP", "1")
+    assert ("sentinel", "sentinel-2") in supervisor.roster() and ("sentinel", "sentinel-1") in supervisor.roster()
+    db.agents.delete_many({"_id": "sentinel-2"})
+    assert not sentinel.sentinel_2_alive()
+    db.agents.insert_one({"_id": "sentinel-2", "role": "sentinel", "status": "working", "last_seen": now()})
+    assert sentinel.sentinel_2_alive()
+    db.agents.update_one({"_id": "sentinel-2"}, {"$set": {"last_seen": now() - timedelta(minutes=5)}})
+    assert not sentinel.sentinel_2_alive()
+    db.agents.delete_many({"_id": "sentinel-2"})

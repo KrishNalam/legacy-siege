@@ -229,7 +229,44 @@ RECURRING = [
 ]
 
 
+SENTINEL_2 = "sentinel-2"
+
+
+def sentinel_2_alive() -> bool:
+    """sentinel-1 hands its Sentinel #2 duties over while a live sentinel-2 heartbeats (and takes them back if it dies)."""
+    return bool(col("agents").find_one({"_id": SENTINEL_2, "status": {"$ne": "dead"},
+                                        "last_seen": {"$gte": now() - timedelta(seconds=settings.DEAD_AFTER_S)}},
+                                       {"_id": 1}))
+
+
+def run_sentinel_2(agent: Agent) -> None:
+    """Structure v3 Sentinel #2 (GARDENER_HELP=1): sits between Comms and the Gardener and cuts duplicate work —
+    pushes remembered fixes to the Scouts and hands repeats to the Gardener. Detection stays on sentinel-1."""
+    agent.set(target="hive", phase="dedup_watch")
+    last_slow = 0.0
+    while not agent.stop.is_set():
+        t0 = time.monotonic()
+        try:
+            versions = {}
+            for s in policy.systems():
+                try:
+                    versions[s] = agent.systems.version(s)
+                except Exception:
+                    pass
+            push_known_fixes(agent, versions)
+            if time.monotonic() - last_slow > 3:
+                last_slow = time.monotonic()
+                note_repeated_problems(agent)
+        except SystemExit:
+            raise
+        except Exception as e:
+            log(agent.id, f"sentinel-2 sweep error: {type(e).__name__}: {e}")
+        agent.nap(max(0.05, settings.SENTINEL_POLL_S - (time.monotonic() - t0)))
+
+
 def run(agent: Agent) -> None:
+    if agent.id == SENTINEL_2:
+        return run_sentinel_2(agent)
     detect, reap, upgrade = build_graphs(agent)
     sysc = agent.systems
     streak: dict[str, int] = {}
@@ -350,7 +387,8 @@ def run(agent: Agent) -> None:
             except Exception as e:
                 log(agent.id, f"schema sample error: {type(e).__name__}: {e}")
 
-        if gardener_help.enabled():  # Sentinel #2: push a remembered fix to the Scout that just took an incident
+        delegated = gardener_help.enabled() and sentinel_2_alive()  # Sentinel #2 duties live on sentinel-2
+        if gardener_help.enabled() and not delegated:  # fallback: push a remembered fix to the Scout
             try:
                 push_known_fixes(agent, versions)
             except Exception as e:
@@ -358,7 +396,8 @@ def run(agent: Agent) -> None:
 
         if time.monotonic() - last_slow > 3:
             last_slow = time.monotonic()
-            note_repeated_problems(agent)
+            if not delegated:
+                note_repeated_problems(agent)
             for row in col("incidents").aggregate(RECURRING):
                 upgrade.invoke({"system": row["_id"]["system"], "fault_class": row["_id"]["fault_class"],
                                 "evidence": row["evidence"]},
