@@ -53,7 +53,8 @@ def dynamic() -> bool:
 def roster() -> list[tuple[str, str]]:
     raw = os.environ.get("SWARM_ROSTER", "").strip()
     if not raw:
-        return list(DYNAMIC_ROSTER if dynamic() else ROSTER)
+        from gardener.help import enabled as gardener_help  # structure v3: Sentinel #2 is its own agent
+        return list(DYNAMIC_ROSTER if dynamic() else ROSTER) + ([("sentinel", "sentinel-2")] if gardener_help() else [])
     return [tuple(x.split(":", 1)) for x in raw.split(",") if ":" in x]  # type: ignore[misc]
 
 
