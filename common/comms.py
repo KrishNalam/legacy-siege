@@ -31,7 +31,9 @@ def signature(message):
     body = message.get('body', '')
     text = json.dumps(body, sort_keys=True, default=str) if isinstance(body, dict) else str(body)
     text = text.lower()
-    if not isinstance(body, dict):
+    if message.get('kind') == 'log':  # estate log lines: job numbers, record ids, pids, threads all vary
+        text = re.sub(r'\d+', '#', text)
+    elif not isinstance(body, dict):
         text = re.sub(r'\b(queue|count|seen|retry|attempt|line|seq|depth)\s+\d+\b', r'\1 #', text)
         text = re.sub(r'\b\d+(?:\.\d+)?\s*(ms|seconds?|s)\b', r'# \1', text)
     return (message.get('to'), message.get('incident'), message.get('system'), message.get('kind'),
@@ -53,3 +55,49 @@ def prioritise(messages, waiting=()):
         g['count'] += original.get('count', 1)
         g['members'].append(original)
     return sorted(groups.values(), key=lambda m: (-m['priority'], -m['count']))
+
+
+# ---- estate logs as comms input (W29): world.system_logs WARN/ERROR/ABEND lines, coalesced like any message
+LOG_SEVERITY = {'ABEND': 'critical', 'FATAL': 'critical', 'SEVERE': 'error', 'ERROR': 'error',
+                'WARN': 'warning', 'WARNING': 'warning'}
+LOG_PIPELINE = [{'$match': {'operationType': 'insert', 'fullDocument.level': {'$in': list(LOG_SEVERITY)}}}]
+
+
+def from_log(doc, incident=None):
+    """One world.system_logs line -> one comms input with source=<system>; None for INFO/DEBUG lines."""
+    level = str(doc.get('level') or '').upper()
+    severity = LOG_SEVERITY.get(level)
+    if severity is None:
+        return None
+    line = str(doc.get('line') or '')
+    if 'ABEND' in line.upper():
+        severity = 'critical'
+    system = doc.get('system')
+    return dict(to='hive', kind='log', body=f"{system} {doc.get('code') or level}: {line}"[:240],
+                source=system, system=system, severity=severity, incident=incident)
+
+
+# ---- consumer: the Queen claims the highest-priority unassigned incident first
+CUSTOMER_FACING = frozenset({'portal'})
+
+
+def customer_facing(inc) -> bool:
+    return bool((set(inc.get('affected') or []) | {inc.get('system')}) & CUSTOMER_FACING)
+
+
+def incident_rank(inc, feed_priority=0):
+    """Sort key, best first: customer-facing (portal in the blast radius), then the highest priority the
+    prioritised feed has seen for it, then oldest (incident ids are sequential)."""
+    return (-int(customer_facing(inc)), -int(feed_priority or 0), str(inc.get('_id')))
+
+
+def feed_priorities(messages, incidents):
+    """Highest feed priority per incident: messages tagged with the incident, or untagged ones (estate logs
+    before triage) about a system in its affected set."""
+    best = {i['_id']: 0 for i in incidents}
+    for m in messages:
+        for i in incidents:
+            if m.get('incident') == i['_id'] or (not m.get('incident') and m.get('system') in
+                                                 (set(i.get('affected') or []) | {i.get('system')})):
+                best[i['_id']] = max(best[i['_id']], int(m.get('priority') or 0))
+    return best
