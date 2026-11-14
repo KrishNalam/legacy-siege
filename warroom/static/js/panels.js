@@ -235,7 +235,7 @@ export class Panels {
     const ops = ai.proposed_ops || [];
     const vs = ops.map((o, i) => ({ ...o, ...((ai.verdicts || [])[i] || {}) }));
     const bad = vs.filter((v) => v.verdict === "overruled"), missed = ai.missed_ops || [];
-    const key = `${inc._id}|${ai.kind}|${ai.request_id || ""}|${status}|${vs.length}|${JSON.stringify(ai.tally || {})}|${ai.done_at || ai.latency_ms || ""}`;
+    const key = `${inc._id}|${status}|${JSON.stringify(ai)}`;  // any change to the doc re-renders
     if (this.aiKey === key) return;
     this.aiKey = key;
     $("#ai-card .kicker").textContent = mapping ? "AI FIELD MAPPING" : "AI SECOND OPINION";

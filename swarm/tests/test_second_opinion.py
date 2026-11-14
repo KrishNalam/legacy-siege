@@ -62,8 +62,11 @@ def test_order_and_missing_prerequisite():
     assert verdicts(res)[0] == ("restart_batch", "overruled")
     assert res["verdicts"][0]["rule"] == so.P2
     assert res["verdicts"][0]["reason"].startswith("runs before quarantine_record: poison record still queued")
-    assert [v for _, v in verdicts(res)[1:]] == ["accepted", "accepted", "accepted"]  # one mistake, one cross
-    assert [m["op"] for m in res["missed_ops"]] == ["restart_batch"]
+    # quarantine stands; the transfer and cache refresh depend on the refused restart, so they fall with it
+    assert verdicts(res)[1:] == [("quarantine_record", "accepted"), ("rerun_transfer", "overruled"), ("refresh_cache", "overruled")]
+    assert [r["reason"] for r in res["verdicts"][2:]] == ["depends on restart_batch, which was overruled",
+                                                          "depends on rerun_transfer, which was overruled"]
+    assert [m["op"] for m in res["missed_ops"]] == ["restart_batch", "rerun_transfer", "refresh_cache"]
     res = so.judge(prop(GOOD[1], GOOD[3]), PLAN, "mainframe", "batch_abort", READBACK)
     assert [r["reason"].split(":")[0] for r in res["verdicts"]] == ["skips quarantine_record", "skips rerun_transfer"]
 

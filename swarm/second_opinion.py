@@ -266,22 +266,27 @@ def judge(proposal: dict, plan_steps: list[dict], root: str, fault_class: str, r
                 else:
                     row["rule"], row["reason"] = _outside(p, readback)
 
-    # Dependency order, judged on the matches above (so one misplaced op costs one cross, not a cascade):
-    # an accepted op is refused unless every plan step of the op before it in the chain was proposed earlier.
+    # Dependency order, in proposal order against the SURVIVING accepted matches: an accepted op is refused unless
+    # every plan step of the op before it in the chain was proposed earlier and still stands. So a refused
+    # prerequisite also refuses what depends on it (a transfer without a re-run batch would not help either).
     chain = list(dict.fromkeys(s["op"] for s in plan))  # distinct ops in plan order
-    matched = dict(used)
+    proposed_at = dict(used)  # plan index -> proposal index, before any dependency refusal
     for k, row in enumerate(rows):
         g = chain.index(row["op"]) if row["verdict"] == "accepted" and row["op"] in chain else 0
         if g == 0:
             continue
         pre = chain[g - 1]
         need = [i for i, s in enumerate(plan) if s["op"] == pre]
-        if not all(i in matched and matched[i] < k for i in need):
-            later = any(i in matched and matched[i] > k for i in need)
-            why = PREREQ_WHY.get((row["op"], pre), f"{row['op']} needs {pre}'s effect first")
-            row.update(verdict="overruled", gated=False, note=None, rule=P2,
-                       reason=f"{'runs before' if later else 'skips'} {pre}: {why}")
-            used = {i: kk for i, kk in used.items() if kk != k}
+        if all(i in used and used[i] < k for i in need):
+            continue
+        if all(i in proposed_at and proposed_at[i] < k for i in need):
+            reason = f"depends on {pre}, which was overruled"
+        else:
+            later = any(i in proposed_at and proposed_at[i] > k for i in need)
+            reason = (f"{'runs before' if later else 'skips'} {pre}: "
+                      f"{PREREQ_WHY.get((row['op'], pre), row['op'] + ' needs ' + pre + chr(39) + 's effect first')}")
+        row.update(verdict="overruled", gated=False, note=None, rule=P2, reason=reason)
+        used = {i: kk for i, kk in used.items() if kk != k}
 
     missed = [{"op": s["op"], "target": s["system"], "params": s.get("params") or {}, "n": s.get("n")}
               for i, s in enumerate(plan) if i not in used]
