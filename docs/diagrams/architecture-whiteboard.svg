@@ -1,0 +1,216 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" font-family="Liberation Sans, DejaVu Sans, Arial, sans-serif">
+<defs>
+  <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="13" markerHeight="13" orient="auto-start-reverse"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#1d3f8f" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="ak" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="13" markerHeight="13" orient="auto-start-reverse"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#222" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="13" markerHeight="13" orient="auto-start-reverse"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#c62828" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+  <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="13" markerHeight="13" orient="auto-start-reverse"><path d="M1,1 L9,5 L1,9" fill="none" stroke="#00684A" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<style>
+  .b{fill:none;stroke:#1d3f8f;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+  .k{fill:none;stroke:#222;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+  .r{fill:none;stroke:#c62828;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+  .g{fill:none;stroke:#00684A;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+  .tb{fill:#1d3f8f} .tk{fill:#222} .tr{fill:#c62828} .tg{fill:#00684A}
+  .h{font-size:21px;font-weight:bold} .m{font-size:16px} .s{font-size:13px} .xs{font-size:12px}
+  .it{font-style:italic} .dash{stroke-dasharray:7 6}
+</style>
+<rect width="1600" height="1000" fill="#fbfaf6"/>
+
+<!-- title -->
+<text x="24" y="38" class="tk h" font-size="24">Legacy Siege — the whiteboard view</text>
+<text x="420" y="38" class="tk s it">left: Blue swarm (blue/black ink) · centre: the legacy System · right: Red (red ink) · bottom: MongoDB Atlas spine</text>
+<rect width="1600" height="1000" fill="#fbfaf6"/>
+<text x="24" y="38" class="tk h" font-size="24">Legacy Siege — the whiteboard view</text>
+<text x="430" y="38" class="tk s it">left: Blue swarm (blue/black ink) · centre: the legacy System · right: Red (red ink) · bottom: MongoDB Atlas spine</text>
+
+<!-- swarm boundary -->
+<path d="M22,62 Q370,56 728,64 Q734,420 726,800 Q380,806 24,798 Q18,420 22,62 Z" fill="none" stroke="#1d3f8f" stroke-dasharray="0.5 8" stroke-width="3" stroke-linecap="round"/>
+<text x="250" y="84" class="tb s it">the swarm (1 OS process per agent) — dotted line = swarm boundary</text>
+
+<!-- Platform Eng -->
+<rect x="44" y="100" width="176" height="56" rx="12" class="b"/>
+<text x="132" y="124" class="tb h" text-anchor="middle">Platform Eng.</text>
+<text x="132" y="144" class="tb xs" text-anchor="middle">build common tools</text>
+<path class="b" d="M80,156 Q76,220 70,282" marker-end="url(#ab)"/>
+<text x="88" y="214" class="tb xs it">tools → Scouts</text>
+<!-- tools -> Gardener loop (left edge, under the swarm) -->
+<path class="b" d="M44,128 Q34,130 36,200 L38,760 Q40,780 70,780 L760,780 Q780,780 788,770" marker-end="url(#ab)"/>
+<text x="60" y="772" class="tb xs it">tools → Gardener</text>
+
+<!-- Queen -->
+<ellipse cx="320" cy="200" rx="68" ry="30" class="k"/>
+<text x="320" y="207" class="tk h" text-anchor="middle">Queen</text>
+<text x="320" y="248" class="tk xs it" text-anchor="middle">triage · spawns Scouts</text>
+
+<!-- Comms -->
+<ellipse cx="530" cy="128" rx="80" ry="32" class="b"/>
+<text x="530" y="125" class="tb h" text-anchor="middle">Comms</text>
+<text x="530" y="145" class="tb s" text-anchor="middle">DB / agent (Waggle)</text>
+<path class="k" d="M376,184 Q410,158 450,140" marker-end="url(#ak)"/>
+
+<!-- Sentinel 1 -->
+<ellipse cx="610" cy="232" rx="78" ry="27" class="b"/>
+<text x="610" y="239" class="tb h" text-anchor="middle">Sentinel 1</text>
+<path class="b" d="M788,330 Q740,280 688,246" marker-end="url(#ab)"/>
+<path class="b" d="M532,226 Q460,212 390,206" marker-end="url(#ab)"/>
+<text x="560" y="276" class="tb xs it">watches System /health</text>
+<text x="560" y="290" class="tb xs it">→ opens incident for Queen</text>
+
+<!-- tree -->
+<path class="k" d="M320,256 L320,292"/>
+<path class="k" d="M320,292 Q220,304 120,349 M320,292 Q275,312 250,349 M320,292 Q360,312 385,349 M320,292 Q430,304 520,349"/>
+<g class="k">
+  <ellipse cx="120" cy="365" rx="22" ry="16"/><ellipse cx="250" cy="365" rx="22" ry="16"/>
+  <ellipse cx="385" cy="365" rx="22" ry="16"/><ellipse cx="520" cy="365" rx="22" ry="16"/>
+</g>
+<text x="44" y="304" class="tk h">Scouts</text>
+<text x="44" y="322" class="tk xs it">recall · diagnose</text>
+<path class="k" d="M112,381 L88,440 M128,381 L150,440 M244,381 L225,440 M256,381 L278,440 M385,381 L385,440 M512,381 L480,440 M528,381 L565,440"/>
+<g class="k">
+  <circle cx="88" cy="452" r="12"/><circle cx="150" cy="452" r="12"/><circle cx="225" cy="452" r="12"/>
+  <circle cx="278" cy="452" r="12"/><circle cx="385" cy="452" r="12"/><circle cx="480" cy="452" r="12"/><circle cx="565" cy="452" r="12"/>
+</g>
+<text x="44" y="496" class="tk h">Workers</text>
+<text x="44" y="514" class="tk xs it">mainframe / unix / web</text>
+<!-- workers act on all three tiers -->
+<path class="k" d="M582,452 Q680,452 720,445"/>
+<path class="k" d="M720,445 Q760,400 806,386" marker-end="url(#ak)"/>
+<path class="k" d="M720,445 L806,444" marker-end="url(#ak)"/>
+<path class="k" d="M720,445 Q760,490 806,502" marker-end="url(#ak)"/>
+<text x="600" y="430" class="tk s it">act on L1 · L2 · L3</text>
+
+<!-- Nurses + Guard -->
+<rect x="64" y="545" width="226" height="58" rx="12" class="b"/>
+<text x="177" y="569" class="tb h" text-anchor="middle">Nurses</text>
+<text x="177" y="589" class="tb xs" text-anchor="middle">expired lease → take over killed agent</text>
+<path class="b" d="M215,545 Q218,505 222,470" marker-end="url(#ab)"/>
+<rect x="340" y="545" width="226" height="58" rx="12" class="b"/>
+<text x="453" y="569" class="tb h" text-anchor="middle">Guard</text>
+<text x="453" y="589" class="tb xs" text-anchor="middle">read-back verify: catches the liar</text>
+<path class="b" d="M566,566 Q690,560 790,530" marker-end="url(#ab)"/>
+<text x="628" y="548" class="tb xs it">read back</text>
+
+<!-- Sentinel 2 -->
+<ellipse cx="300" cy="712" rx="92" ry="34" class="b"/>
+<text x="300" y="708" class="tb h" text-anchor="middle">Sentinel 2</text>
+<text x="300" y="728" class="tb xs" text-anchor="middle">repeat fault classes</text>
+<path class="b" d="M315,678 L315,520 Q315,420 372,384" marker-end="url(#ab)"/>
+<text x="324" y="530" class="tb xs it">pushes known fixes → Scouts</text>
+<text x="324" y="516" class="tb xs it" opacity="0">.</text>
+<path class="b" d="M392,716 Q600,740 786,728" marker-end="url(#ab)"/>
+<text x="520" y="752" class="tb s it">upgrade requests</text>
+
+<!-- Red target cluster in swarm -->
+<g fill="#c62828">
+  <circle cx="640" cy="612" r="3"/><circle cx="660" cy="602" r="3"/><circle cx="682" cy="610" r="3"/><circle cx="694" cy="628" r="3"/>
+  <circle cx="684" cy="646" r="3"/><circle cx="662" cy="652" r="3"/><circle cx="642" cy="644" r="3"/><circle cx="660" cy="628" r="3"/>
+</g>
+
+<!-- Gardener (outside swarm) -->
+<path class="k" d="M790,690 Q905,684 1024,690 Q1028,740 1022,792 Q905,796 792,790 Q786,740 790,690 Z"/>
+<text x="907" y="716" class="tk h" text-anchor="middle">Gardener</text>
+<text x="907" y="738" class="tk xs" text-anchor="middle">separate system, outside the swarm</text>
+<text x="907" y="758" class="tk xs it" text-anchor="middle">plan → patch → test → gate → deploy</text>
+<!-- pause arrow across the boundary -->
+<path class="k" d="M840,690 Q760,668 600,668" marker-end="url(#ak)" stroke-width="2.6"/>
+<text x="596" y="684" class="tk s" font-weight="bold" text-anchor="end">PAUSES all agents</text>
+<text x="596" y="700" class="tk xs it" text-anchor="end">during upgrades</text>
+
+<!-- System -->
+<path class="k" d="M790,300 Q912,292 1042,300 Q1050,420 1042,545 Q912,552 792,546 Q784,420 790,300 Z"/>
+<text x="917" y="330" class="tk h" text-anchor="middle">System</text>
+<text x="917" y="348" class="tk xs" text-anchor="middle">mock legacy bank (FastAPI)</text>
+<g class="k" stroke-width="1.6">
+  <rect x="812" y="362" width="210" height="48" rx="8"/><rect x="812" y="420" width="210" height="48" rx="8"/><rect x="812" y="478" width="210" height="48" rx="8"/>
+</g>
+<text x="917" y="384" class="tk m" text-anchor="middle">L1 web portal</text>
+<text x="917" y="401" class="tk xs" text-anchor="middle">customer-facing symptom</text>
+<text x="917" y="442" class="tk m" text-anchor="middle">L2 unix batch</text>
+<text x="917" y="459" class="tk xs" text-anchor="middle">nightly jobs</text>
+<text x="917" y="500" class="tk m" text-anchor="middle">L3 mainframe</text>
+<text x="917" y="517" class="tk xs" text-anchor="middle">root cause lives here</text>
+
+<!-- RED -->
+<ellipse cx="1260" cy="110" rx="118" ry="32" class="r"/>
+<text x="1260" y="106" class="tr h" text-anchor="middle">Red Scout</text>
+<text x="1260" y="126" class="tr xs" text-anchor="middle">reads the Hive in MongoDB</text>
+<rect x="1410" y="80" width="160" height="60" rx="10" class="r dash"/>
+<text x="1490" y="104" class="tr m" text-anchor="middle" font-weight="bold">Red Commander</text>
+<text x="1490" y="124" class="tr xs it" text-anchor="middle">optional · plans campaigns</text>
+<path class="r" d="M1260,142 L1260,176" marker-end="url(#ar)"/>
+<path class="r dash" d="M1490,140 L1490,176" marker-end="url(#ar)"/>
+<text x="1500" y="164" class="tr xs it">orders</text>
+
+<rect x="1110" y="180" width="460" height="196" rx="12" class="r"/>
+<text x="1340" y="206" class="tr h" text-anchor="middle">Strikers — one per persona</text>
+<text x="1340" y="226" class="tr s it" text-anchor="middle">each its own LangGraph loop: scout → plan → strike → observe</text>
+<g class="r" stroke-width="1.4">
+  <rect x="1126" y="240" width="140" height="56" rx="8"/><rect x="1270" y="240" width="140" height="56" rx="8"/><rect x="1414" y="240" width="140" height="56" rx="8"/>
+  <rect x="1126" y="304" width="140" height="56" rx="8"/><rect x="1270" y="304" width="140" height="56" rx="8"/><rect x="1414" y="304" width="140" height="56" rx="8"/>
+</g>
+<text x="1196" y="264" class="tr m" text-anchor="middle" font-weight="bold">Saboteur</text>
+<text x="1196" y="282" class="tr xs" text-anchor="middle">ABENDs, full disk, cron</text>
+<text x="1340" y="264" class="tr m" text-anchor="middle" font-weight="bold">Assassin</text>
+<text x="1340" y="282" class="tr xs" text-anchor="middle">SIGKILLs agents</text>
+<text x="1484" y="264" class="tr m" text-anchor="middle" font-weight="bold">Liar</text>
+<text x="1484" y="282" class="tr xs" text-anchor="middle">ACKs that don't apply</text>
+<text x="1196" y="328" class="tr m" text-anchor="middle" font-weight="bold">Hacker</text>
+<text x="1196" y="346" class="tr xs" text-anchor="middle">planted vulns</text>
+<text x="1340" y="328" class="tr m" text-anchor="middle" font-weight="bold">Drifter</text>
+<text x="1340" y="346" class="tr xs" text-anchor="middle">renames Hive fields</text>
+<text x="1484" y="328" class="tr m" text-anchor="middle" font-weight="bold">Memory Striker</text>
+<text x="1484" y="346" class="tr xs" text-anchor="middle">poisons playbooks</text>
+
+<!-- Strikers -> Runner -->
+<path class="r" d="M1290,376 L1290,424" marker-end="url(#ar)"/>
+<text x="1300" y="406" class="tr xs it">vetted menu item</text>
+<rect x="1180" y="428" width="220" height="60" rx="10" class="r"/>
+<text x="1290" y="453" class="tr h" text-anchor="middle">Runner</text>
+<text x="1290" y="474" class="tr xs" text-anchor="middle">fires only via chaos.runner.fire</text>
+
+<!-- Seeded attacks -->
+<rect x="1444" y="420" width="126" height="84" rx="10" class="r"/>
+<text x="1507" y="446" class="tr m" text-anchor="middle" font-weight="bold">Seeded</text>
+<text x="1507" y="464" class="tr m" text-anchor="middle" font-weight="bold">Chaos Monkey</text>
+<text x="1507" y="484" class="tr xs" text-anchor="middle">cascade · lying</text>
+<path class="r" d="M1444,460 L1404,460" marker-end="url(#ar)"/>
+
+<!-- Runner -> System -->
+<path class="r" d="M1180,450 L1048,450" marker-end="url(#ar)"/>
+<text x="1060" y="440" class="tr s it">inject faults</text>
+<!-- Runner -> swarm -->
+<path class="r" d="M1200,488 Q1150,620 1040,624 L704,624" marker-end="url(#ar)"/>
+<text x="760" y="646" class="tr s it">kill agents · poison memory · drift schema</text>
+<!-- Runner -> chaos_events -->
+<path class="r" d="M1290,488 L1290,826" marker-end="url(#ar)"/>
+<text x="1300" y="720" class="tr xs it">logs every strike</text>
+<text x="1300" y="735" class="tr xs it">→ chaos_events</text>
+
+<!-- swarm/Gardener -> spine -->
+<path class="g" d="M500,800 L500,826" marker-end="url(#ag)"/>
+<path class="g" d="M907,794 L907,826" marker-end="url(#ag)"/>
+<path class="r" d="M1260,142 L1260,142"/>
+
+<!-- MongoDB Atlas spine -->
+<path class="g" d="M24,832 Q800,826 1576,832 Q1582,905 1576,980 Q800,986 26,980 Q18,905 24,832 Z" stroke-width="2.6"/>
+<text x="44" y="862" class="tg h">MongoDB Atlas — the spine</text>
+<text x="350" y="862" class="tg s it">every agent, the Gardener and Red read and write here (the Hive)</text>
+<g class="g" stroke-width="1.6">
+  <rect x="44" y="880" width="150" height="80" rx="10"/><rect x="208" y="880" width="150" height="80" rx="10"/>
+  <rect x="372" y="880" width="150" height="80" rx="10"/><rect x="536" y="880" width="410" height="80" rx="10"/>
+  <rect x="960" y="880" width="170" height="80" rx="10"/><rect x="1144" y="880" width="412" height="80" rx="10"/>
+</g>
+<text x="119" y="912" class="tg m" text-anchor="middle" font-weight="bold">ledger</text>
+<text x="119" y="932" class="tg xs" text-anchor="middle">incidents · tasks · ops</text>
+<text x="283" y="912" class="tg m" text-anchor="middle" font-weight="bold">leases</text>
+<text x="283" y="932" class="tg xs" text-anchor="middle">generation fencing</text>
+<text x="447" y="912" class="tg m" text-anchor="middle" font-weight="bold">checkpoints</text>
+<text x="447" y="932" class="tg xs" text-anchor="middle">LangGraph, per task</text>
+<text x="741" y="908" class="tg m" text-anchor="middle" font-weight="bold">playbooks + $vectorSearch</text>
+<text x="741" y="928" class="tg s" text-anchor="middle">Voyage AI voyage-4 embeddings (live: local fallback)</text>
+<text x="741" y="946" class="tg xs it" text-anchor="middle">round 2: same fault recalled → fixed faster</text>
+<text x="1045" y="912" class="tg m" text-anchor="middle" font-weight="bold">chaos_events</text>
+<text x="1045" y="932" class="tg xs" text-anchor="middle">Red's attack log</text>
+<text x="1350" y="912" class="tg m" text-anchor="middle" font-weight="bold">change streams → war room</text>
+<text x="1350" y="932" class="tg xs" text-anchor="middle">live map of the siege</text>
+</svg>

@@ -40,10 +40,10 @@ What the demo shows, all checked automatically by `scripts/demo_check.py`:
 
 ## Architecture
 
-![Legacy Siege architecture](docs/architecture.png)
+![Legacy Siege architecture](docs/diagrams/architecture.png)
 
-Full-system diagram: [docs/architecture.png](docs/architecture.png) ([SVG](docs/architecture.svg)). Detailed wiring below.
-Whiteboard view (same system, drawn from the team's whiteboard sketch: swarm tree left, System centre, Red right, Atlas spine bottom): [docs/architecture-whiteboard.png](docs/architecture-whiteboard.png) ([SVG](docs/architecture-whiteboard.svg)).
+Full-system diagram: [docs/diagrams/architecture.png](docs/diagrams/architecture.png) ([SVG](docs/diagrams/architecture.svg)). Detailed wiring below.
+Whiteboard view (same system, drawn from the team's whiteboard sketch: swarm tree left, System centre, Red right, Atlas spine bottom): [docs/diagrams/architecture-whiteboard.png](docs/diagrams/architecture-whiteboard.png) ([SVG](docs/diagrams/architecture-whiteboard.svg)). All diagrams: [docs/diagrams/](docs/diagrams/README.md).
 
 ```
                          ┌────────────────────────── MongoDB (Atlas / atlas-local 8.0) ───────────────────────────┐
