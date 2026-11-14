@@ -1,0 +1,757 @@
+           Legacy Siege — Design Doc
+              Nov 13, 2026   · @Someone
+
+
+           Overview
+           Le cy Sie e is self-he lin oper tions te m m de of AI ents. It keeps simul ted
+           b nk's interconnected le cy systems (m infr me, Unix, IE-er web port l) online while
+           Ch os Monkey tt cks both the systems nd the ents themselves.
+           Problem. B nks like RBC still run core business on dec des-old, ti htly coupled systems.
+           One f ilure or bre ch c sc des: the m infr me b tch job bre ks, nd the customer port l
+            oes d rk three hops w y. The en ineers who underst nd these systems re retirin .
+           Wh t we build. Four workstre ms, built in p r llel:
+
+Workstre m       Side                 Builds                               One-line purpose
+A. Systems       Red                  Mock le cy est te                    Fr ile, vulner ble, interconnected t r ets
+                 (simul tion)                                              with he lth metrics
+B. Sw rm         Blue (product)       Orchestr tor h rness +        ent    Detect, di nose, p tch, verify, brin
+                                      te m                                 systems b ck online
+C. Fleet         Red                  Ch os Monkey                         Deterministic tt cks on systems nd on
+                 (simul tion)                                              the sw rm's own ents
+D. G rdener      Blue (product)       Moderniz tion pipeline               Turns repe ted fixes into perm nent code
+                                                                           up r des
+
+           C te ory fit. Problem st tement 3, Finish the Job: lon multi-step restor tion cross
+           sever l systems, verified t sk st te in Atl s, Vector Se rch over p st incidents, survivin
+           cr shes (of ents) nd system ch n es (from ch os nd from G rdener up r des).
+           Jud in fit. Technic l demo (35%): jud es tri er ch os live. Implement tion difficulty
+           (30%): multi- ent coordin tion with le ses, verific tion nd le rnin . Imp ct (20%): the
+           le cy-t lent cliff t b nks. Cre tivity (15%): ents tt cked s well s systems.
+           The Blue/Red split is the only split th t m tters: Red builds the world, Blue builds the
+           te m th t defends it, nd they meet t one contr ct (section: Interf ces).
+
+
+           Architecture
+           Red builds the world nd tt cks it; Blue builds the te m th t defends it. Both sides only
+           meet throu h the systems' HTTP API nd Mon oDB Atl s, which holds every piece of
+           st te.
+
+             Red bre ks the world, Blue rep irs it, Atl s holds ll st te
+    Simul tion (Red): A Systems + C Fleet                        Product (Blue): B Hive + D G rdener
+
+      Ch os Monkey (C)                                                                    Beekeeper
+      Seeded f ults on systems; kills    ents
+
+                                                                    Queen (he d orchestr tor)
+                                                                    T lks to Beekeeper, opens nd ssi ns incidents
+      M infr me
+      Core led er, ni htly b tch, ABEND codes
+
+                                feeds                               Scout                        Scout
+                                                                    Owns incident 1              Owns incident 2
+      Unix middlew re
+      File tr nsfer, cron, confi files
+
+                                                                    Worker bees                  Gu rd bees
+                                                                    Sp wned speci lists          Re d-b ck, retest
+      Le    cy web port l
+      Customer-f cin SOAP; shows the symptom
+
+                                                                    W     le (n+1)               Sentinel (n+2)
+                                                                    Bus, h ndoff notes           Metrics, recurrences
+      IE dmin console (stretch)
+      Old forms; fields ch n e by version
+
+                                                                                                 G rdener (D)
+                                                                        up r des code
+                                                                                                 Tested code up r des
+
+
+
+
+    Mon oDB Atl s S ndbox: the sh red br in
+    world: systems, system_st te, ch os_scen rios, ch os_events
+    sw rm: incidents + le ses, ents, checkpoints, led er, pl ybooks (vector), thou hts
+
+
+
+                                          W r-room visu liz tion
+                                          Ch n e stre ms to WebSocket c nv s
+
+
+
+
+Workers ct on the systems throu h their HTTP API (the elbow between the h lves). The
+d shed red line is Ch os killin ents. G rdener's up r des flow b ck into the systems'
+code. Everythin re ds nd writes Atl s, nd the visu liz tion only w tches it.
+
+
+Workstream A: Systems (Red)
+A builds thin but believ ble le cy est te: three or four sm ll Python services, e ch with
+ le cy person lity, re l dependencies on e ch other, pl nted vulner bilities, nd he lth
+metrics. They re mocks with beh vior, not emul tors.
+Dependency ch in (the core desi n). F ilures must c sc de so the sw rm h s to tr ce
+symptoms b ck to root c use:
+
+ Mainframe (core ledger, nightly batch) -> Unix middleware (file transfer, cron) ->
+ Legacy web portal (customer-facing, SOAP)
+                                                                    \-> IE-only admin
+ console (stretch)
+System                Person lity                  Pl nted fr ility                Pl nted vulner bility
+M infr me             Fixed-width records, b tch   B tch job borts on              Def ult oper tor credenti l;
+                      jobs, cryptic codes          m lformed record; job           unv lid ted record input
+                      (ABEND S0C7, S322)           queue st lls
+Unix middlew re       Confi files, cron, file      Disk fills; cron job silently   World-writ ble confi ; st le
+                      drops, permissions           stops; confi drift              SSH key
+Le cy web port l      SOAP/XML, sessions, form     Session store le ks;            SQL-inject ble se rch field;
+                      fields                       returns 200 with n error        outd ted TLS fl
+                                                   p e
+IE-only dmin          Old HTML forms, ActiveX-     Field n mes ch n e              H rd-coded dmin token in
+console (stretch)     er quirks                    between versions                p e source
+
+         E ch system exposes the s me four thin s (so the sw rm c n tre t them uniformly):
+          • GET /health : st tus (up, de r ded, down), plus the dependency it bl mes.
+          • GET /metrics : l tency, error r te, queue depth, disk, l st successful b tch.
+          • GET /logs?since= : le    cy-fl vored lo lines (the clues).
+          • POST /ops/<action> : the oper tions n en ineer could run (rest rt job, edit confi ,
+            rot te credenti l, pply p tch).
+         Two honesty rules m ke verific tion necess ry. Some oper tions return success but do
+         not pply (the system lies). Some pply only fter del y ( ccepted is not done). The
+         sw rm must re d b ck st te to verify.
+         Metrics A owns. Uptime per system, c sc de depth (how m ny systems f ult took
+         down), nd open vulner bilities. These feed the visu liz tion nd the fin l scorec rd.
+         Implement tion: one F stAPI pp, one router per system, system st te held in world
+         d t b se in Atl s so st te survives rest rts nd the visu liz tion c n w tch it with ch n e
+         stre ms.
+
+
+         Workstream B: Swarm (Blue)
+         B builds the h rness nd the ent te m. The te m is or nized like re l incident
+         response or , nd every ent's st te lives in Atl s, so ny ent c n die nd be repl ced
+         without losin work.
+
+         Roles
+
+Role                                Count          Responsibilities                       T lks to
+Queen (he d orchestr tor)           1 (+1 Nurse    Owns the over ll o l ( ll systems      Beekeeper, Scouts,
+                                    bee)            reen, zero open vulns). T lks to      Sentinel
+                                                   the Beekeeper (hum n oper tor).
+                                                   Opens incidents, ssi ns them to
+                                                   Scouts, requests pprov l for risky
+                                                    ctions.
+Scout (sub-orchestr tor)         1 per ctive       Owns one incident end to end:          Queen, its workers
+                                 incident          di nose root c use, sp wn
+                                                   workers, tr ck the step led er,
+                                                   decl re resolved only fter
+                                                   verific tion.
+Workers                          Sp wned on        Speci lists: m infr me, Unix, web.     Their Scout
+                                 dem nd            Investi te lo s nd metrics,
+                                                   propose nd execute fixes.
+Gu rd bee (verifier)             1 sh red          Independently re-checks every fix      All
+                                                   (re d-b ck, he lth, exploit retest).
+                                                   Only the Gu rd bee c n m rk
+                                                   step verified .
+W    le: comms (n+1)             1                 The te m's mess e bus nd               All
+                                                   scribe: routes mess es, writes
+                                                   h ndoff notes, posts st tus for the
+                                                   Beekeeper.
+Sentinel: SRE / Pl tform +       1                 W tches fleet-wide metrics nd          Queen, G rdener
+Observ bility (n+2)                                   ent he lth, spots recurrin
+                                                   incidents, sends l r e fixes to
+                                                   G rdener.
+
+          Keep the live count sm ll for the demo: Queen, 2 Scouts, 3 workers, Gu rd bee, W le,
+          Sentinel. "Sw rm" is the rchitecture; nine visible ents is enou h to re d s te m.
+
+          Incident lifecycle
+            . Detect. Sentinel sees he lth or metric nom ly (or Ch os fires) nd the Queen
+              opens n incident in incidents .
+            . Cl im. A Scout cl ims it by t kin le se ( owner , lease_until ).
+            . Rec ll. It runs Vector Se rch on playbooks with the symptoms: h s the te m seen
+              this before?
+            . Di nose. Workers w lk the dependency ch in from symptom to root c use usin
+              lo s nd metrics.
+            . Act. E ch fix is step in the led er: planned -> sent -> verified (or failed ,
+               unknown ), with unique ction id so retries never pply twice.
+            . Verify. The Gu rd bee re ds b ck st te, checks /health , nd retests the exploit for
+              security fixes. A system th t lied ets c u ht here.
+            . Approve. Destructive steps (rest rt m infr me, rot te prod credenti l) p use on
+              L n Gr ph interrupt until the Beekeeper pproves.
+            . Resolve nd le rn. Incident closes; pl ybook entry (symptoms, root c use, fix,
+              outcome) is embedded nd s ved. Recurrin p tterns o to Sentinel.
+            Crash recovery (the employee-team analogy)
+             • He rtbe ts. Every     ent writes last_seen every 3 seconds to agents .
+             • Le ses. Work is held, not owned. If n ent stops he rtbe tin , its le se expires
+                fter bout 10 seconds.
+             • Nurse bees. A Nurse bee (or ny idle ent of the s me role) cl ims the expired le se,
+               lo ds the L n Gr ph checkpoint from Atl s, nd continues from the l st verified step.
+             • Reconcile before retry. Steps stuck in sent re checked          inst the system before
+                nythin is re-run. This is the "took effect vs only sent" requirement.
+             • Queen f ilover. The Queen is the s me: b ckup Queen t kes over its le se. The
+               Beekeeper sees one h ndoff mess e from W le.
+
+            Getting better over time
+             • Every resolved incident becomes      playbooks document with n embeddin
+               (Voy e AI).
+             • New incidents query it first, filtered by system, so one ent's lesson is every ent's
+               lesson.
+             • Proof is number: time to resolve nd steps t ken for the s me f ult cl ss in round 1
+               vs round 2 vs round 3.
+
+            Stack
+            Python, L n Gr ph (one r ph per role, MongoDBSaver checkpointer, interrupt for
+             pprov ls), one LLM for ll roles (Cl ude or Gemini), Voy e AI embeddin s, L n Smith
+            tr cin . A ents re processes, not thre ds, so killin one is re l cr sh.
+
+
+            Workstream C: Fleet / Chaos Monkey (Red)
+            C builds the tt cker, modeled on Netflix's Ch os Monkey: it bre ks the systems nd it
+            kills the sw rm's own ents. For the demo, every tt ck is scripted nd seeded, so the
+            s me scen rio pl ys out identic lly in rehe rs l nd on st e.
+
+            Fault library
+
+F ult                T r et        Effect                                     Wh t it tests in the sw rm
+B tch bort           M infr me     M lformed record borts the ni htly job;    Root-c use tr cin   cross the
+                                   port l shows st le b l nces                ch in
+Disk fill            Unix          File tr nsfers f il; downstre m timeouts   Di nosis from metrics
+Silent cron stop     Unix          Job stops with no error                    Detectin   bsence of ctivity
+Lyin success         Any           Next 2 ops return success without          Verific tion by re d-b ck
+                                   pplyin
+Slow pply            Any          Ops pply 20 seconds fter " ccepted"        Sent vs took effect
+Schem drift          Port l       Field or endpoint ren med mid-incident     Ad ptin to system ch n es
+Exploit              Port l /     SQL injection or world-writ ble confi is   Security p tch + exploit retest
+                     Unix         exploited; d t t mpered
+A ent kill           Sw rm        SIGKILL worker, Scout, or the Queen        Le se expiry, Nurse bee t keover,
+                                                                             resume
+Network              Sw rm        A ent c nnot re ch Atl s for 15 seconds    He rtbe t loss, no split-br in
+p rtition
+
+
+          Determinism
+             • A scen rio is  list of (t_offset, fault, target, params) stored in
+                chaos_scenarios . S me seed, s me timeline.
+             • Demo uses scen rio bank-night-1 (c sc de) nd bank-night-2 (s me f ult cl ss,
+               to show le rnin ).
+             • A m nu l mode lets jud e press buttons; e ch press is lo ed s f ult event like
+                ny other.
+             • Option l: n LLM "red te m" picks which f ults to combine, but only from the libr ry.
+               The f ults themselves re lw ys code.
+
+          Interface
+          Every f ult writes chaos_events document (f ult, t r et, time, seed). The sw rm never
+          re ds this collection; it h s to discover f ults from symptoms. The visu liz tion nd the
+          fin l scorec rd re d it to comp re "wh t h ppened" with "wh t the sw rm fi ured out".
+
+
+          Workstream D: Gardener (neutral, built by Blue)
+          G rdener turns repe ted b nd- id fixes into perm nent code up r des. The sw rm's
+          p tches keep systems up tod y; G rdener removes the re son they broke, the w y
+          softw re f ctory continuously modernizes code.
+          Scope it to t r eted up r des, not rewrites. "Modernize the m infr me" is multi-ye r
+          pro r m. In 6 hours, G rdener up r des one we kness t time in the mock systems'
+          own source code.
+
+          Pipeline
+              . Tri er. Sentinel sees the s me incident cl ss resolved 2+ times (from playbooks )
+                 nd files n upgrade_requests document: system, we kness, evidence (incident ids).
+              . Pl n. G rdener re ds the relev nt mock-system source file nd the incidents, nd
+                proposes minim l diff (for ex mple: v lid te fixed-width records before the b tch
+              runs; p r meterize the SQL query; m ke the confi file re d-only).
+            . Test. It runs th t system's sm ll test file plus re ression check th t repl ys the
+              ori in l f ult from the libr ry.
+            . G te. The diff nd test results o to the Beekeeper throu h the Queen for pprov l.
+            . Deploy. The mock service hot-relo ds with the new code. Its version field
+              increments.
+            . Prove. Ch os repl ys the s me f ult. The system now shru s it off, so no incident
+              opens t ll.
+
+          Why it matters for the demo
+           • It closes the loop: incidents
+                                         o to the sw rm (fix now) nd to G rdener (never    in).
+           • An up r de is itself system ch n e. The sw rm must h ndle the new version
+             (ren med fields, new endpoints), which is the problem st tement's " d pt when
+             systems ch n e underne th it".
+
+          Guardrails
+           • G rdener only edits files inside the mock systems directory.
+           • One diff per up r de, underbout 50 lines, lw ys with test.
+           • Every up r de is led er entry: request, diff, tests, pprover, version before nd fter.
+
+
+          Visualization
+          The visu liz tion is live "w r room": top-down m p where systems re buildin s nd
+            ents re ch r cters th t physic lly w lk to the system they re workin on, with their
+          ch in of thou ht stre min beside them. It is the st e the demo pl ys on, not the
+          product.
+          D shbo rd-b n u rdr il. The rules b n projects where d shbo rd is the m in fe ture.
+          Every pitch line le ds with the sw rm's beh vior (it di nosed, verified, survived kill,
+          le rned). The m p only shows it. Never present it s "we built monitorin d shbo rd".
+
+          What is on screen
+
+Element                      Shows                                          D t source
+System buildin s             M infr me, Unix, port l, l id out lon the      world collections vi ch n e
+                             dependency ch in; color = he lth; cr cks =     stre m
+                             open vulns
+Dependency pipes             Lines between systems; pulse red when          He lth blames field
+                             f ilure c sc des
+A ent sprites                One per ent, l beled by role; w lk to the      agents (position = current
+                             system they re ctin on; Nurse bee sprites      t r et)
+                               w it in   bench
+Thou ht bubbles / side         Live ch in of thou ht: "Port l shows st le          thoughts collection, stre med
+p nel                          b l nces. Checkin Unix tr nsfer lo s..."
+Ch os li htnin                 A strike on the system or       ent the Ch os       chaos_events
+                               Monkey hit
+De th nd t keover              Killed ent turns rey; Nurse bee w lks              Le se ch n e on incidents
+                               over nd picks up the s me ticket
+Le rnin meter                  Time to resolve per round for the s me f ult        incidents
+                               cl ss
+G rdener workshop              A corner where up r ded systems et new              upgrade_requests
+                               version b d e
+
+
+          Build
+             • One HTML p      e with c nv s (PixiJS or pl in 2D c nv s), served by the s me
+               F stAPI pp.
+             • A WebSocket endpoint f ns out Mon oDB ch n e stre ms from agents , thoughts ,
+                incidents , chaos_events , nd world .
+             • Sprites interpol te between fixed coordin tes per system. No p thfindin .
+             • Ch in of thou ht: e ch ent writes short thoughts document per re sonin step
+               (one sentence, not the r w LLM output).
+             • F llb ck if time runs out: termin l view with rich (system p nels plus scrollin
+               thou ht lo ).
+
+
+          Data model (MongoDB Atlas)
+          Atl s is the sin le source of truth for the world, the te m, nd the te m's memory.
+          Everythin runs on the h ck thon's Atl s S ndbox cluster ( fin list requirement), split
+          into two d t b ses so Red nd Blue never sh re writes.
+
+Collection             DB        Key fields                            Atl s fe tures used              Written by
+systems                world     n me, version, st tus, bl mes,        Ch n e stre ms                   A
+                                 metrics, vulns[]
+system_state           world     per-system records (led er            Tr ns ctions                     A
+                                 rows, confi , sessions)
+chaos_scenarios        world     n me, seed, steps[(t, f ult,                                           C
+                                 t r et, p r ms)]
+chaos_events           world     f ult, t r et, ts, scen rio           Ch n e stre ms                   C
+incidents              sw rm     st tus, system, symptoms,             Ch n e stre ms,                  B
+                                 owner, le se_until, steps[],          $jsonSchema , p rti l index on
+                                root_c use, opened/closed ts         open incidents
+agents                  sw rm   role, st tus, t r et, l st_seen,     TTL-style st leness query on      B
+                                st ndby_for                          l st_seen
+checkpoints             sw rm   L n Gr ph st te per thre d            MongoDBSaver                     B
+thoughts                sw rm     ent, incident, text, ts            Ch n e stre ms, TTL index         B
+                                                                     (24h)
+ledger                  sw rm    ction_id, incident, ent, op,        Unique index on ction_id,         B, D
+                                st tus, evidence, pprover            tr ns ctions
+playbooks               sw rm   symptoms, root_c use, fix,           Atl s Vector Se rch with filter   B
+                                outcome, system, embeddin            on system
+upgrade_requests        sw rm   system, we kness, evidence[],                                          B
+                                diff, tests, pprover,                                                  (Sentinel),
+                                version_before/ fter                                                   D
+
+
+         How the key mechanics map to Atlas
+           • Le se cl im: findOneAndUpdate({_id, $or: [{owner: null}, {lease_until:
+             {$lt: now}}]}, {$set: {owner, lease_until}}) . Atomic, so two                ents c n never
+             own one incident.
+           • Ex ctly-once ctions: the unique index on ledger.action_id m kes retried ction
+               no-op insert.
+           • Step + udit to ether: upd tin incidents.steps nd insertin into ledger
+             h ppen in one tr ns ction.
+           • Rec ll: $vectorSearch on playbooks.embedding , pre-filtered by system , top 3.
+           • Live view: one ch n e stre m per w tched collection, f nned out to the browser over
+               WebSocket.
+           • Cle n led er: $jsonSchema on incidents rejects step with n unknown st tus or
+               verified step with no evidence.
+         Open question for #mon odb on Discord: does the s ndbox tier support Vector Se rch
+         indexes nd ch n e stre ms, nd re Voy e AI keys included?
+
+
+         Interfaces between workstreams
+         Four people c n build in p r llel only if these contr cts re reed in the first 15 minutes
+          nd do not ch n e. Write them into the repo s CONTRACTS.md t 10:45.
+
+    From           To               Contr ct                Sh pe
+    A Systems      B Sw rm          System HTTP API          GET /{sys}/health , /metrics , /logs?since= ;
+                                                             POST /{sys}/ops/{action} with {action_id,
+                                                            params} returns {accepted, applied}
+     A Systems      C Ch os         F ult hooks          POST /{sys}/_chaos/{fault} with p r ms; only
+                                                         C c lls these
+     C Ch os        B Sw rm         A ent kill           C re ds agents for PIDs nd sends SIGKILL; B
+                                                         must not need ny w rnin
+     B Sw rm        Visu liz tion   Event collections    agents , thoughts , incidents documents s in
+                                                         the d t model
+     A, C           Visu liz tion   World collections    systems , chaos_events
+
+     B Sentinel     D G rdener      Up r de request      upgrade_requests document; D writes b ck diff,
+                                                         tests, st tus
+     D G rdener     A Systems       Code ch n e          Edits only systems/{sys}.py ; F stAPI relo d
+                                                         picks it up; bumps systems.version
+
+          Stub first. E ch workstre m ships f ke version of its side by 11:30: A serves c nned
+          he lth responses, B writes f ke thoughts , C lo s f ults without effect. Inte r tion then
+          h ppens continuously inste d of t 4 PM.
+          Te m m ppin . With four people: one per workstre m, nd the person on D lso owns the
+          visu liz tion (D is the sm llest). With two: Red (A + C) nd Blue (B + D + visu liz tion).
+          Solo: A nd B only, minim l C ( ent kill + 3 f ults), no D.
+
+
+          Agent team vs human team
+          The ent te m copies how hum n incident-response te m is or nized nd removes
+          its f ilure modes: f ti ue, lost context t h ndoff, nd knowled e th t le ves when people
+          do. Every row below is somethin the demo shows, not cl im.
+
+Dimension               Hum n SOC / SRE te m            A ent te m                        Where the demo
+                                                                                          shows it
+Cover e                 Shifts, 3 AM p es,              Alw ys on                         Ch os t ny time
+                        burnout
+P r llelism             One en ineer per incident       Scouts sp wn workers per          Two incidents
+                                                        incident                          worked t once
+Shift h ndoff           Context lost in notes nd        Checkpoint holds ex ct st te      Nurse bee resumes
+                        ch t                                                              mid-step
+Someone le ves or       Knowled e w lks out the         Le se expires, Nurse bee t kes    A ent kill
+is out sick             door                            over in bout 10 s
+Le rnin                 One person le rns; the wiki     One ent le rns, every ent         Round 2 resolves
+                         oes st le                      rec lls it vi Vector Se rch       f ster
+Onbo rdin               Months to le rn COBOL           Re ds the pl ybook memory         New worker uses old
+                        m infr me                       inst ntly                         pl ybook
+Consistency            Runbook steps skipped         S me verified procedure every       Gu rd bee c tches
+                       under pressure                time                                lyin system
+Audit                  Reconstructed fter the        Every ction lo ed with              Fin l led er
+                       f ct                          evidence nd pprover
+Lon -term fixes        Tech debt b cklo              G rdener up r des code              F ult repl y c uses
+                                                      utom tic lly                       no incident
+
+        C ve ts to s y before jud es sk.
+          • A ents c n be confidently wron . Th t is why the Gu rd bee is sep r te from the
+            worker who m de the fix.
+          • Destructive ctions still need hum n. The hum n moves from doin the toil to
+              pprovin the risky 5%.
+          • The simul tion is simplified. Re l m infr mes need re l inte r tions; our contribution
+            is the coordin tion, verific tion nd memory l yer, which is inte r tion- nostic.
+
+
+        Demo script
+        The live demo is 3 minutes plus Q&A; every be t is one ch os event nd one visible
+        recovery. Run scen rio bank-night-1 with fixed seed so it is identic l to rehe rs l.
+           . 0:00 Hook. "B nks run on 40-ye r-old systems wired to ether. Bre k one, nd the
+             customer port l oes d rk three hops w y. The people who know how to fix them
+              re retirin ."
+           . 0:20 Ch os. Li htnin hits the m infr me. The port l turns red first: the symptom is
+             f r from the c use.
+           . 0:40 Di nose. The Queen opens n incident. Its Scout rec lls nothin (first time)
+              nd w lks the ch in: port l, then Unix, then the m infr me b tch bort. Thou hts
+             stre m on screen.
+           . 1:05 Verify. A worker pplies fix; the system lies nd returns success. The Gu rd
+             bee re ds b ck, rejects it, nd the worker retries. Led er shows sent then
+              verified .
+           . 1:30 Kill. H nd jud e the button: kill the worker mid-fix. Its sprite reys out; bout 10
+             s l ter Nurse bee w lks over nd resumes from the checkpoint without repe tin
+             the verified steps.
+           . 1:55 Approve. A m infr me rest rt needs pprov l; the Queen sks the Beekeeper,
+             who pproves.
+           . 2:10 Le rn. Run bank-night-2 , s me f ult cl ss. Rec ll hits the pl ybook; it is fixed in
+               fr ction of the time. Show round 1 vs round 2 numbers.
+           . 2:30 Never      in. Sentinel sends the recurrin f ult to G rdener; it ships v lid tion
+             up r de. Ch os repl ys the f ult nd no incident opens.
+           . 2:50 Close. "Every ction verified, lo ed nd recover ble, ll in Mon oDB Atl s."
+        Show the Atl s collections for 3 seconds.
+
+    Q&A prep
+
+Likely question                                                        Answer
+Is this just d shbo rd?                                                No. The m p shows ents' work; the product is
+                                                                       the coordin tion, verific tion nd memory l yer.
+How do you prevent two         ents doin the s me                      Atomic le se on the incident plus unique ction
+fix?                                                                   id in the led er.
+How do you know memory helped?                                         S me f ult cl ss, me sured time nd steps per
+                                                                       round.
+Wh t h ppens if Atl s is unre ch ble?                                  A ents stop ctin when they lose their le se; no
+                                                                       split-br in.
+Wh t w s built tod y?                                                  Everythin in the repo; commit history st rts t
+                                                                       10:45.
+
+
+    1-minute submission video
+    Record the full run once t bout 4:15 PM s b ckup. Cut to: hook (5 s), c sc de +
+    di nosis (15 s), lyin system c u ht (10 s), ent kill + t keover (15 s), round 2 f ster (10
+    s), G rdener up r de (5 s).
+
+
+    Build plan, cuts and risks
+    H ckin runs 10:45 to 17:00 (6h15m). Fe ture freeze is 16:15, le vin 45 minutes to
+    rehe rse, record nd submit.
+
+       Fe ture freeze t 16:15 le ves 45 minutes to rehe rse nd submit
+
+                               A Systems                     B Hive                    C Ch os               D + Viz
+
+       10:45-11:30         F stAPI skeleton          L n Gr ph skeleton         F ult hook stubs       C nv s p e
+       Contr cts + stubs   c nned /he lth            le se + he rtbe t          scen rio form t        WebSocket stub
+
+
+       11:30-13:30         3 systems, ch in          Queen, Scouts,             6 f ults + seeds       M p, sprites,
+       Core build          lo s + metrics            workers, led er               ent kill            thou ht stre m
+
+
+       13:30-15:00         Lyin + slow ops,          Gu rd, pprov l,            b nk-ni ht-1           Live ch n e
+       Inte r tion         vulns pl nted             cr sh recovery             end to end             stre ms on m p
+
+
+       15:00-16:15         Hot relo d for            Pl ybooks + Vector         b nk-ni ht-2           G rdener
+       Le rn + up r de     G rdener                  Se rch, Sentinel           m nu l buttons         pipeline
+
+
+       16:15-17:00          Fe ture freeze t 16:15, three full rehe rs ls, record the 1-minute video
+       Rehe rse + submit    M ke the repo public, dd every te mm te, submit before 17:00
+        E ch ph se ends with n inte r tion check: run the current scen rio end to end nd fix
+        wh t bre ks before st rtin the next ph se.
+
+        Cut order (first to go at the top)
+           . IE-only dmin console (keep three systems).
+           . G rdener deploy step (show the diff nd tests; skip hot relo d).
+           . C nv s m p (f ll b ck to the rich termin l view).
+           . Network-p rtition nd schem -drift f ults.
+           . Beekeeper pprov l step.
+        Never cut: the c sc din f ilure, the lyin system c u ht by the Gu rd bee, the       ent kill
+        with Nurse bee t keover, nd the round-2 speedup. Those c rry the score.
+
+        Risks
+
+Risk                                           Likelihood   Miti tion
+Scope: four workstre ms do not inte r te in    Hi h         Contr cts t 10:45, stubs by 11:30, inte r te
+time                                                        every ph se
+LLM l tency m kes the demo slow                Medium       One f st model, short prompts, c p re sonin
+                                                            per step; pre-w rm with dry run
+Non-determinism on st e                        Medium       Seeded scen rios, temper ture 0, rehe rse the
+                                                            ex ct run three times
+Venue Wi-Fi drops                              Medium       Phone hotspot; Atl s network ccess set to
+                                                            0.0.0.0/0
+S ndbox l cks Vector Se rch or ch n e          Low          Ask in #mon odb tod y; f ll b ck to person l
+stre ms                                                     M0 cluster for testin only
+Jud es re d it s d shbo rd                     Medium       Le d every line with ent beh vior; m p is the
+                                                            st e, not the product
+
+
+        Before Saturday
+            Confirm every te mm te is pproved on Cerebr l V lley (not only Lum )
+            Accept the Atl s S ndbox em il on Frid y nd s ve the connection strin
+            LLM API key, Voy e AI key, L n Smith key in sh red .env (not committed)
+            Python 3.11+, langgraph , langgraph-checkpoint-mongodb , pymongo , fastapi ,
+            uvicorn inst lled
+            Ask in #mon odb: s ndbox tier, Vector Se rch, ch n e stre ms, Voy e keys
+            A ree who owns A, B, C, D
+           Brin : l ptops, ch r ers, phone hotspot, overnment photo ID
+     No project code before 10:45: the rules require new work only, nd the demo must show
+     only wh t w s built durin the event.
+
+
+     Theme: the Hive vs the Chaos Monkey
+     Yes, use it: bees m p cle nly onto the re l mech nics, so the theme expl ins the system
+     inste d of decor tin it. Keep it n min nd visu l l yer; the pitch still le ds with
+     verific tion, recovery nd le rnin .
+     Three f ctions.
+         • The Hive (Blue,  ood): the fixer sw rm.
+         • Ch os Monkey (Red, enemy): bre ks systems nd kills bees.
+         • G rdener (neutr l): up r des systems. Every up r de inv lid tes wh t both sides
+           le rned. Ch os's known exploits stop workin , nd the Hive's pl ybooks for the old
+           version o st le. Both must rele rn.
+     Why the neutr l G rdener is the stron est ide here. It turns " d pt when systems
+     ch n e underne th it" ( problem-st tement question) into visible me mech nic.
+     Implement it by t in every pl ybook with the system version it w s le rned on. An
+     up r de bumps the version; rec ll then r nks old-version pl ybooks lower nd m rks
+     them stale until bee re-verifies them on the new version.
+
+Bee n me                 Desi n-doc role              Why it fits
+Beekeeper                Hum n oper tor               Tends the hive, pproves risky moves
+Queen                    He d Orchestr tor            Center of the colony; t lks to the Beekeeper
+Scouts                   Sub-orchestr tors            Find n incident, cl im it, recruit workers
+Worker bees              Workers                      Do the fixin
+Gu rd bees               Verifier                     Check everythin th t enters the hive
+W    le                  Comms                        Bees sh re where food is throu h the w       le
+                                                      d nce; ours sh re incident st tus
+Sentinel                 SRE / observ bility          W tches the whole colony for p tterns
+Undert ker bees          Le se re per (p rt of SRE)   Re l bees remove de d bees; ours detect de d
+                                                        ents nd free their work
+Nurse bees               St ndbys                     Re dy to repl ce f llen bee
+The Hive / honeycomb     Mon oDB Atl s                E ch cell stores somethin
+Honey                    Pl ybooks (Vector Se rch)    Stored experience the whole colony feeds on
+
+     C utions.
+ • Re l queens do not   ive orders. Nobody will object, but do not le n on biolo y cl ims
+   in Q&A.
+ • S y " Ch os Monkey" (the ener l pr ctice) nd void Netflix's n me or br ndin in
+   the UI.
+ • Enterprise jud es: one line of theme in the pitch, then spe k in pl in terms ("the
+   Verifier, our Gu rd bee").
+
+
+Diagram 1: Full system map
+Three f ctions ct on one le cy est te, nd every ction l nds in the Hive (Atl s). The
+Hive's bees never re d Ch os's event lo ; they must discover f ults from symptoms.
+error
+Could not find suit ble point for the iven dist nce
+Diagram 2: Incident lifecycle
+One incident from f ult to honey: the Scout cl ims it, rec lls p st experience, w lks the
+ch in to the root c use, nd nothin counts s done until Gu rd bee verifies it.
+
+
+
+     Ch os Monkey               M infr me                 Web port l               Sentinel                      Que
+
+
+               b tch bort (m lformed
+                      record)
+           1
+
+                                           st le d t c sc des
+                                               downstre m
+                                       2
+
+                                                                GET /he lth = de r ded,
+                                                                      bl mes unix
+                                                                                      3
+
+                                                                                              nom ly on port l
+                                                                                      4
+
+
+                                                                                                                   5
+
+
+
+
+                                                                                               GET /lo s = ABEND
+
+
+
+
+                                                                                                POST /ops/skip_rec
+
+                                                                                                        200 ccept
+                                   13
+
+
+
+
+                                   16
+                                                                                     retry with s
+
+                                                                                                re
+
+
+
+
+                                                                                                ne
+
+
+
+                                                                                                23
+
+
+
+
+                                                                                        POST /op
+
+
+
+
+        Ch os Monkey        M infr me            Web port l            Sentinel              Que
+
+
+
+
+Diagram 3: Step states and crash recovery
+Every led er step moves throu h these st tes; only Gu rd bee c n move step to
+verified , nd step left in sent is reconciled     inst the system before ny retry.
+error
+Could not find suit ble point for the iven dist nce
+
+When bee dies mid-step, the Undert ker frees its le se nd Nurse bee resumes from
+the Atl s checkpoint, skippin verified steps.
+
+
+
+    Ch os Monkey                 Worker bee 1                       Atl s                Undert ker                  Nurse
+
+                                        loop          [every 3 s]
+
+                                            he rtbe t l st_seen
+                                        1
+
+                                       step 3 sent (chmod confi )
+                                        2
+
+                      SIGKILL
+            3
+                                  no he rtbe t
+
+                                                                     find   ents l st_seen older
+                                                                              th n 10 s
+                                                                                                4
+
+                                                                        m rk W1 de d, rele se
+                                                                               le se
+                                                                                                5
+
+                                                                            cl im le se ( tomic findOneAndUpd te)
+                                                                                                                           6
+
+                                                                                 lo d L n Gr ph checkpoint
+                                                                                                                           7
+                                                                                                               steps 1-2 ve
+                                                                                                            step 3 is sent, r
+
+
+
+
+                                                                                                                           8
+
+
+
+
+                                                                                  step 3 verified (no repl y)
+                                                                                                                          10
+
+                                                                                                                           st
+                                                                                                                          11
+
+
+    Ch os Monkey                 Worker bee 1                       Atl s                Undert ker                  Nurse
+Diagram 4: The three-way learning loop
+The Hive ets f ster by storin honey; Ch os ets n stier by findin wh t still works;
+G rdener resets both by up r din the systems, so neither side c n co st on old
+knowled e.
+
+
+
+
+                                                         Did it
+                                                                       yes
+                                                     bre k thin s?
+                                                                                M rk exploit effecti
+                                                                                  for this version
+
+
+
+        Pick f ult
+       from libr ry        Att ck
+
+
+
+
+                                      c uses
+
+
+
+
+                                                                                      Rec ll honey
+                                                    Incident opens
+                                                                                filter: system + versi
+Wh t to me sure for the demo. Time to resolve nd number of steps per incident, per
+round. Expected sh pe: round 1 slow (no honey), round 2 f st (fresh honey), round 3 fter
+  G rdener up r de slower     in (honey st le, new fields), then f st once rele rned.
+
