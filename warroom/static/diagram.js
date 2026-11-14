@@ -863,9 +863,7 @@ function renderOverview() {
   const legacy = `<div class="big legacy ${live ? "hot" : ""}" data-zoom="legacy" style="${pos(B.legacy)}">
     <div class="bh"><span class="bt">LEGACY SYSTEMS</span><span class="dim">THE OLD BANK</span></div>
     <div class="chainL">${legacyChain(inc, lieSys)}</div>
-    <div class="bl-k" style="margin-top:22px">FIXES${steps.length ? ` · ${steps.filter((s) => s.status === "verified").length}/${steps.length} VERIFIED` : ""}</div>
-    <div class="bl">${steps.length ? steps.slice(0, 4).map((s) => `${tickMark(s)} ${U(sop(s.op))}${(s.attempts || []).length > 1 ? ' <b class="r">LIED</b>' : ""}`).join("&nbsp;&nbsp;") : inc?.status === "resolved" ? '<span class="g">ALL FIXED ✓</span>' : '<span class="dim">—</span>'}</div>
-    ${liveLine("legacy", esc(cascade.toUpperCase()))}</div>`;
+    </div>`; // Krish ledger 62: FIXES + NOW only when zoomed in
 
   // THE BEES
   const bees = `<div class="big bees ${live || working ? "hot" : ""}" data-zoom="bees" style="${pos(B.bees)}">
@@ -880,8 +878,7 @@ function renderOverview() {
   const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
   const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="${pos(B.gardener)}">
     <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">OUTSIDE THE SWARM</span></div>
-    <div class="gsteps">${["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"].map((n, i) => `<span class="${u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "cur" : ""}">${n}</span>`).join("")}</div>
-    ${liveLine("gardener", u ? (u.status === "proven" ? `<span class="g">${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}: ATTACK REPLAYED, NOTHING BROKE</span>` : esc((gThought ? (translate(gThought)?.text || "").replace(/<[^>]+>/g, "") : String(u.status)).toUpperCase())) : '<span class="dim">WAITING FOR A REPEAT</span>')}</div>`;
+    </div>`; // Krish ledger 62: stage steps + NOW only when zoomed in
 
   patch($("#ov-nodes"), [{ k: "chaos", html: chaos }, { k: "legacy", html: legacy }, { k: "bees", html: bees }, { k: "gard", html: gard }]);
 
@@ -1122,7 +1119,7 @@ function renderDiagram() {
   $("#ex-title").textContent = TITLE[zoom];
   $("#z-back").hidden = zoom === "overview";
   const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener"); // swarm only
-  $("#ex-a-l").textContent = zoom === "overview" ? `${agents.filter((a) => a.status !== "dead").length} AGENTS ALIVE` : "";
+  $("#ex-a-l").textContent = ""; // Krish ledger 62: no AGENTS ALIVE
   const t0 = runStartedAt();
   const el = rid && t0 ? Math.max(0, Math.floor((serverNow() - t0) / 1000)) : null;
   $("#clock").textContent = rid ? `NIGHT ${state.current?.round ?? "?"} · T+${el != null ? `${String(Math.floor(el / 60)).padStart(2, "0")}:${String(el % 60).padStart(2, "0")}` : "—"}` : "NO NIGHT RUNNING";

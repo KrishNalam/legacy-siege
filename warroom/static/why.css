@@ -21,9 +21,8 @@ em { font-style: normal; }
 .f { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; background: var(--paper); counter-reset: ln; }
 .f > * { position: absolute; }
 
-/* paper header, same as the diagram */
-.sheet { left: 0; top: 0; width: 1600px; height: 84px; background: #f4f4f1; color: #111;
-  --ink: #111; --paper: #f4f4f1; --gutter: #8a8a8a; --muted: #555; --faint: #c9c9c9; }
+/* header: no white bar (Krish ledger 62), sits on the black sheet */
+.sheet { left: 0; top: 0; width: 1600px; height: 84px; background: transparent; color: var(--ink); }
 .l { position: absolute; left: 60px; right: 40px; height: 26px; line-height: 26px; counter-increment: ln; white-space: nowrap; }
 .l::before { content: counter(ln); position: absolute; left: -44px; width: 28px; text-align: right; font-size: 10px; color: var(--gutter); }
 .row { display: flex; justify-content: space-between; align-items: center; gap: 2ch; }
@@ -32,7 +31,7 @@ em { font-style: normal; }
 .nav { display: flex; gap: 1ch; }
 .nav a { color: var(--ink); text-decoration: none; border: 1px solid var(--ink); padding: 0 1.2ch; height: 26px; line-height: 24px; }
 .nav a:hover, .nav a.on { background: var(--ink); color: var(--paper); }
-.nav a.back { border-color: var(--amber); color: #8a5200; margin-left: 2ch; }
+.nav a.back { border-color: var(--amber); color: var(--amber); margin-left: 2ch; }
 .nav a.back:hover { background: var(--amber); color: #111; }
 
 /* black exhibit */
@@ -64,7 +63,7 @@ h1 { left: 60px; font-size: 104px; line-height: 1.12; letter-spacing: -.02em; }
 .q h2 { font-size: 30px; line-height: 1.25; min-height: 130px; margin-bottom: 14px; }
 .q h2 i { font-style: normal; display: inline-block; background: var(--ink); color: var(--paper); width: 1.4em; text-align: center; margin-right: .5ch; }
 .q.last h2 i { background: var(--amber); color: #111; }
-.q p { font-size: 21px; line-height: 1.45; color: var(--muted); margin: 0 0 22px; min-height: 270px; }
+.q p { font-size: 24px; line-height: 1.4; color: var(--muted); margin: 0 0 22px; min-height: 150px; }
 .q p em { color: var(--red); }
 .q ul { list-style: none; margin: 0; padding: 18px 0 0; border-top: 1px solid var(--green); }
 .q li { font-size: 19px; line-height: 1.35; color: var(--green); padding: 4px 0; }
