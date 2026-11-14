@@ -94,6 +94,7 @@ def _summary_systems(f: dict) -> str:
     return f"weak systems: {weak}. Open vulns on {', '.join(f['open_vulns']) or 'none'}"
 
 
+SCOUT_REPORT_S = 15.0
 SCOUTS = {SCOUT_HIVE: ("Hive Scout", scout_hive, _summary_hive),
           SCOUT_SYSTEMS: ("Systems Scout", scout_systems, _summary_systems)}
 
@@ -104,12 +105,14 @@ def post_findings(snap: dict) -> dict:
     for sid, (name, fn, summarize) in SCOUTS.items():
         findings = fn(snap)
         summary = summarize(findings)
-        prev = world().red_agents.find_one({"_id": sid}, {"summary": 1}) or {}
-        world().red_agents.update_one({"_id": sid}, {"$set": {
-            "name": name, "kind": "scout", "status": "watching", "findings": findings, "summary": summary,
-            "run_id": snap.get("run_id"), "pid": os.getpid(), "last_seen": now()}}, upsert=True)
-        if snap.get("night_running") and prev.get("summary") != summary:
-            think(sid, core.ROLE, f"{name}: {summary}.")
+        prev = world().red_agents.find_one({"_id": sid}, {"reported": 1, "reported_at": 1}) or {}
+        fields = {"name": name, "kind": "scout", "status": "watching", "findings": findings, "summary": summary,
+                  "run_id": snap.get("run_id"), "pid": os.getpid(), "last_seen": now()}
+        quiet = prev.get("reported_at") and (now() - prev["reported_at"]).total_seconds() < SCOUT_REPORT_S
+        if snap.get("night_running") and prev.get("reported") != summary and not quiet:
+            think(sid, core.ROLE, f"{name}: {summary}.")   # the feed hears a changed picture at most every 15 s
+            fields.update(reported=summary, reported_at=now())
+        world().red_agents.update_one({"_id": sid}, {"$set": fields}, upsert=True)
         out[sid] = findings
     return out
 
@@ -212,8 +215,9 @@ def order_strike(persona_id: str, order: dict, snap: dict, cfg: core.Settings) -
     """Turn an order into a validated strike from the Striker's OWN menu now (a mid-send victim may have changed)."""
     p = PERSONAS[persona_id]
     menu = p.menu(snap, cfg)
-    if order["fault"] in AGENT_FAULTS:
-        item = _worker_item(menu, order["fault"])
+    if order["fault"] in AGENT_FAULTS:   # the ordered victim if still on my menu, else the best worker now
+        item = next((m for m in menu if m["fault"] == order["fault"] and m.get("victim") == order.get("victim")
+                     and order.get("victim")), None) or _worker_item(menu, order["fault"])
     else:
         want = {k: order[k] for k in KEYS if order.get(k) is not None}
         item = next((m for m in menu if _key(m) == want), None)
@@ -266,7 +270,7 @@ class Commander:
         self.first_s = _f("RED_COMMANDER_FIRST_S", 20)
         self.step_gap_s = _f("RED_COMMANDER_STEP_GAP_S", 3)
         self.step_timeout_s = _f("RED_COMMANDER_STEP_TIMEOUT_S", 90)
-        self.observe_s = _f("RED_COMMANDER_OBSERVE_S", 20)
+        self.observe_s = _f("RED_COMMANDER_OBSERVE_S", 45)
         self.max_campaigns = int(_f("RED_COMMANDER_MAX", 0))
         self.llm_calls = 0
         self.fallback_count = 0
@@ -283,7 +287,17 @@ class Commander:
         world().red_agents.update_one({"_id": COMMANDER_ID}, {"$set": fields}, upsert=True)
 
     def _say(self, text: str, kind: str = "thought", system: str | None = None) -> None:
-        think(COMMANDER_ID, core.ROLE, text, system=system, kind=kind)
+        """Thoughts are capped at 280 chars: a long reasoning line goes out as up to 3 lines, not truncated."""
+        parts, rest = [], text
+        while rest and len(parts) < 3:
+            if len(rest) <= 278:
+                parts.append(rest)
+                break
+            cut = rest.rfind(" ", 0, 272)
+            parts.append(rest[:cut if cut > 100 else 272] + " …")
+            rest = "… " + rest[cut if cut > 100 else 272:].lstrip()
+        for p in parts:
+            think(COMMANDER_ID, core.ROLE, p, system=system, kind=kind)
 
     def _label(self, planner: str) -> str:
         return "claude" if planner == "claude" else "policy (no reasoning)"
@@ -462,7 +476,8 @@ class Commander:
                      "outcome": learning.outcome(e)} for i, e in enumerate(events)]
         caught = any(ev["outcome"].get("guard_caught") for ev in evidence)
         recov = [ev["outcome"]["recovery_s"] for ev in evidence if ev["outcome"].get("recovery_s") is not None]
-        handoffs = sum(len(r.get("handoffs") or []) for ev in evidence for r in ev["outcome"].get("incidents") or [])
+        seen = {r["incident"]: r for ev in evidence for r in ev["outcome"].get("incidents") or []}
+        handoffs = sum(len(r.get("handoffs") or []) for r in seen.values())
         summary = {"landed": f"{len(events)}/{len(camp['steps'])}", "guard_caught": caught or None,
                    "recovery_s": max(recov) if recov else None, "nurse_handoffs": handoffs,
                    "aborted": camp["status"] == "aborted"}

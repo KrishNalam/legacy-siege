@@ -130,3 +130,14 @@ def test_unexecuted_step_expires_and_campaign_aborts(systems, fast, monkeypatch)
     assert reg["last_reflection"]["outcome_summary"] == {"landed": "0/2", "guard_caught": None, "recovery_s": None,
                                                          "nurse_handoffs": 0, "aborted": True}
     assert "order" not in world().red_agents.find_one({"_id": "red-saboteur"})
+
+
+def test_ordered_victim_is_kept_when_still_on_the_menu():
+    from .test_redfleet import agent
+    hive = HIVE + [agent("worker-web-1", "worker", phase="investigate", specialty="portal", incident="INC-0001")]
+    s = snap(agents=hive, incidents=[INC])
+    order = {"fault": "agent_kill", "target": "swarm", "victim": "worker-web-1", "reason": "r"}
+    strike, _ = commander.order_strike("red-assassin", order, s, cfg())
+    assert strike["victim"] == "worker-web-1" and strike["params"]["selector"] == {"agent": "worker-web-1"}
+    strike, _ = commander.order_strike("red-assassin", {**order, "victim": "worker-gone-9"}, s, cfg())
+    assert strike["victim"] == "worker-mainframe-1"   # victim left: the worker mid-send now
