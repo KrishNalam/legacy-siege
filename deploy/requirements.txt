@@ -1,0 +1,14 @@
+# Runtime deps for the container image. Versions pinned to what the dev .venv has
+# installed (Python 3.12). Transitive deps resolve freely.
+fastapi==0.162.7
+uvicorn[standard]==0.54.0
+pymongo==4.20.0
+langgraph==1.2.22
+langgraph-checkpoint-mongodb==0.5.1
+anthropic==2.8.0
+voyageai==0.6.0
+httpx==0.28.1
+rich==15.0.0
+pytest==9.2.0
+websockets==17.4
+python-dotenv==1.2.4

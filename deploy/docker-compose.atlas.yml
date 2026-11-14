@@ -1,0 +1,22 @@
+# App only, pointed at MongoDB Atlas (or any replica set with Atlas Search).
+# Run from repo root:
+#   MONGODB_URI='mongodb+srv://...' docker compose -f deploy/docker-compose.atlas.yml up --build
+# or put MONGODB_URI in ../.env.
+name: legacy-siege-atlas
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: legacy-siege:dev
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI to your Atlas connection string}
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    ports:
+      - "${WARROOM_HOST_PORT:-8700}:8700"
+      - "${SYSTEMS_HOST_PORT:-8701}:8701"
+    restart: unless-stopped

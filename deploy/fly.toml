@@ -1,0 +1,46 @@
+# Fly.io: one always-on machine. The app keeps live agent processes in memory
+# (chaos SIGKILLs them by PID), so never scale past 1 and never auto-stop.
+#
+#   cd <repo root>
+#   fly apps create <your-app-name>   # then set `app` below to that name
+#   fly secrets set MONGODB_URI='mongodb+srv://...' ANTHROPIC_API_KEY=... VOYAGE_API_KEY=... --config deploy/fly.toml
+#   fly deploy --config deploy/fly.toml --dockerfile deploy/Dockerfile --ha=false
+# (run from the repo root so the build context is the whole repo)
+app = "legacy-siege"
+primary_region = "iad"
+
+[env]
+  WARROOM_PORT = "8700"
+  SYSTEMS_PORT = "8701"
+  PACE = "1.0"
+
+# War room (public, HTTPS + WebSockets). Fly's proxy passes WebSocket upgrades through.
+[http_service]
+  internal_port = 8700
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 250
+  [[http_service.checks]]
+    grace_period = "40s"
+    interval = "15s"
+    method = "GET"
+    path = "/"
+    timeout = "5s"
+
+# Systems API (:8701) is reached by the bees over 127.0.0.1 inside the machine.
+# Expose it publicly only if you need it for debugging:
+# [[services]]
+#   internal_port = 8701
+#   protocol = "tcp"
+#   [[services.ports]]
+#     port = 8701
+#     handlers = ["http"]
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

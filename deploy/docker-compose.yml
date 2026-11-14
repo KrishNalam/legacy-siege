@@ -1,0 +1,44 @@
+# Local full stack: MongoDB (Atlas Local, has vector search + change streams) + app.
+# Run from repo root:   docker compose -f deploy/docker-compose.yml up --build
+# Atlas instead:        docker compose -f deploy/docker-compose.atlas.yml up --build
+name: legacy-siege
+
+services:
+  mongo:
+    image: mongodb/mongodb-atlas-local:8.0
+    hostname: mongo
+    volumes:
+      - mongo-data:/data/db
+      - mongo-config:/data/configdb
+    healthcheck:
+      # The image ships its own probe (no mongosh inside).
+      test: ["CMD", "/usr/local/bin/runner", "healthcheck"]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: legacy-siege:dev
+    depends_on:
+      mongo:
+        condition: service_healthy
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      # Overrides any MONGODB_URI in ../.env so compose always uses its own mongo.
+      MONGODB_URI: mongodb://mongo:27017/?directConnection=true
+      PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+    ports:
+      - "${WARROOM_HOST_PORT:-8700}:8700"
+      - "${SYSTEMS_HOST_PORT:-8701}:8701"
+    restart: unless-stopped
+
+volumes:
+  mongo-data:
+  mongo-config:
