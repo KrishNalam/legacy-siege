@@ -255,3 +255,37 @@ def test_main_registers_heartbeats_and_picks_requests(env):
     stream, woke = gmain.wait_for_request(stream, 5)
     stream.close()
     assert woke
+
+
+def test_reset_while_awaiting_approval_unblocks_the_gardener(env):
+    """A full reset wipes the approval the Gardener is waiting on: it must give up and go back to watching
+    for new requests (not wait forever), so the next upgrade request after the reset is picked up."""
+    upg_id = new_request()
+    done = threading.Event()
+    t = threading.Thread(target=lambda: (gmain.run_safely(upg_id), done.set()), daemon=True)
+    t.start()
+    for _ in range(400):
+        if (col("upgrade_requests").find_one({"_id": upg_id}) or {}).get("status") == "awaiting_approval":
+            break
+        time.sleep(0.05)
+    assert col("upgrade_requests").find_one({"_id": upg_id})["status"] == "awaiting_approval"
+    time.sleep(0.5)
+    assert not done.is_set()  # really waiting for the Beekeeper
+    setup_db.reset()  # the demo's Reset ▸ Full
+    assert done.wait(10), "gardener still blocked on a wiped approval"
+    assert col("upgrade_requests").count_documents({}) == 0  # nothing resurrected or marked rejected
+    new_request("UPG-0001")  # counters restart after a reset: same id, new request
+    assert gmain.next_request()["_id"] == "UPG-0001"
+
+
+def test_wait_for_decision_abandons_when_request_moves_on(env):
+    upg_id = new_request()
+    pipeline.plan(upg_id)
+    pipeline.test(upg_id)
+    pipeline.gate(upg_id, wait=False)
+    apr_id = col("upgrade_requests").find_one({"_id": upg_id})["approval_id"]
+    col("upgrade_requests").delete_one({"_id": upg_id})  # request gone, approval still pending
+    t0 = time.monotonic()
+    with pytest.raises(pipeline.Abandoned):
+        pipeline.wait_for_decision(apr_id, timeout=10, upg_id=upg_id)
+    assert time.monotonic() - t0 < 5

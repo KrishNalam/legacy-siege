@@ -58,6 +58,10 @@ class StepError(RuntimeError):
     """A step was called on an upgrade in the wrong status (nothing was changed)."""
 
 
+class Abandoned(StepError):
+    """The approval (or the upgrade request) we were waiting on vanished, e.g. a demo reset wiped it."""
+
+
 # ------------------------------------------------------------------ small helpers
 def say(text: str, system: str | None = None) -> None:
     """One short sentence on the activity stream (swarm.thoughts, kind 'upgrade')."""
@@ -300,14 +304,24 @@ def request_approval(upg_id: str) -> dict:
     return get(upg_id)
 
 
-def wait_for_decision(apr_id: str, timeout: float | None = None, poll_s: float = 3.0) -> dict | None:
-    """Block until approvals/<apr_id> is approved or denied (change stream + polling fallback)."""
+def wait_for_decision(apr_id: str, timeout: float | None = None, poll_s: float = 3.0,
+                      upg_id: str | None = None) -> dict | None:
+    """Block until approvals/<apr_id> is approved or denied (change stream + polling fallback).
+
+    Raises Abandoned if the approval disappears, or (with ``upg_id``) the upgrade request is gone or no
+    longer awaiting this approval -- a reset wiped it, so the caller goes back to watching for new requests
+    instead of waiting forever."""
     deadline = None if timeout is None else time.monotonic() + timeout
     approvals = col("approvals")
 
     def decided() -> dict | None:
         d = approvals.find_one({"_id": apr_id})
-        return d if d and d.get("status") in ("approved", "denied") else None
+        if d is None:
+            raise Abandoned(f"approval {apr_id} is gone (reset?)")
+        if upg_id is not None and not col("upgrade_requests").find_one(
+                {"_id": upg_id, "status": "awaiting_approval", "approval_id": apr_id}, {"_id": 1}):
+            raise Abandoned(f"{upg_id} is gone or no longer awaiting {apr_id} (reset?)")
+        return d if d.get("status") in ("approved", "denied") else None
 
     stream = None
     try:
@@ -323,7 +337,16 @@ def wait_for_decision(apr_id: str, timeout: float | None = None, poll_s: float =
                 if d := decided():
                     return d
             if stream is not None:
-                ev = stream.try_next()
+                try:
+                    ev = stream.try_next()
+                except Exception as e:  # e.g. the collection was dropped by a reset: keep polling
+                    log.warning("approval change stream ended (%s); polling", e)
+                    stream.close()
+                    stream, last_poll = None, 0.0
+                    continue
+                if (ev or {}).get("operationType") in ("delete", "drop", "dropDatabase", "invalidate"):
+                    last_poll = 0.0  # re-check right away (raises Abandoned if it is really gone)
+                    continue
                 doc = (ev or {}).get("fullDocument") or {}
                 if doc.get("status") in ("approved", "denied"):
                     return doc
@@ -340,7 +363,7 @@ def gate(upg_id: str, wait: bool = True, timeout: float | None = None) -> str:
     upg = request_approval(upg_id)
     if not wait:
         return "pending"
-    d = wait_for_decision(upg["approval_id"], timeout)
+    d = wait_for_decision(upg["approval_id"], timeout, upg_id=upg_id)
     if d is None:
         return "pending"
     if d["status"] == "denied":
