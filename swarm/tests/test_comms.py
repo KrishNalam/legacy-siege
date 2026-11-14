@@ -208,3 +208,5 @@ def test_queen_claims_customer_facing_incident_first(db, monkeypatch):
     ranked = sorted([{'_id': 'INC-1', 'affected': ['unix']}, {'_id': 'INC-2', 'affected': ['mainframe']}],
                     key=lambda i: comms.incident_rank(i, {'INC-1': 20, 'INC-2': 100}[i['_id']]))
     assert ranked[0]['_id'] == 'INC-2'  # neither customer-facing: the feed's priority decides
+    from swarm.tests.conftest import reset_runtime
+    reset_runtime()  # leave no scout-1/queen-1 agents behind for later modules (test_roster inserts scout-1)
