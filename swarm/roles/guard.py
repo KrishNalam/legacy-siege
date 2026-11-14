@@ -19,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 from common import config as shared
 from common.db import col, now
 
-from .. import settings, steps, verify
+from .. import schema, settings, steps, verify
 from ..harness import Agent, checkpointer, log
 
 SENT_STEPS = [
@@ -88,6 +88,8 @@ def build_graph(agent: Agent):
         if state["applied"]:
             if steps.verify(inc, st, aid, f"{facts}; health.{sys}={state['health']}", agent.id):
                 agent.think(f"Verified {aid}: {facts}.", kind="verify", incident=inc, system=sys, pause=False)
+                if op == "map_field":
+                    learn_mapping(inc, st, facts)
                 return {"verdict": "verified"}
             return {"verdict": "moot"}
         resp = st.get("response")
@@ -121,6 +123,19 @@ def build_graph(agent: Agent):
             if steps.reject(inc, st, aid, reason, agent.id):
                 return {"verdict": "rejected"}
         return {"verdict": "pending"}
+
+    def learn_mapping(inc: str, st: dict, facts: str) -> None:
+        """A verified field mapping becomes shared memory: swarm.schema_mappings, version + 1."""
+        p = st.get("params") or {}
+        try:
+            m = schema.learn(p.get("field", "balance"), p.get("source"), inc, st["step_id"], facts, agent.id)
+        except Exception as e:
+            log(agent.id, f"schema mapping not stored: {type(e).__name__}: {e}")
+            return
+        if m:
+            agent.think(f"{schema.SYSTEM} renamed {m['from']} → {m['to']} · mapping learned v{m['version']} "
+                        f"(swarm.schema_mappings; every agent reads {m['to']} from now on).", kind="learn",
+                        incident=inc, system=schema.SYSTEM, pause=False)
 
     g = StateGraph(GuardState)
     g.add_node("read_back", read_back)

@@ -142,6 +142,10 @@ def fix_plan(fault_class: str, params: dict | None = None) -> list[dict]:
     if fault_class == "config_exploit":
         return [_step("unix", "chmod_config", {"file": "/etc/xfer.conf", "mode": "0640"},
                       "Make /etc/xfer.conf non-world-writable (0640)")]
+    if fault_class == "schema_drift" and p.get("to"):
+        return [_step("portal", "map_field", {"field": p.get("field", "balance"), "source": p["to"]},
+                      f"Map the portal's {p.get('field', 'balance')} to the manifest's new field {p['to']}"),
+                _step("portal", "refresh_cache", {}, "Refresh the portal balance cache through the new mapping")]
     if fault_class == "credential_exploit":
         return [_step("mainframe", "rotate_credential", {"account": "OPERATOR"},
                       "Rotate the default OPERATOR credential", destructive=True)]
@@ -150,8 +154,8 @@ def fix_plan(fault_class: str, params: dict | None = None) -> list[dict]:
 
 def rebind(fix: list[dict], fault_class: str, params: dict) -> list[dict]:
     """Turn a playbook's remembered fix into today's plan: facts (record ids) come from today's read-back."""
-    if fault_class == "batch_abort":
-        return fix_plan("batch_abort", params)
+    if fault_class in ("batch_abort", "schema_drift"):  # today's facts (record ids / field names) win
+        return fix_plan(fault_class, params)
     remembered = [_step(f["system"], f["op"], dict(f.get("params") or {}), f.get("desc") or f"{f['op']} on {f['system']}",
                         bool(f.get("destructive"))) for f in fix]
     return remembered or fix_plan(fault_class)
@@ -172,4 +176,5 @@ WEAKNESS = {
     "sqli_exploit": "portal search builds SQL from raw input",
     "config_exploit": "/etc/xfer.conf ships world-writable",
     "credential_exploit": "mainframe OPERATOR account keeps its default credential",
+    "schema_drift": "unix xfer manifest field names change with vendor patches",
 }

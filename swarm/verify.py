@@ -73,6 +73,9 @@ def check(op: str, params: dict, read, probe=None, sent_at: datetime | None = No
         patch = read("portal").get("search_patch")
         clean, pf = _probe_clean(probe, "portal") if probe else (True, "no probe")
         return patch == p.get("patch", "parameterize_search") and clean, f"state.search_patch={patch}; {pf}"
+    if op == "map_field":
+        from . import schema  # noqa: PLC0415
+        return schema.verify_mapping(p.get("field", "balance"), p.get("source"), read("portal"), read("unix"))
     if op == "refresh_cache":
         c = read("portal").get("cache", {})
         return c.get("stale") is False, f"state.cache.stale={c.get('stale')}; balances_as_of={c.get('balances_as_of')}"
