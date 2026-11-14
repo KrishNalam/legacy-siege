@@ -340,3 +340,26 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   occurrences it upserts `gardener_notes {_id:signature, source, system, problem, count, evidence,
   text, ts, updated_at}` and emits a `gardener_note` message/thought once per signature. These are
   advisory notes, not upgrade requests; Gardener behavior is unchanged. Full reset clears notes.
+
+- **Workflow drift (additive W26, `WORKFLOW_DRIFT=1`, default off; Statement 3 Q3 "workflow").**
+  - Systems: mainframe fault `workflow_drift` ("JES2 maintenance"). After it, an ABENDed NIGHTBAT is held:
+    `restart_batch` returns `{accepted:false, message:"$HASP101 NIGHTBAT HELD - JCL HOLD: issue release_hold before
+    restart_batch"}` (new `systems.base.OpRefused`: refused outright, the receipt keeps the message). New op
+    `release_hold {job:"NIGHTBAT"}` (non-destructive, postcondition `state.workflow.hold == false`) exists only after
+    the fault; `GET /mainframe/ops` is now built per state and then lists it with `before:"restart_batch"`, and
+    `restart_batch` gains `requires:["release_hold"]`. `GET /mainframe/state` adds `workflow:{version, hold, requires}`
+    only once drifted. Baseline catalog/state unchanged. `/_admin/reset` restores workflow v1.
+  - Chaos: `workflow_drift` (target mainframe, switch-gated). With the switch on, `bank-night-1/2` get it at t=0 and
+    scenario `bank-workflow` (seed 1005: drift + batch_abort) exists; off = seeded nights unchanged.
+  - Swarm (`swarm/workflow.py`): the worker notices a refused step, reads the live `/ops`, rules R1-R4 decide
+    (refusal names the op, catalog lists it as a prerequisite, non-destructive, params given; Claude may propose with
+    key + `AI_SECOND_OPINION=1`, same rules accept/overrule) and inserts step `<step_id>p` (n = refused n - 0.5) into
+    the same fenced task; `incident.workflow_drift {system, op, requires, params, message, refused, proposed_by, ...}`.
+    After the Guard verifies the prerequisite and the retried op it writes `swarm.schema_mappings`
+    `{_id:"mainframe.workflow.restart_batch", kind:"workflow", system, op, requires, params, version (v1 = original),
+    history[], learned_from, verified_by, evidence, reused, uses}` (no `source`/`field`, so the round-reset rewind and
+    the war-room mapping stamp skip it). The Scout's plan puts learned prerequisites up front (if live `/ops` still
+    lists them); such steps carry `workflow:{before, memory, version}`. Thoughts: "workflow changed: restart_batch now
+    needs release_hold first …", "workflow memory: … planned up front, no refusal".
+  - Rehearsal: `scripts.demo_check --drift` adds a field-drift row set (drift_check logic) and, with
+    `WORKFLOW_DRIFT=1` on the stack and the checker, rows w1 (learned night 1) and w2 (reused night 2).
