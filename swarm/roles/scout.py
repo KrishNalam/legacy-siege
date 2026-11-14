@@ -57,17 +57,6 @@ def scout_config(inc_id: str, agent_id: str, generation: int) -> dict:
             "recursion_limit": 500}
 
 
-def _replan_update(replacements):
-    """Merge retirement flags into live steps without replacing Guard evidence."""
-    return [{"$set": {
-        "steps": {"$concatArrays": [{"$map": {
-            "input": "$steps", "as": "step", "in": {"$cond": [
-                {"$in": ["$$step.status", ["sent", "verified"]]},
-                "$$step", {"$mergeObjects": ["$$step", {"superseded_by_replan": True}]}]}
-        }}, {"$literal": replacements}]},
-        "memory_replanned": True, "status": "fixing"}}]
-
-
 def build_graph(agent: Agent):
     sysc = agent.systems
 
@@ -388,18 +377,18 @@ def build_graph(agent: Agent):
             return escalate(config, inc["_id"], "rejected memory has no safe policy replacement")
         old = [dict(s) for s in inc["steps"]]
         done = [(s["system"], s["op"], s.get("params") or {}) for s in old if s["status"] == "verified"]
-        replacements = []
+        for s in old:
+            if s["status"] != "verified":
+                s["superseded_by_replan"] = True
         n = max(s["n"] for s in old)
         for s in raw:
             if (s["system"], s["op"], s.get("params") or {}) in done:
                 continue
             n += 1
-            replacements.append({**s, "step_id": f"{inc['_id']}-s{n}", "n": n, "task_id": None,
+            old.append({**s, "step_id": f"{inc['_id']}-s{n}", "n": n, "task_id": None,
                         "status": "planned", "action_id": None, "attempts": [], "agent": None,
                         "evidence": None, "approval_id": None, "ts": now()})
-        # Guard owns verdicts: never write a stale snapshot of its step or attempts.
-        # Match eligibility at write time so a concurrent sent/verified step survives.
-        fenced(config, inc["_id"], _replan_update(replacements))
+        fenced(config, inc["_id"], {"$set": {"steps": old, "memory_replanned": True, "status": "fixing"}})
         say(inc["_id"], "The Guard rejected the recalled repair. Replacing unverified work with a fresh policy plan; "
                         "keeping the failed attempts as evidence.", kind="action", pause=False)
         return {"outcome": "await"}
