@@ -202,7 +202,8 @@ def build_graphs(agent: Agent):
     return detect, reap, upgrade
 
 
-SAMPLE_EVERY_S = 10.0
+SAMPLE_EVERY_S = 10.0   # known-good feed sample (4 MongoDB round trips)
+FEED_CHECK_S = 2.0      # feed field check (1 state read + 1 find): notices a drift before the portal breaks
 
 RECURRING = [
     {"$match": {"status": "resolved", "fault_class": {"$nin": [None, "unknown", "schema_drift"]}}},
@@ -225,6 +226,7 @@ def run(agent: Agent) -> None:
     versions: dict[str, int] = {}
     last_slow = 0.0
     last_sample = 0.0
+    last_feed = 0.0
 
     last_scan: dict = {"at": 0.0, "since": {}, "seen": set()}
 
@@ -273,7 +275,7 @@ def run(agent: Agent) -> None:
                     f"schema; {schema.CONSUMER} reads it next).", kind="thought", system=schema.SYSTEM, pause=False)
 
     def sweep() -> None:
-        nonlocal last_slow, last_sample
+        nonlocal last_slow, last_sample, last_feed
         health, lines = {}, {}
         for s in policy.systems():
             try:
@@ -325,13 +327,16 @@ def run(agent: Agent) -> None:
             last_scan["at"] = time.monotonic()
             security_scan()
 
-        if time.monotonic() - last_sample > SAMPLE_EVERY_S and all(
-                (health.get(s) or {}).get("status") == "up" for s in (schema.SYSTEM, schema.CONSUMER)):
-            last_sample = time.monotonic()
-            try:  # known-good feed sample for schema-drift diffs (only kept if it matches the expected schema)
+        both_up = all((health.get(s) or {}).get("status") == "up" for s in (schema.SYSTEM, schema.CONSUMER))
+        if both_up and time.monotonic() - last_feed > FEED_CHECK_S:
+            last_feed = time.monotonic()
+            try:
                 st = sysc.state(schema.SYSTEM)
-                if not schema.capture_good(st):
-                    notice_feed_change(st)
+                notice_feed_change(st)
+                if time.monotonic() - last_sample > SAMPLE_EVERY_S:
+                    # known-good feed sample for schema-drift diffs (only kept if it matches the expected schema)
+                    last_sample = time.monotonic()
+                    schema.capture_good(st)
             except Exception as e:
                 log(agent.id, f"schema sample error: {type(e).__name__}: {e}")
 
