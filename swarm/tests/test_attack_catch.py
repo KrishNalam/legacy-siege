@@ -128,3 +128,39 @@ def test_exploit_caught_by_signature_and_probe_then_patched(c, sys, fault, op):
     assert plan[0]["destructive"] == ((sys, op) in policy.DESTRUCTIVE)   # rotate_credential goes to approval
     assert not c.post(f"/{sys}/security/probe/{vid}").json()["exploitable"]   # retest: the exploit bounces
     assert look(c, sys)["fault_class"] is None
+
+
+# ------------------------------------------------------------------ G3 false_log (Liar): read-back over logs
+def test_false_log_alone_opens_nothing(c):
+    for sys, blame in (("mainframe", "unix"), ("unix", "portal"), ("portal", "mainframe")):
+        chaos(c, sys, "false_log", {"blame": blame})
+    tick(c, 3)
+    for s in ALL:
+        assert c.get(f"/{s}/health").json()["status"] == "up"     # the Sentinel sees a healthy estate
+        assert not policy.exploit_signs(s, logs(c, s))              # and no security signature
+        assert look(c, s)["fault_class"] is None                    # no specialist blames anything
+
+
+def test_false_log_during_a_real_cascade_does_not_redirect_the_walk(c, monkeypatch):
+    from systems import mainframe as mf
+    monkeypatch.setattr(mf, "validate_record", lambda record: True)   # legacy validator, whatever is on disk
+    chaos(c, "mainframe", "batch_abort")
+    for _ in range(20):
+        tick(c)
+        if c.get("/portal/health").json()["status"] == "degraded":
+            break
+    # the liar plants an ABEND note on the mainframe blaming unix, and a unix note blaming the portal
+    chaos(c, "mainframe", "false_log", {"blame": "unix"})
+    chaos(c, "unix", "false_log", {"blame": "portal"})
+    tick(c)
+    assert any("UNIX" in ln["line"] for ln in logs(c, "mainframe"))
+    # the walk follows health.blames + state, not log prose: portal -> unix -> mainframe
+    hops, s = [], policy.most_downstream(ALL)
+    while s:
+        hops.append(s)
+        s = c.get(f"/{s}/health").json().get("blames")
+    assert hops == ["portal", "unix", "mainframe"]
+    f = only(c, "mainframe", "batch_abort")
+    assert f["params"]["poison_records"] and "S0C7" in f["root_cause"]   # the real ABEND, not the planted S0C4
+    fix_and_verify(c, "batch_abort", f["params"])
+    assert all(c.get(f"/{s}/health").json()["status"] == "up" for s in ALL)
