@@ -405,3 +405,12 @@ main > .l { z-index: 5; }
 .w.how { stroke: var(--muted); stroke-width: 1.4; }
 .w.how.red { stroke: var(--red); } .w.how.amb, .w.how.warn { stroke: var(--amber); } .w.how.grn { stroke: var(--green); } .w.how.faint { stroke: var(--faint); stroke-dasharray: 4 4; }
 .wl.warn { fill: var(--amber); } .wl.faint { fill: var(--gutter); }
+/* W24 progress panel (inside a zoomed box) */
+.pp { font-size: 13px; line-height: 1.6; }
+.pp-h { display: flex; gap: 1.5ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-k { background: var(--amber); color: #111; padding: 0 .8ch; font-size: 11px; }
+.pp-b { height: 6px; background: var(--faint); margin: 4px 0; }
+.pp-b i { display: block; height: 100%; background: var(--amber); transition: width .4s; }
+.pp-e { display: flex; gap: 2ch; } .pp-eta { color: var(--amber); }
+.pp-l { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.eta:has(.pp) { border-top: 0; }

@@ -315,7 +315,7 @@ function seatMap() {
 function lastThoughts(since) {
   const by = new Map(), moves = new Map(); let last = null;
   for (const t of state.thoughts) {
-    if (ts(t.ts) < since) continue;
+    if (ts(t.ts) < since || isProgress(t)) continue;
     by.set(t.agent, t); if (!last || ts(t.ts) >= ts(last.ts)) last = t;
     if (stripLetter(t)) moves.set(t.agent, (moves.get(t.agent) || 0) + 1);
   }
@@ -479,9 +479,10 @@ function renderStrips(since) {
 
 function renderBoard() {
   const ds = duels().slice(-4);
-  let html = `<div class="du head" style="top:0"><span class="who">ATTACKER</span><span>ATTACK</span><span class="ar"></span><span>DEFENCE</span></div>`;
-  if (!ds.length) html += `<div class="du" style="top:22px"><span class="who" style="background:var(--faint)">—</span><span class="dim">EVERY ATTACK WE LAUNCH</span><span class="ar">→</span><span class="dim">AND HOW THE AGENTS ANSWERED IT</span></div>`;
-  ds.forEach((d, i) => {
+  const roster = rosterRowsHtml(5);
+  let html = roster || `<div class="du head" style="top:0"><span class="who">ATTACKER</span><span>ATTACK</span><span class="ar"></span><span>DEFENCE</span></div>`;
+  if (!roster && !ds.length) html += `<div class="du" style="top:22px"><span class="who" style="background:var(--faint)">—</span><span class="dim">EVERY ATTACK WE LAUNCH</span><span class="ar">→</span><span class="dim">AND HOW THE AGENTS ANSWERED IT</span></div>`;
+  if (!roster) ds.forEach((d, i) => {
     const key = `${d.id}|${d.def.t}`; const n = !seenDuel.has(key); seenDuel.add(key);
     html += `<div class="du${n ? " n" : ""}" style="top:${22 * (i + 1)}px"><span class="who">${esc(d.who)}</span><span class="atk">${esc(d.atk)}</span><span class="ar">→</span><span class="def ${d.def.c}">${esc(d.def.t)}</span></div>`;
   });
@@ -492,7 +493,7 @@ function renderBoard() {
   const y = 22 * 5 + 8;
   html += `<div class="score" style="top:${y}px"><span class="dim">TIME TO FIX</span><span>NIGHT 1 ${t1 != null ? secs(t1).toUpperCase() : "—"}</span>${t1 != null ? `<span class="bar2" style="width:${bw(t1)}px"></span>` : ""}</div>`;
   html += `<div class="score" style="top:${y + 22}px"><span class="dim" style="visibility:hidden">TIME TO FIX</span><span>NIGHT 2 ${t2 != null ? secs(t2).toUpperCase() : "—"}</span>${t2 != null ? `<span class="bar2 r2" style="width:${bw(t2)}px"></span>` : ""}${r[1] && r[2] && r[2].ttr < r[1].ttr ? `<span class="x">${(r[1].ttr / r[2].ttr).toFixed(1)}× FASTER · ${Math.round(r[2].hops)} CHECK, NOT ${Math.round(r[1].hops)}</span>` : r[1] && !r[2] ? '<span class="dim">SAME ATTACK NEXT NIGHT. FASTER?</span>' : ""}</div>`;
-  html += `<div class="eta" data-eta="bees" style="top:${y + 50}px"></div>`; // slot: W24 progress + ETA (PROGRESS_ETA)
+  html += `<div class="eta" data-eta="bees" style="top:${y + 50}px">${progressPanel("bees")}</div>`; // W24 progress + ETA (PROGRESS_ETA)
   const host = $("#board");
   if (host.dataset.html !== html) { host.innerHTML = html; host.dataset.html = html; }
 }
@@ -622,6 +623,61 @@ function renderBees() {
 }
 
 
+// ================================================================== W24 progress + learned ETAs, W22 roster (both behind their switches)
+// Progress: swarm.thoughts {kind:"progress", progress:{area, phase, step, of, pct, eta_s, eta_p90_s, eta_k, elapsed_s, text}} and
+// swarm.stats {_id:"progress:<area>"} — both already on the change stream. Off = no such docs = every slot stays empty.
+const progressByArea = new Map(); // area -> {..., at}
+function noteProgress(p, at) {
+  if (!p?.area) return;
+  const cur = progressByArea.get(p.area);
+  if (!cur || at >= cur.at) progressByArea.set(p.area, { ...p, at });
+}
+function seedProgress() { progressByArea.clear(); for (const t of state.thoughts) if (t.kind === "progress") noteProgress(t.progress, ts(t.ts)); }
+const isProgress = (t) => t?.kind === "progress";
+function prog(area, maxAgeS = 180) {
+  const p = progressByArea.get(area);
+  return p && (serverNow() - p.at) / 1000 <= maxAgeS ? p : null;
+}
+function etaWords(p) {
+  if (!p) return "";
+  if (p.phase === "done") return p.elapsed_s != null ? `DONE IN ${secs(p.elapsed_s).toUpperCase()}` : "DONE";
+  if (p.eta_s == null || !p.eta_k) return "FIRST TIME · NO ETA YET";
+  const left = Math.round(p.eta_s - (serverNow() - p.at) / 1000);
+  return `${left > 0 ? `~${left} S LEFT` : "ANY MOMENT"} · ${p.eta_k} PAST RUN${p.eta_k === 1 ? "" : "S"}`;
+}
+// one short chip for a box's NOW line
+function etaChip(area, filter) {
+  const p = prog(area, 90);
+  if (!p || (filter && !filter(p))) return "";
+  const step = p.step != null && p.of ? `${p.step}/${p.of} · ` : "";
+  return `${step}${etaWords(p)}`;
+}
+// the panel inside a zoomed box: latest line, a bar, the ETA, and the last few events
+function progressPanel(area, filter) {
+  const p = prog(area, 600);
+  if (!p || (filter && !filter(p))) return "";
+  const hist = state.thoughts.filter((t) => isProgress(t) && t.progress?.area === area && (!filter || filter(t.progress))).slice(-4).reverse();
+  const pct = p.pct != null ? Math.round(p.pct * 100) : null;
+  return `<div class="pp"><div class="pp-h"><span class="pp-k">PROGRESS</span><span>${esc(String(p.text || "").toUpperCase())}</span></div>
+    <div class="pp-b">${pct != null ? `<i style="width:${pct}%"></i>` : ""}</div>
+    <div class="pp-e"><span class="pp-eta">${esc(etaWords(p))}</span>${p.eta_p90_s != null && p.phase !== "done" ? `<span class="dim">P90 ${secs(p.eta_p90_s).toUpperCase()}</span>` : ""}${pct != null ? `<span class="dim">${pct}%</span>` : ""}</div>
+    ${hist.slice(1).map((t) => `<div class="pp-l dim">${esc(String(t.progress?.text || t.text || "").toUpperCase())}</div>`).join("")}</div>`;
+}
+const bySystem = (sys) => (p) => !sys || p.system === sys;
+const fixing = (p) => /^(step:|incident|diagnose:)/.test(String(p.action_type || ""));
+
+// W22 roster: state.roster when store.js maps it, else our own copy from the snapshot + change stream
+const localRoster = new Map();
+const rosterMap = () => (state.roster instanceof Map && state.roster.size ? state.roster : localRoster);
+function rosterRowsHtml(n = 5) {
+  const R = [...rosterMap().values()];
+  if (!R.length) return "";
+  const rank = { working: 0, dead: 1, standby: 2, idle: 3, retired: 4 };
+  const rows = R.filter((r) => !String(r._id).startsWith("red-")).sort((a, b) => (rank[a.state] ?? 5) - (rank[b.state] ?? 5)).slice(0, n);
+  return `<div class="du head" style="top:0"><span class="who">AGENT</span><span>STATE · DOING</span><span class="ar"></span><span>REPORTS TO</span></div>`
+    + rows.map((r, i) => `<div class="du" style="top:${22 * (i + 1)}px"><span class="who ${r.state === "dead" ? "" : "rw"}" style="${r.state === "dead" ? "" : "background:var(--ink);color:var(--paper)"}">${U(agentName(r._id))}</span><span class="${r.state === "dead" ? "r" : r.state === "working" ? "" : "dim"}">${U(r.state)}${r.doing ? ` · ${esc(String(r.doing).toUpperCase())}` : ""}</span><span class="ar">${r.parent ? "←" : ""}</span><span class="dim">${r.parent ? U(agentName(r.parent)) : r.took_over ? `TOOK OVER ${U(agentName(r.took_over.from))}` : ""}</span></div>`).join("");
+}
+
 // ================================================================== level 0: four boxes · zoom in / out
 // CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES, THE GARDENER below Legacy pointing up into it.
 const BOXR = {
@@ -732,13 +788,14 @@ function renderOverview() {
   const hos = nightIncidents().flatMap((i) => i.handoffs || []).length;
   const steps = inc?.steps || [];
   const notRed = (t) => !String(t?.agent || "").startsWith("red-");
-  const last = lt.last && notRed(lt.last) ? lt.last : [...state.thoughts].reverse().find((t) => ts(t.ts) >= since && notRed(t));
+  const last = lt.last && notRed(lt.last) ? lt.last : [...state.thoughts].reverse().find((t) => ts(t.ts) >= since && notRed(t) && !isProgress(t));
   const lastTx = last ? (translate(last)?.text || "").replace(/<[^>]+>/g, "") : "";
   const r = rounds(), liveR2 = [...state.incidents.values()].find((i) => i.active && i.round === 2);
   const t1 = r[1]?.ttr, t2 = r[2]?.ttr ?? (liveR2 ? (serverNow() - ts(liveR2.opened_at)) / 1000 : null);
   const mx = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / mx) * 150);
   const look = (n) => `<div class="look"><span>${n}</span>LOOK INSIDE +</div>`;
-  const liveLine = (k, html) => `<div class="nowl"><span class="lk">NOW</span>${html} <span class="eta" data-eta="${k}"></span></div>`; // .eta = W24 progress/ETA slot
+  const ETAF = { chaos: ["chaos"], legacy: ["bees", fixing], bees: ["bees"], gardener: ["gardener"] };
+  const liveLine = (k, html) => `<div class="nowl"><span class="lk">NOW</span>${html} <span class="eta" data-eta="${k}">${etaChip(...ETAF[k])}</span></div>`; // W24 progress/ETA
   const B = BOXR;
   const lieFresh = rejects.some((t) => serverNow() - ts(t.ts) < 12000);
   const killFresh = ds.some((d) => d.e.fault === "agent_kill" && d.e.result?.agent && serverNow() - ts(d.e.done_at || d.e.ts) < 20000);
@@ -940,7 +997,7 @@ function renderChaos() {
       <div class="dz head"><span>TIME</span><span>ATTACKER</span><span>ATTACK</span><span></span><span>DEFENCE</span></div>
       ${rows.length ? rows.map((d) => `<div class="dz"><span class="dim">${clock(d.e.ts)}</span><span class="who">${esc(d.who)}</span><span>${esc(d.atk)}</span><span class="ar">→</span><span class="def ${d.def.c}">${esc(d.def.t)}</span></div>`).join("") : '<div class="dz"><span></span><span class="who" style="background:var(--faint)">—</span><span class="dim">NO ATTACKS YET TONIGHT.</span><span></span><span class="dim">PRESS START.</span></div>'}
     </div>
-    <div class="eta" data-eta="chaos" style="left:580px;top:700px;width:980px"></div>
+    <div class="eta" data-eta="chaos" style="left:580px;top:640px;width:980px">${progressPanel("chaos")}</div>
   </div>`;
   const host = $("#chaos-body");
   if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }
@@ -980,7 +1037,7 @@ function renderLegacy() {
   }).join("");
   const html = `<div class="zc"><svg class="wires" viewBox="0 0 1600 900" style="position:absolute;left:0;top:0;width:1600px;height:900px">${arrows}</svg>
     <div class="zcol" style="left:60px;top:86px;width:1480px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><span class="dim">CASCADE&nbsp;&nbsp;</span>${esc((live ? nowLine().replace(/<[^>]+>/g, "") : "the website needs the unix server, which needs the mainframe").toUpperCase())}</div>
-    ${cards}<div class="eta" data-eta="legacy-inside" style="left:60px;top:700px;width:1480px"></div></div>`;
+    ${cards}<div class="eta" data-eta="legacy-inside" style="left:60px;top:704px;width:1480px">${progressPanel("bees", fixing)}</div></div>`;
   const host = $("#legacy-body");
   if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }
 }
@@ -1006,7 +1063,7 @@ function renderGardener() {
     ${stages}
     <div class="zcol" style="left:60px;top:330px;width:700px"><div class="bl-k">THE CODE FIX</div>${kv.map(([k, v]) => `<div class="kv"><span class="dim">${k}</span><span>${v}</span></div>`).join("")}</div>
     <div class="zcol" style="left:820px;top:330px;width:740px"><div class="bl-k">WHAT THE GARDENER IS DOING</div>${thoughts.length ? thoughts.map((t) => `<div class="kv"><span class="dim">${new Date(t.ts).toLocaleTimeString([], { hour12: false })}</span><span>${esc((translate(t)?.text || "").replace(/<[^>]+>/g, ""))}</span></div>`).join("") : '<div class="pd">Waiting: after the same failure is fixed on two nights, the Gardener writes a permanent code fix.</div>'}</div>
-    <div class="eta" data-eta="gardener" style="left:60px;top:700px;width:1500px"></div>
+    <div class="eta" data-eta="gardener" style="left:60px;top:640px;width:1500px">${progressPanel("gardener")}</div>
   </div>`;
   const host = $("#gard-body");
   if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }
@@ -1129,7 +1186,11 @@ function render() {
 }
 
 on("snapshot", () => { render(); refreshScore(); });
+on("snapshot", (snap) => { seedProgress(); localRoster.clear(); for (const r of snap?.roster || []) localRoster.set(r._id, r); });
 on("change", (m, prev) => {
+  if (m.coll === "thoughts" && m.op === "insert" && isProgress(m.doc)) noteProgress(m.doc.progress, ts(m.doc.ts));
+  if (m.coll === "stats" && String(m.key || "").startsWith("progress:") && m.doc) noteProgress({ area: String(m.key).slice(9), ...m.doc }, ts(m.doc.ts) || serverNow());
+  if (m.coll === "roster") { if (m.op === "delete") localRoster.delete(m.key); else if (m.doc) localRoster.set(m.key, m.doc); }
   try { watchForPulses(m, prev); } catch (e) { console.error(e); }
   if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") refreshScore();
   render();
