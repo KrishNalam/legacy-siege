@@ -26,7 +26,7 @@ from pymongo.errors import DuplicateKeyError
 from common.db import col, next_id, now
 from common.events import say
 
-from .. import leases, policy, settings
+from .. import leases, policy, schema, settings
 from ..harness import Agent, checkpointer, log
 from .. import lessons
 
@@ -202,8 +202,10 @@ def build_graphs(agent: Agent):
     return detect, reap, upgrade
 
 
+SAMPLE_EVERY_S = 10.0
+
 RECURRING = [
-    {"$match": {"status": "resolved", "fault_class": {"$nin": [None, "unknown"]}}},
+    {"$match": {"status": "resolved", "fault_class": {"$nin": [None, "unknown", "schema_drift"]}}},
     {"$sort": {"closed_at": 1}},
     {"$group": {"_id": {"fault_class": "$fault_class", "system": "$root_cause_system"},
                 "n": {"$sum": 1}, "evidence": {"$push": "$_id"}}},
@@ -222,6 +224,7 @@ def run(agent: Agent) -> None:
     streak: dict[str, int] = {}
     versions: dict[str, int] = {}
     last_slow = 0.0
+    last_sample = 0.0
 
     last_scan: dict = {"at": 0.0, "since": {}, "seen": set()}
 
@@ -256,7 +259,7 @@ def run(agent: Agent) -> None:
                           durability="exit")
 
     def sweep() -> None:
-        nonlocal last_slow
+        nonlocal last_slow, last_sample
         health, lines = {}, {}
         for s in policy.systems():
             try:
@@ -307,6 +310,14 @@ def run(agent: Agent) -> None:
         if time.monotonic() - last_scan["at"] > settings.SECURITY_SCAN_S:
             last_scan["at"] = time.monotonic()
             security_scan()
+
+        if time.monotonic() - last_sample > SAMPLE_EVERY_S and all(
+                (health.get(s) or {}).get("status") == "up" for s in (schema.SYSTEM, schema.CONSUMER)):
+            last_sample = time.monotonic()
+            try:  # known-good feed sample for schema-drift diffs (only kept if it matches the expected schema)
+                schema.capture_good(sysc.state(schema.SYSTEM))
+            except Exception as e:
+                log(agent.id, f"schema sample error: {type(e).__name__}: {e}")
 
         if time.monotonic() - last_slow > 3:
             last_slow = time.monotonic()

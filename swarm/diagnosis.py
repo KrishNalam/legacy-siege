@@ -12,6 +12,18 @@ from .policy import EXPLOIT_CLASS, VULNS, exploit_signs
 REC = re.compile(r"\bREC-\d+\b")
 
 
+def _schema_drift(state: dict) -> dict | None:
+    """Compare unix's manifest sample with the Hive's expected schema (MongoDB $jsonSchema + field diff).
+    Never lets a schema-check problem break a diagnosis."""
+    if not ((state or {}).get("feed") or {}).get("sample"):
+        return None
+    try:
+        from . import schema  # noqa: PLC0415
+        return schema.detect(state)
+    except Exception:
+        return None
+
+
 def classify(system: str, health: dict, metrics: dict, logs: list[dict], state: dict,
              probe=None) -> dict:
     """Return findings for one system:
@@ -46,11 +58,19 @@ def classify(system: str, health: dict, metrics: dict, logs: list[dict], state: 
         else:
             t = (state or {}).get("transfer") or {}
             facts.append(f"transfer.status={t.get('status')} last_file_batch_ts={t.get('last_file_batch_ts')}")
+            drift = _schema_drift(state)
+            if drift:
+                fault, cause, params = drift["fault_class"], drift["root_cause"], drift["params"]
+                facts += drift["facts"]
     elif system == "portal":
         sessions = (state or {}).get("sessions", metrics.get("sessions")) or 0
         if sessions >= settings.SESSION_HIGH:
             fault, cause = "session_leak", f"portal session store holds {sessions} sessions"
             facts.append(f"sessions={sessions}")
+        feed = (state or {}).get("feed") or {}
+        if feed.get("errors"):
+            facts.append(f"xfer manifest unreadable: <{(feed.get('map') or {}).get('balance')}> missing "
+                         f"({feed['errors']} unmarshal errors)")
         cache = (state or {}).get("cache") or {}
         if cache.get("stale"):
             facts.append(f"serving stale balances as of {cache.get('balances_as_of')} (HTTP 200)")
