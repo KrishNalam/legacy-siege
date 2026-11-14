@@ -280,7 +280,7 @@ const SEATS = {
   "nurse-1": [1255, BOT], "nurse-2": [1425, BOT],
 };
 const SPARE = [[105, BOT], [1255, BOT + 0], [1425, BOT + 0]];
-const ATK = { x: 60, y: 286, w: 210 }, MEM = { x: 1330, y: 286, w: 210 };
+const ATK = { x: 40, y: 286, w: 240 }, MEM = { x: 1330, y: 286, w: 210 };
 const GLYPH = { queen: "Q", scout: "S", worker: "W", guard: "G", nurse: "N", sentinel: "L", gardener: "R", waggle: "M" };
 const TAG = { queen: "COORDINATOR", scout: "INVESTIGATOR", worker: "FIXER", guard: "THE CHECKER", nurse: "STANDBY · TAKES OVER",
   sentinel: "LOOKOUT", gardener: "WRITES CODE FIXES", waggle: "MESSENGER" };
@@ -310,12 +310,13 @@ function seatMap() {
 
 // the latest thought per agent (this night) and the agent that spoke last
 function lastThoughts(since) {
-  const by = new Map(); let last = null;
+  const by = new Map(), moves = new Map(); let last = null;
   for (const t of state.thoughts) {
     if (ts(t.ts) < since) continue;
     by.set(t.agent, t); if (!last || ts(t.ts) >= ts(last.ts)) last = t;
+    if (stripLetter(t)) moves.set(t.agent, (moves.get(t.agent) || 0) + 1);
   }
-  return { by, last };
+  return { by, last, moves };
 }
 
 const PHASE = { diagnosing: "TRACING", step_sent: "FIX SENT", awaiting_verify: "RE-CHECKING", awaiting_approval: "NEEDS YOUR OK",
@@ -326,8 +327,7 @@ function seatModel(a, since, lt, inc) {
   const sys = SYSXY[a.target] ? a.target : null;
   const t = lt.by.get(a._id);
   const fresh = t && serverNow() - ts(t.ts) < 4500;
-  const age = (serverNow() - ts(a.last_seen)) / 1000;
-  const life = a.status === "dead" ? 0 : isNaN(age) ? 10 : Math.max(0, Math.min(10, Math.round(10 - age)));
+  const life = Math.min(10, lt.moves.get(a._id) || 0); // one cell per move tonight (see Exhibit B)
   let cls = "idle", ph = a.status === "standby" ? "STANDING BY" : "IDLE";
   if (a.status === "working" || a.phase || (a.incident && inc?.active && a.incident === inc._id)) {
     cls = "work"; ph = PHASE[a.phase] || (a.phase ? U(String(a.phase).replace(/_/g, " ")) : "WORKING");
@@ -454,6 +454,7 @@ function stripLetter(t) {
 let lastSeenThought = "";
 const seenDuel = new Set(), seenStrip = new Set();
 function renderStrips(since) {
+  const rid0 = runId();
   const t0 = since + 5000, now = serverNow(), span = Math.max(60000, now - t0 + 8000);
   const rows = new Map();
   for (const t of state.thoughts) {
@@ -470,8 +471,8 @@ function renderStrips(since) {
   const list = [...rows.values()].sort((a, b) => Math.min(...a.marks.map((m) => m.at)) - Math.min(...b.marks.map((m) => m.at))).slice(-7);
   const pct = (at) => Math.max(0, Math.min(100, ((at - t0) / span) * 100));
   const minute = (i) => `${i}:00`;
-  let html = `<div class="st head" style="top:0"><span class="name">AGENT</span><span class="track">${[0, 1, 2, 3, 4, 5].filter((i) => i * 60000 <= span).map((i) => `<span style="left:${pct(t0 + i * 60000)}%">${minute(i)}</span>`).join("")}</span></div>`;
-  if (!list.length) html += `<div class="st" style="top:22px"><span class="name dim">—</span><span class="track dim">NOTHING YET. PRESS START: THE ATTACK BEGINS, AND EACH AGENT’S MOVES PRINT HERE.</span></div>`;
+  let html = `<div class="st head" style="top:0"><span class="name">AGENT</span><span class="track">${[0, 1, 2, 3, 4, 5].filter((i) => pct(t0 + i * 60000) < 94).map((i) => `<span style="left:${pct(t0 + i * 60000)}%">${minute(i)}</span>`).join("")}</span></div>`;
+  if (!list.length) html += `<div class="st" style="top:22px"><span class="name dim">—</span><span class="track dim">${rid0 ? "NO AGENT MOVES YET TONIGHT." : "PRESS START: THE ATTACK BEGINS, AND EACH AGENT’S MOVES PRINT HERE."}</span></div>`;
   list.forEach((r, i) => {
     const a = state.agents.get(r.id), dead = a?.status === "dead";
     const first = Math.min(...r.marks.map((m) => m.at)), last = Math.max(...r.marks.map((m) => m.at));
@@ -532,12 +533,12 @@ function renderDiagram() {
     const m = seatModel(a, since, lt, inc); seatModels[id] = m;
     const bar = Array.from({ length: 10 }, (_, i) => `<i class="${i < m.life ? "f" : ""}"></i>`).join("");
     nodes += `<div class="seat ${m.cls}" data-id="${esc(id)}" style="left:${p[0]}px;top:${p[1]}px"><div class="who"><span>${U(m.name)}</span><span class="gl">${GLYPH[m.role] || "·"}</span></div>
-      <div class="rl">${TAG[m.role] || U(m.role)}</div><div class="bar" title="heartbeat">${bar}</div><div class="ph">${esc(m.ph)}</div><div class="tx">${esc(m.tx)}</div></div>`;
+      <div class="rl">${TAG[m.role] || U(m.role)}</div><div class="bar" title="moves tonight">${bar}</div><div class="ph">${esc(m.ph)}</div><div class="tx">${esc(m.tx)}</div></div>`;
   }
   // attacker box: the personas who struck tonight
   const ds = duels();
   const per = [...new Set(ds.map((d) => d.who))];
-  nodes += `<div class="side red" style="left:${ATK.x}px;top:${ATK.y}px"><div class="hd"><span>THE ATTACKERS</span><small>US</small></div>
+  nodes += `<div class="side red" style="left:${ATK.x}px;top:${ATK.y}px;width:${ATK.w}px"><div class="hd"><span>THE ATTACKERS</span><small>US</small></div>
     ${ds.length ? ds.slice(-4).map((d) => `<div class="ln"><span class="p">${esc(d.who)}</span> ${esc(d.atk)}</div>`).join("") : '<div class="ln dim">WAITING FOR NIGHT 1.</div><div class="ln dim">WE BREAK THE BANK;</div><div class="ln dim">THE AGENTS FIX IT.</div>'}
     ${per.length ? "" : ""}</div>`;
   // memory box
@@ -566,8 +567,13 @@ function renderDiagram() {
   const atkBox = { x: ATK.x, y: ATK.y, w: ATK.w, h: 104 };
   const hitSys = new Set(ds.filter((d) => d.e.fault !== "agent_kill" && SYSXY[d.e.target]).map((d) => d.e.target));
   let k = -8;
-  for (const s2 of hitSys) { const c = curve(atkBox, sysBox(s2), k); k += 8; w += `<path class="w red" d="${c.d}"/>`; }
-  if (hitSys.size) w += `<text class="wl red" x="${ATK.x + ATK.w + 40}" y="${ATK.y + 40}">ATTACKS</text>`;
+  // attack wires arc over the chain and land on the top of the system they hit
+  for (const s2 of hitSys) {
+    const b = sysBox(s2), sx = ATK.x + ATK.w, sy = ATK.y + 16 + k, ex = b.x + 22 + k, ey = b.y - 8;
+    const ok = (state.systems.get(s2)?.status || "up") === "up" && !(live && live.root_cause_system === s2);
+    w += `<path class="w red ${ok ? "" : "on"}" d="M${sx} ${sy} C${sx + 140} ${sy} ${ex} ${ey - 120} ${ex} ${ey}"/>`; k += 10;
+  }
+  if (hitSys.size) w += `<text class="wl red" x="${ATK.x + ATK.w + 14}" y="${ATK.y + 8}">ATTACKS</text>`;
   for (const d of ds) {
     const v = d.e.fault === "agent_kill" && d.e.result?.agent; if (!v || !seats[v]) continue;
     const c = curve(atkBox, seatBox(seats[v])); w += `<path class="w red on" d="${c.d}"/>` + lbl(c, "KILL", "red");
