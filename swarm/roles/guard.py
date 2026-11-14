@@ -151,39 +151,37 @@ def build_graph(agent: Agent):
         return {"verdict": "pending"}
 
     def learn_mapping(inc: str, st: dict, facts: str) -> None:
-        """A verified field mapping becomes shared memory: swarm.schema_mappings, version + 1."""
+        """A verified field mapping becomes shared memory: swarm.schema_mappings (new version, or the earlier
+        version reused when this exact change was verified before). The good sample is re-captured at once."""
         p = st.get("params") or {}
         try:
-            m = schema.learn(p.get("field", "balance"), p.get("source"), inc, st["step_id"], facts, agent.id)
+            unix_state = sysc.state(schema.SYSTEM)
+        except Exception:
+            unix_state = None
+        try:
+            m = schema.learn_verified(p.get("field", "balance"), p.get("source"), inc, st["step_id"], facts, agent.id,
+                                      unix_state)
         except Exception as e:
             log(agent.id, f"schema mapping not stored: {type(e).__name__}: {e}")
             return
-        if m:
+        if not m:
+            return
+        try:
+            doc = schema.guard_verdict(inc, m["to"], facts, m["version"])
+        except Exception:
+            doc = None
+        n = re.search(r"(\d+/\d+) accounts", facts or "")
+        lined = f"{n.group(1)} values match" if n else "values line up"
+        if m.get("reused"):
+            agent.think(f"{schema.SYSTEM} renamed {m['from']} → {m['to']} · seen before: mapping v{m['version']} "
+                        f"reused (swarm.schema_mappings history).", kind="learn", incident=inc,
+                        system=schema.SYSTEM, pause=False)
+        else:
             agent.think(f"{schema.SYSTEM} renamed {m['from']} → {m['to']} · mapping learned v{m['version']} "
                         f"(swarm.schema_mappings; every agent reads {m['to']} from now on).", kind="learn",
                         incident=inc, system=schema.SYSTEM, pause=False)
-            try:
-                doc = schema.guard_verdict(inc, m["to"], facts, m["version"])
-            except Exception:
-                doc = None
-            ai = (doc or {}).get("ai") or {}
-            v0 = (ai.get("verdicts") or [{}])[0]
-            claimed = ((ai.get("proposed_ops") or [{}])[0].get("params") or {}).get("source")
-            how = ai.get("proposed_by")
-            if not how:  # flag off: the unix hop's findings still say who proposed it
-                t = col("tasks").find_one({"incident": inc, "kind": "diagnose", "findings.params.to": m["to"]},
-                                          {"findings.params.proposed_by": 1}, sort=[("ts", -1)])
-                how = (((t or {}).get("findings") or {}).get("params") or {}).get("proposed_by")
-            prov = {"claude": f"Claude proposed {m['from']}→{claimed}",
-                    "memory": "MongoDB memory already knew it (no Claude call)"}.get(
-                how, f"type + value match proposed {m['from']}→{m['to']}")
-            if ai.get("proposed_by") == "claude" and v0.get("verdict") == "overruled":
-                prov += f", rules overruled → {m['to']}"
-            n = re.search(r"(\d+/\d+) accounts", facts or "")
-            lined = f"{n.group(1)} values match" if n else "values line up"
-            agent.think(f"rules: no playbook/op for unknown field {m['to']} → {prov} → Guard verified ({lined}) "
-                        f"→ mapping v{m['version']} stored.", kind="learn", incident=inc, system=schema.SYSTEM,
-                        pause=False)
+        agent.think(provenance(inc, m, (doc or {}).get("ai") or {}, lined), kind="learn", incident=inc,
+                    system=schema.SYSTEM, pause=False)
 
     g = StateGraph(GuardState)
     g.add_node("read_back", read_back)
@@ -192,6 +190,28 @@ def build_graph(agent: Agent):
     g.add_edge("read_back", "judge")
     g.add_edge("judge", END)
     return g.compile(checkpointer=checkpointer())
+
+
+def provenance(inc: str, m: dict, ai: dict, lined: str) -> str:
+    """The Guard's chain line, naming who really proposed the mapping (memory / Claude / rules)."""
+    how = ai.get("proposed_by")
+    if not how:  # flag off: the unix hop's findings still say who proposed it
+        t = col("tasks").find_one({"incident": inc, "kind": "diagnose", "findings.params.to": m["to"]},
+                                  {"findings.params": 1}, sort=[("ts", -1)])
+        how = (((t or {}).get("findings") or {}).get("params") or {}).get("proposed_by")
+    stored = f"mapping v{m['version']} {'reused' if m.get('reused') else 'stored'}"
+    v0 = (ai.get("verdicts") or [{}])[0]
+    claimed = ((ai.get("proposed_ops") or [{}])[0].get("params") or {}).get("source")
+    if how == "memory":
+        head = f"memory: MongoDB already knew {m['from']}→{m['to']} (no Claude call)"
+    elif how == "claude" and v0.get("verdict") == "overruled":
+        head = (f"rules: no op for unknown field {m['to']} → Claude proposed {m['from']}→{claimed}, "
+                f"rules overruled → {m['to']}")
+    elif how == "claude":
+        head = f"rules: no op for unknown field {m['to']} → Claude proposed {m['from']}→{m['to']}"
+    else:
+        head = f"rules: no playbook/op for unknown field {m['to']} → type + value match proposed {m['from']}→{m['to']}"
+    return f"{head} → Guard verified ({lined}) → {stored}."
 
 
 def run(agent: Agent) -> None:

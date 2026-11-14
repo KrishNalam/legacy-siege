@@ -12,10 +12,15 @@ The Hive knows one feed today: the unix xfer manifest the portal unmarshals (``G
 * ``swarm.schema_mappings``: one doc per logical field (``_id: "unix.xfer_manifest.balance"``) with ``source``
   (the manifest field to read), ``version`` and ``history``. Written only after the Guard verified the
   mapping by read-back. Every agent reads expectations from here, so the next drift is diffed against the
-  learned schema (v2 -> v3), not the original one.
+  learned schema (v2 -> v3), not the original one. A round reset (warroom ``/api/reset`` next_round) puts the live mapping back to v1
+  (the estate is v1 again) but keeps ``history``, so the same vendor patch next night is "seen before" and the
+  verified version is reused. Only a full reset deletes the collection.
 
 Who proposes the mapping (renaming is a meaning problem, so the AI gets a say):
-  memory  a non-stale schema_drift playbook already maps to one of the new fields -> reuse it, no Claude call
+  memory  "seen before": schema_mappings.history already holds a Guard-verified mapping for this exact change
+          (or a non-stale schema_drift playbook maps to one of the new fields) -> reuse it, no Claude call. It
+          gets the same value check as Claude's answer; if its values no longer line up it is marked stale and
+          Claude / the rules propose instead
   claude  with a key and AI_SECOND_OPINION=1: Claude names the new field that means the same thing; the rules
           pre-check it (field exists, numeric, values line up) and overrule it if it doesn't fit
   rules   otherwise (no key, flag off, timeout, error, overruled): best type + value line-up match
@@ -182,13 +187,24 @@ def detect(state: dict) -> dict | None:
                 "facts": facts, "params": {}}
     new, how, ai = cands[0][3], "rules", None
     mem = remembered(old, added)
-    if mem:  # MongoDB already knows this rename: no Claude call
+    if mem:  # MongoDB already knows this rename: same value check as Claude's answer, no Claude call
+        fits, ok, total = score(mem["source"]) if mem["source"] in added else (False, 0, 0)
+        if not fits:
+            forget(mem, f"{mem['source']} no longer lines up with {old} ({ok}/{total})")
+            facts.insert(0, f"memory: {mem['label']} said {old} → {mem['source']}, but its values don't line up "
+                            f"({ok}/{total}): marked stale")
+            mem = None
+    if mem:
         new, how = mem["source"], "memory"
-        facts.insert(0, f"memory: playbook {mem['playbook_id']} already maps {old} → {new} (no Claude call)")
+        facts.insert(0, f"seen before: {mem['label']} reused ({old} → {new}, verified on {mem['incident']}; "
+                        f"values line up {ok}/{total}; no Claude call)")
+        params_extra = {"reused_version": mem.get("version"), "memory": mem["label"]}
         if ai_enabled():
-            ai = _ai_doc(None, f"Recalled from playbook {mem['playbook_id']}: {old} was renamed {new} before.",
-                         [mem["playbook_id"]], 1.0, 0, old, new, "memory", "accepted", "memory: verified before")
-    elif ai_enabled():
+            ai = _ai_doc(None, f"Recalled from {mem['label']}: {old} was renamed {new} before.",
+                         [mem["cite"]], 1.0, 0, old, new, "memory", "accepted", "memory: verified before")
+    else:
+        params_extra = {}
+    if not mem and ai_enabled():
         prop = ask_claude(old, missing, added, good["record"] if good else None, recs[0])
         if prop.get("source"):
             fits, ok, total = score(prop["source"]) if prop["source"] in added else (False, 0, 0)
@@ -212,7 +228,7 @@ def detect(state: dict) -> dict | None:
     facts.append(f"{new} is {types.get(new)} like {old}, values line up {ok}/{total}"
                  if good else f"{new} is {types.get(new)} like {old} (no good sample)")
     params = {"field": "balance", "from": old, "to": new, "sample_id": str(sid), "lined_up": [ok, total],
-              "version": cur["version"] + 1, "proposed_by": how}
+              "version": next_version(old, new), "proposed_by": how, **params_extra}
     if ai:
         params["ai"] = ai
     return {"fault_class": "schema_drift",
@@ -221,15 +237,48 @@ def detect(state: dict) -> dict | None:
 
 
 def remembered(old: str, added: list[str]) -> dict | None:
-    """A verified schema_drift playbook whose fix already maps to one of today's new fields."""
+    """Memory for this change: a Guard-verified history entry ``old -> one of added`` in schema_mappings (kept
+    across round resets), else a non-stale schema_drift playbook whose fix maps to one of today's new fields."""
+    doc = col("schema_mappings").find_one({"_id": _mid("balance")}, {"history": 1}) or {}
+    for e in reversed(doc.get("history") or []):
+        if e.get("from") == old and e.get("to") in added and not e.get("stale"):
+            return {"kind": "mapping", "source": e["to"], "version": e.get("version"), "incident": e.get("incident"),
+                    "label": f"mapping v{e.get('version')}", "cite": f"schema_mappings v{e.get('version')}"}
     pb = col("playbooks").find_one({"fault_class": "schema_drift", "stale": False,
                                     "fix": {"$elemMatch": {"op": "map_field", "params.source": {"$in": added}}}},
-                                   {"fix": 1}, sort=[("created_at", DESCENDING)])
+                                   {"fix": 1, "incident": 1}, sort=[("created_at", DESCENDING)])
     if not pb:
         return None
     src = next(f["params"]["source"] for f in pb["fix"] if f.get("op") == "map_field"
                and (f.get("params") or {}).get("source") in added)
-    return {"playbook_id": pb["_id"], "source": src}
+    return {"kind": "playbook", "source": src, "version": None, "incident": pb.get("incident") or pb["_id"],
+            "label": f"playbook {pb['_id']}", "cite": pb["_id"], "playbook_id": pb["_id"]}
+
+
+def forget(mem: dict, reason: str) -> None:
+    """A remembered mapping failed today's value check: mark it stale so nobody reuses it blindly."""
+    if mem["kind"] == "mapping":
+        col("schema_mappings").update_one(
+            {"_id": _mid("balance")}, {"$set": {"history.$[e].stale": True, "history.$[e].stale_reason": reason}},
+            array_filters=[{"e.to": mem["source"], "e.version": mem["version"]}])
+    else:
+        col("playbooks").update_one({"_id": mem["playbook_id"]}, {"$set": {
+            "stale": True, "staled_at": now(), "stale_reason": reason}})
+
+
+def _verified_before(doc: dict, old: str, new: str) -> dict | None:
+    return next((e for e in reversed(doc.get("history") or [])
+                 if e.get("from") == old and e.get("to") == new and not e.get("stale")), None)
+
+
+def next_version(old: str, new: str, field: str = "balance") -> int:
+    """The version a verified old -> new mapping gets: its earlier version if this exact change was verified
+    before (reused), else one past every version ever stored."""
+    doc = col("schema_mappings").find_one({"_id": _mid(field)}) or {}
+    seen = _verified_before(doc, old, new)
+    if seen:
+        return int(seen["version"])
+    return max([int(doc.get("version") or 1)] + [int(e.get("version") or 1) for e in doc.get("history") or []]) + 1
 
 
 def _ai_doc(model, hypothesis, cites, confidence, latency_ms, old, source, how, verdict, reason) -> dict:
@@ -320,24 +369,48 @@ def verify_mapping(field: str, source: str, portal_state: dict, unix_state: dict
 
 
 def learn(field: str, source: str, incident: str, step_id: str, evidence: str, agent: str) -> dict | None:
-    """Store the verified mapping (version + 1). Idempotent: returns None if it was already learned."""
+    """Store the verified mapping. A change verified before keeps its version (``reused``), a new one gets
+    max version + 1. Idempotent: returns None if it is already the live mapping."""
     cur = mapping(field)
     if cur["source"] == source:
         return None
-    ver = int(cur.get("version") or 1) + 1
+    ver = next_version(cur["source"], source, field)
+    reused = bool(_verified_before(col("schema_mappings").find_one({"_id": cur["_id"]}) or {}, cur["source"], source))
     entry = {"version": ver, "from": cur["source"], "to": source, "incident": incident, "step_id": step_id,
-             "verified_by": agent, "evidence": evidence, "ts": now()}
+             "verified_by": agent, "evidence": evidence, "reused": reused, "ts": now()}
     try:
         col("schema_mappings").update_one(
             {"_id": cur["_id"], "source": {"$ne": source}},
             {"$set": {"system": SYSTEM, "feed": FEED, "field": field, "source": source, "previous": cur["source"],
-                      "version": ver, "consumer": CONSUMER, "learned_from": incident, "verified_by": agent,
-                      "evidence": evidence, "ts": now()},
+                      "version": ver, "reused": reused, "consumer": CONSUMER, "learned_from": incident,
+                      "verified_by": agent, "evidence": evidence, "ts": now()},
              "$push": {"history": entry}},
             upsert=True)
     except DuplicateKeyError:
         return None  # someone already stored this exact mapping
     return {**entry, "_id": cur["_id"]}
+
+
+def learn_verified(field: str, source: str, incident: str, step_id: str, evidence: str, agent: str,
+                   unix_state: dict | None) -> dict | None:
+    """Guard, after map_field is verified: store the mapping, then re-capture the known-good sample right away
+    (the manifest already conforms to the new expectation). Without this the good sample keeps the old field
+    name for up to SAMPLE_EVERY_S, and a second drift in that window can't be diffed or verified."""
+    m = learn(field, source, incident, step_id, evidence, agent)
+    if unix_state is not None:
+        capture_good(unix_state)
+    return m
+
+
+def feed_change(state: dict) -> tuple[list[str], list[str]] | None:
+    """Sentinel: (missing, added) fields of the current manifest vs. what the Hive expects; None if it conforms."""
+    recs = _sample(state)
+    if not recs:
+        return None
+    exp = expected_fields()
+    missing = sorted(k for k in exp if k not in recs[0])
+    added = sorted(k for k in recs[0] if k not in exp)
+    return (missing, added) if missing or added else None
 
 
 def latest_mappings(limit: int = 10) -> list[dict]:
