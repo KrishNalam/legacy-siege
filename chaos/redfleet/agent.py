@@ -12,7 +12,7 @@ import os
 import time
 from typing import TypedDict
 
-from common import llm
+from common import llm, pause
 from common.db import now, world
 from common.events import think
 
@@ -222,6 +222,11 @@ class Attacker:
     def run(self) -> None:
         think(self.p.id, core.ROLE, f"{self.p.name} online: {self.p.motto}.")
         while not self._stop:
+            # GARDENER_PAUSE=1: hold fire while the Gardener upgrades a system (a lease: if the Gardener
+            # dies mid-upgrade it lapses and we resume on our own).
+            if pause.wait_while_paused(lambda: self._stop, on_pause=lambda d: self._heartbeat(
+                    "paused", f"Gardener upgrading {d.get('system')}", force=True)):
+                continue
             try:
                 self.step()
             except Exception:  # MongoDB blips etc.: crash-only, try again next tick
