@@ -48,8 +48,10 @@ class Agent:
         self.last_busy, self.last_incident, self._retire_checked = time.monotonic(), None, 0.0
         self.pid = os.getpid()
         self.systems = Systems()
+        self.systems.before_op = self.check_held
         self.stop = threading.Event()
         self._held: dict[str, tuple[str, object, int]] = {}  # key -> (collection, _id, generation)
+        self._deadlines: dict[str, float] = {}
         self._lost: set[str] = set()
         self._lock = threading.Lock()
         self._hb: threading.Thread | None = None
@@ -144,17 +146,31 @@ class Agent:
         with self._lock:
             held = dict(self._held)
         for key, (c, _id, gen) in held.items():
-            if not leases.renew(col(c), _id, self.id, gen):
+            started = time.monotonic()
+            with self._lock:
+                expired = settings.lease_deadline_enabled() and started >= self._deadlines.get(key, 0)
+            if expired or not leases.renew(col(c), _id, self.id, gen):
                 log(self.id, f"lost lease {key}")
                 with self._lock:
-                    self._held.pop(key, None)
+                    if not settings.lease_deadline_enabled():
+                        self._held.pop(key, None)
                     self._lost.add(key)
+            else:
+                with self._lock:
+                    # Use the request START, so a slow response cannot extend authority past the server lease.
+                    if self._held.get(key) == (c, _id, gen) and key not in self._lost:
+                        self._deadlines[key] = started + config.LEASE_S * 0.8
 
     def hold(self, coll: str, _id, generation: int) -> str:
         key = f"{coll}/{_id}"
+        started = time.monotonic()
+        # Renew before granting initial local authority: a process may have frozen after its claim.
+        if settings.lease_deadline_enabled() and not leases.renew(col(coll), _id, self.id, generation):
+            raise leases.LeaseLost(key)
         with self._lock:
             self._held[key] = (coll, _id, generation)
             self._lost.discard(key)
+            self._deadlines[key] = started + config.LEASE_S * 0.8
         self.last_busy = time.monotonic()
         return key
 
@@ -163,10 +179,23 @@ class Agent:
             self._held.pop(f"{coll}/{_id}", None)
         self.last_busy = time.monotonic()
 
+    def check_held(self) -> None:
+        """Recheck authority immediately before external ops and each transport retry."""
+        if not settings.lease_deadline_enabled():
+            return
+        with self._lock:
+            held = list(self._held)
+        for key in held:
+            c, ident = key.split('/', 1)
+            self.check(c, ident)
+
     def check(self, coll: str, _id) -> None:
         """Raise LeaseLost if the heartbeat found this lease gone. Call before every action."""
         key = f"{coll}/{_id}"
         with self._lock:
+            if (settings.lease_deadline_enabled() and key in self._held
+                    and time.monotonic() >= self._deadlines.get(key, 0)):
+                self._lost.add(key)
             lost = key in self._lost
         if lost:
             raise leases.LeaseLost(key)
