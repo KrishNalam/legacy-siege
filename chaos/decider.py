@@ -181,21 +181,21 @@ def _rules(fault: str, params: dict, st: dict, caps: Caps, campaign: bool = Fals
         return "deny", f"{st['scenario']} is a quiet night for Red (the upgrade proof must stay clean)"
     if caps.max_per_night and st["red_tonight"] >= caps.max_per_night:
         return "deny", f"night budget spent ({st['red_tonight']}/{caps.max_per_night}): the estate must go green so autoplay can move on"
-    if st["upgrade_busy"]:
-        return "hold", "the Gardener is mid-upgrade"
-    if not campaign and _age(st["last_red"]) < caps.gap_s:   # a Commander campaign keeps its own step gap
-        return "hold", f"spacing strikes: last Red strike {_age(st['last_red']):.0f}s ago (< {caps.gap_s:g}s)"
     f = faults.FAULTS.get(fault)
     if f is not None and f.kind == "system" and st["scenario"] in caps.protected:
         return "deny", (f"{st['scenario']} is a demo night: Red hits the agents, not the estate (an extra incident "
                         "would skew the round-2 timing)")
-    if f is not None and f.kind == "system" and st["open_incidents"]:
-        return "hold", (f"{st['open_incidents']} incident(s) still open: a second system fault mid-repair strands "
-                        "the Hive (R1 #3), wait for green")
     if fault in AGENT_VICTIM:
         why = _victim_reason(fault, params)
         if why:
             return "deny", why
+    if st["upgrade_busy"]:
+        return "hold", "the Gardener is mid-upgrade"
+    if not campaign and _age(st["last_red"]) < caps.gap_s:   # a Commander campaign keeps its own step gap
+        return "hold", f"spacing strikes: last Red strike {_age(st['last_red']):.0f}s ago (< {caps.gap_s:g}s)"
+    if f is not None and f.kind == "system" and st["open_incidents"]:
+        return "hold", (f"{st['open_incidents']} incident(s) still open: a second system fault mid-repair strands "
+                        "the Hive (R1 #3), wait for green")
     if (_on("DEMO_AUTOPLAY") and st["run_status"] in ("played", "cancelled") and not st["open_incidents"]
             and st["systems_up"] and st["red_tonight"]):
         return "hold", "the estate is green after tonight's attacks: autoplay is counting its green gap"
