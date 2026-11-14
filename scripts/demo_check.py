@@ -531,7 +531,8 @@ class Demo:
         m = self.s.schema_mappings.find_one({"_id": "mainframe.workflow.restart_batch"}) or {}
         said = self.s.thoughts.find_one({"incident": inc1["_id"], "agent": "guard-1", "kind": "learn",
                                          "text": {"$regex": "^workflow changed: restart_batch now needs release_hold"}})
-        refused = self.w.op_receipts.find_one({"_id": {"$in": rb.get("attempts") or []}, "accepted": False})
+        # the refused attempt as the incident recorded it (world.op_receipts is wiped by the round reset)
+        refused = {"_id": wd["refused"]} if wd.get("refused") in (rb.get("attempts") or [])[:-1] else None
         ok = (wd.get("requires") == ["release_hold"] and rh.get("status") == "verified"
               and rb.get("status") == "verified" and rh.get("judged_at") and rb.get("judged_at")
               and rh["judged_at"] < rb["judged_at"] and refused is not None and m.get("kind") == "workflow"
