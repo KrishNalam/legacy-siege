@@ -58,6 +58,11 @@ class Op:
                 "desc": self.desc, "postcondition": self.postcondition}
 
 
+class OpRefused(Exception):
+    """An op the system refuses outright (accepted:false), e.g. a workflow prerequisite is missing. The message is
+    the system's own legacy error text."""
+
+
 @dataclass(frozen=True)
 class Vuln:
     id: str
@@ -185,6 +190,13 @@ class LegacySystem:
 
     def op_spec(self, op: str) -> Op | None:
         return next((o for o in self.OPS if o.name == op), None)
+
+    def catalog(self, ctx: Ctx) -> list[dict]:
+        """GET /{sys}/ops: the live ops catalog. Systems whose workflow can change override this."""
+        return [o.catalog() for o in self.OPS]
+
+    def op_available(self, ctx: Ctx, op: str) -> bool:
+        return self.op_spec(op) is not None
 
     def apply(self, ctx: Ctx, op: str, params: dict) -> tuple[bool, str]:
         """Really perform an op. Returns (applied, message). Never lies; lying is the estate's job."""

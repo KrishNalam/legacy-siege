@@ -11,13 +11,18 @@ non-numeric byte there is a data exception (S0C7) that ABENDs the whole batch.
 Planted weakness: :func:`validate_record` accepts everything (the Gardener's target).
 Planted vuln: the OPERATOR account still has its factory-default password.
 
+Workflow drift (``workflow_drift`` chaos, additive): "JES2 maintenance" changes the operator workflow. From then
+on an ABENDed NIGHTBAT is put on HOLD, ``restart_batch`` is refused (accepted:false, ``JCL HOLD: issue
+release_hold before restart_batch``) until the new op ``release_hold`` is run, and ``GET /mainframe/ops`` lists
+``release_hold`` (``before: restart_batch``) with ``restart_batch`` naming it in ``requires``.
+
 This module is hot-reloadable: ``POST /_admin/reload/mainframe`` re-imports it.
 """
 from __future__ import annotations
 
 from datetime import datetime
 
-from systems.base import BATCH_EVERY_TICKS, Ctx, LegacySystem, Op, Vuln, iso
+from systems.base import BATCH_EVERY_TICKS, Ctx, LegacySystem, Op, OpRefused, Vuln, iso
 
 # ---------------------------------------------------------------- NIGHTBAT record layout (LRECL=80)
 RECORD_LEN = 80
@@ -100,9 +105,13 @@ class Mainframe(LegacySystem):
            "RACF ALTUSER: replace the OPERATOR password (breaks any job still using the old one).",
            "state.credentials.OPERATOR == 'rotated' and probe mf-default-operator not exploitable"),
     )
+    # appears in the live catalog only after workflow_drift (JES2 maintenance)
+    RELEASE_HOLD = Op("release_hold", {"job": "NIGHTBAT"}, False,
+                      "JES2 $A: release the operator hold on NIGHTBAT (required before restart_batch since the "
+                      "JES2 maintenance).", "state.workflow.hold == false")
     VULNS = (Vuln("mf-default-operator", "default_credential",
                   "TSO/RACF account OPERATOR still uses its factory-default password"),)
-    FAULTS = ("batch_abort", "credential_exploit")
+    FAULTS = ("batch_abort", "credential_exploit", "workflow_drift")
 
     # ------------------------------------------------------------ state
     def baseline(self, now: datetime) -> dict[str, dict]:
@@ -113,6 +122,7 @@ class Mainframe(LegacySystem):
                       "output": {"as_of": now, "balances": {a: 1_000_000 for a in ACCOUNTS}}},
             "ledger": {"balances": {a: 1_000_000 for a in ACCOUNTS}, "posted": 0},
             "credentials": {"OPERATOR": "default"},
+            "workflow": {"version": 1, "hold": False, "released": 0, "patch": None},
         }
 
     @staticmethod
@@ -181,11 +191,15 @@ class Mainframe(LegacySystem):
         b = ctx["batch"]
         b["status"] = "ABENDED"
         b["abend"] = {"code": "S0C7", "record_id": rec_id, "at": ctx.now}
+        if ctx["workflow"]["version"] >= 2:  # after the JES2 maintenance an ABENDed job is held for the operator
+            ctx["workflow"]["hold"] = True
         ctx.log("ERROR", "CEE3207S", "CEE3207S The system detected a data exception (System Completion Code=0C7).")
         ctx.log("ERROR", "IEA995I", f"IEA995I SYMPTOM DUMP OUTPUT SYSTEM COMPLETION CODE=0C7 REASON CODE=00000007 "
                                     f"REC={rec_id} FIELD=AMOUNT COLS 37-48 DATA='{field}'")
         ctx.log("ERROR", "IEF450I", f"IEF450I NIGHTBAT ABEND=S0C7 U0000 REASON=00000007 STEP020 POSTTRN REC={rec_id}")
         ctx.log("ERROR", "$HASP395", f"$HASP395 NIGHTBAT ENDED - ABEND=S0C7 ({jobno}) - NIGHTBAT.OUTPUT NOT CATALOGED")
+        if ctx["workflow"]["hold"]:
+            ctx.log("WARN", "$HASP101", "$HASP101 NIGHTBAT HELD - OPERATOR RELEASE REQUIRED")
 
     # ------------------------------------------------------------ tick
     def tick(self, ctx: Ctx) -> None:
@@ -218,7 +232,29 @@ class Mainframe(LegacySystem):
                       "abend": {**b["abend"], "at": iso(b["abend"]["at"])} if b["abend"] else None},
             "credentials": {"OPERATOR": ctx["credentials"]["OPERATOR"]},
             "validation_enabled": validation_enabled(),
+            **self._workflow_view(ctx),
         }
+
+    @staticmethod
+    def _workflow_view(ctx: Ctx) -> dict:
+        """Additive read-back: batch.hold + the workflow version (only once the workflow has drifted)."""
+        w = ctx["workflow"]
+        if w["version"] < 2:
+            return {}
+        return {"workflow": {"version": w["version"], "hold": w["hold"], "requires": {"restart_batch": ["release_hold"]}}}
+
+    # ------------------------------------------------------------ live ops catalog (changes with the workflow)
+    def catalog(self, ctx: Ctx) -> list[dict]:
+        out = [o.catalog() for o in self.OPS]
+        if ctx["workflow"]["version"] >= 2:
+            for o in out:
+                if o["op"] == "restart_batch":
+                    o["requires"] = ["release_hold"]
+            out.append({**self.RELEASE_HOLD.catalog(), "before": "restart_batch"})
+        return out
+
+    def op_available(self, ctx: Ctx, op: str) -> bool:
+        return super().op_available(ctx, op) or (op == "release_hold" and ctx["workflow"]["version"] >= 2)
 
     def probe(self, ctx: Ctx, vuln_id: str) -> tuple[bool, str]:
         if vuln_id != "mf-default-operator":
@@ -233,6 +269,8 @@ class Mainframe(LegacySystem):
             return b["status"] == "OK" and not self.poison(b)
         if fault == "credential_exploit":
             return not self.probe(ctx, "mf-default-operator")[0]
+        if fault == "workflow_drift":  # the workflow stays changed; "resolved" once an operator ran the new step
+            return ctx["workflow"]["released"] > 0
         return super().fault_resolved(ctx, fault)
 
     def lie_log(self, ctx: Ctx, op: str) -> None:
@@ -256,11 +294,25 @@ class Mainframe(LegacySystem):
         job = params.get("job", "NIGHTBAT")
         if job != "NIGHTBAT":
             return False, f"$HASP003 RC=(52),{job} - NO SUCH JOB"
+        if ctx["workflow"]["hold"]:
+            ctx.log("WARN", "$HASP101", "$HASP101 NIGHTBAT HELD - RESUBMIT REJECTED")
+            raise OpRefused("$HASP101 NIGHTBAT HELD - JCL HOLD: issue release_hold before restart_batch")
         ctx.log("INFO", "$HASP100", "$HASP100 NIGHTBAT ON INTRDR - RESUBMITTED BY OPERATOR FROM STEP010")
         if self.run_batch(ctx, "RESTART"):
             return True, "$HASP395 NIGHTBAT ENDED - RC=0000"
         rid = ctx["batch"]["abend"]["record_id"]
         return False, f"IEF450I NIGHTBAT ABEND=S0C7 REC={rid} - POISON RECORD STILL QUEUED"
+
+    def op_release_hold(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
+        job = params.get("job", "NIGHTBAT")
+        if job != "NIGHTBAT":
+            return False, f"$HASP003 RC=(52),{job} - NO SUCH JOB"
+        w = ctx["workflow"]
+        was = w["hold"]
+        w["hold"] = False
+        w["released"] += 1
+        ctx.log("INFO", "$HASP890", f"$HASP890 JOB NIGHTBAT {'RELEASED' if was else 'NOT HELD'} BY OPERATOR ($A)")
+        return True, f"$HASP890 NIGHTBAT {'RELEASED' if was else 'NOT HELD - NO ACTION'}"
 
     def op_rotate_credential(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
         acct = params.get("account", "OPERATOR")
@@ -279,6 +331,17 @@ class Mainframe(LegacySystem):
         rec = format_record(rid, ctx.now.strftime("%Y%m%d"), ACCOUNTS[0], ACCOUNTS[1], amount, memo="WIRE MANUAL KEYED")
         b["queue"].append({"id": rid, "rec": rec})
         return True, f"malformed record {rid} (amount={amount!r}) queued for the next NIGHTBAT run"
+
+    def chaos_workflow_drift(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
+        """JES2 maintenance changes the operator workflow: ABENDed jobs are held; restart needs release_hold first."""
+        w = ctx["workflow"]
+        w["version"] = max(2, int(w["version"]))
+        w["patch"] = str(params.get("patch", "JES2 PTF UA99412"))
+        if ctx["batch"]["status"] == "ABENDED":
+            w["hold"] = True
+        # what the maintenance logs: a routine PTF line, nothing about the new operator step
+        ctx.log("INFO", "$HASP000", f"$HASP000 JES2 MAINTENANCE {w['patch']} APPLIED - WARM START COMPLETE")
+        return True, "restart_batch now refused while NIGHTBAT is held; new op release_hold in /mainframe/ops"
 
     def chaos_credential_exploit(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
         """An intruder logs on with the factory-default OPERATOR password and moves money in the ledger."""
