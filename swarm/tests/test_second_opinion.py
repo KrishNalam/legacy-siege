@@ -165,3 +165,18 @@ def test_done_path_writes_verdict_and_thought(inc, monkeypatch):
     assert so.start("scout-1", doc, state, PLAN, "mainframe", "batch_abort")
     time.sleep(0.3)
     assert col("incidents").find_one({"_id": "INC-0099"})["ai"]["request_id"] == ai["request_id"]
+
+
+def test_param_values_are_case_exact():
+    res = so.judge(prop(GOOD[0], ("mainframe", "restart_batch", {"job": "nightbat"}), *GOOD[2:]),
+                   PLAN, "mainframe", "batch_abort", READBACK)
+    assert verdicts(res)[1] == ("restart_batch", "overruled") and not res["agrees_with_policy"]
+
+
+def test_order_follows_the_plan_chain_for_other_faults():
+    plan = [dict(s, n=i) for i, s in enumerate(policy.fix_plan("disk_fill"), 1)]
+    p = prop(("unix", "rerun_transfer", {}), ("unix", "purge_spool", {"path": "/var/spool/xfer"}), ("portal", "refresh_cache", {}),
+             root="unix", fc="disk_fill")
+    res = so.judge(p, plan, "unix", "disk_fill", READBACK)
+    assert res["proposed_ops"][0]["reason"] == "out of order: spool still full: the transfer would fail again"
+    assert not res["agrees_with_policy"]
