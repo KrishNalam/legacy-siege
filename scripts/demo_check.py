@@ -473,6 +473,22 @@ class Demo:
                    f"{run_id}: batch_abort {ev.get('status')}, {n} incidents in {watch_s:.0f}s, batch {st['batch']['status']}, "
                    f"rejected={st['batch'].get('rejected')}, unhealthy={worst or 'none'}", time.monotonic() - t0)
 
+    def check_ai(self, inc_ids: list[str]) -> None:
+        """Optional (--check-ai, needs ANTHROPIC_API_KEY): Claude's second opinion landed on each night's incident
+        and every proposed op carries the guardrail's verdict. Advisory only, so it is not one of the 26 beats."""
+        parts, ok = [], bool(inc_ids)
+        for inc_id in inc_ids:
+            ai = (self.s.incidents.find_one({"_id": inc_id}, {"ai": 1}) or {}).get("ai") or {}
+            ops = ai.get("proposed_ops") or []
+            good = (ai.get("status") == "done" and bool(ops) and ai.get("latency_ms") is not None
+                    and all(o.get("verdict") in ("agree", "overruled") for o in ops)
+                    and all(o.get("reason") for o in ops if o.get("verdict") == "overruled"))
+            ok = ok and good
+            parts.append(f"{inc_id} {ai.get('status', 'absent')} {ai.get('latency_ms')}ms root_agrees={ai.get('root_agrees')} "
+                         f"{sum(o.get('verdict') == 'agree' for o in ops)}✓/{len(ai.get('overruled_ops') or [])}✗"
+                         f"/{len(ai.get('missed_ops') or [])}+")
+        self.r.add("h. AI second opinion judged (opt-in)", ok, "; ".join(parts) or "no incidents")
+
     def final_reset(self) -> None:
         log("POST /api/reset {mode: full} (demo reset: Gardener revert)")
         out = self.post("/api/reset", {"mode": "full"})
@@ -497,6 +513,8 @@ def main() -> int:
                     help="seconds to watch night 3 for incidents (env NIGHT3_WATCH_S)")
     ap.add_argument("--autoplay", action="store_true", default=config.DEMO_AUTOPLAY,
                     help="the stack runs with DEMO_AUTOPLAY=1: don't click Night 2/3, next round or later approvals")
+    ap.add_argument("--check-ai", action="store_true",
+                    help="also check Claude's second opinion on each night's incident (skipped without ANTHROPIC_API_KEY)")
     a = ap.parse_args()
     rep = Report()
     d = Demo(a.base, a.approve_delay, rep, autoplay=a.autoplay)
@@ -504,11 +522,16 @@ def main() -> int:
         + (" [autoplay]" if a.autoplay else ""))
     try:
         if d.preflight(reset=not a.no_reset):
+            n1 = n2 = None
             n1 = d.night1(a.night_timeout)
             if n1:
                 n2 = d.night2(n1, a.night_timeout)
                 if n2 and d.gardener(a.night_timeout):
                     d.night3(a.night3_watch)
+            if a.check_ai and config.ANTHROPIC_API_KEY:
+                d.check_ai([n["inc"]["_id"] for n in (n1, n2) if n])
+            elif a.check_ai:
+                log("--check-ai skipped: no ANTHROPIC_API_KEY")
             if not a.keep:
                 d.final_reset()
     except KeyboardInterrupt:
