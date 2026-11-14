@@ -1,0 +1,90 @@
+"""agent_kill against real dummy subprocesses registered in the (isolated) swarm.agents collection."""
+from __future__ import annotations
+
+import subprocess
+import sys
+import threading
+import time
+from datetime import timedelta
+
+import pytest
+
+from chaos import runner
+from common.db import col, now, world
+
+
+@pytest.fixture
+def spawn():
+    procs: list[subprocess.Popen] = []
+
+    def _spawn(agent_id: str, **fields) -> subprocess.Popen:
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)  # swarm.agent dummy"])
+        procs.append(p)
+        doc = {"_id": agent_id, "role": "worker", "specialty": "mainframe", "status": "working",
+               "phase": "diagnosing", "pid": p.pid, "last_seen": now(), "started_at": now(),
+               "incident": "INC-0001", "task": "INC-0001-t1", "generation": 1, **fields}
+        col("agents").insert_one(doc)
+        return p
+
+    yield _spawn
+    for p in procs:  # never leave dummies behind
+        if p.poll() is None:
+            p.kill()
+        p.wait(5)
+
+
+def _killed(p: subprocess.Popen) -> bool:
+    try:
+        return p.wait(5) == -9
+    except subprocess.TimeoutExpired:
+        return False
+
+
+def test_kill_waits_for_step_sent_phase(spawn):
+    bystander = spawn("worker-unix-1", specialty="unix")
+    victim = spawn("worker-mainframe-1")
+
+    def becomes_step_sent():  # the worker sends its step a moment later
+        time.sleep(0.6)
+        col("agents").update_one({"_id": "worker-mainframe-1"}, {"$set": {"phase": "step_sent", "last_seen": now()}})
+
+    threading.Thread(target=becomes_step_sent, daemon=True).start()
+    ev = runner.fire("agent_kill", "swarm", {"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 10})
+    assert ev["status"] == "ok"
+    r = ev["result"]
+    assert r["agent"] == "worker-mainframe-1" and r["pid"] == victim.pid and r["matched"] == "selector"
+    assert r["phase"] == "step_sent" and r["task"] == "INC-0001-t1" and r["waited_s"] >= 0.5
+    assert _killed(victim) and bystander.poll() is None
+    assert world().chaos_events.find_one({"_id": ev["_id"]})["result"]["pid"] == victim.pid
+
+
+def test_kill_by_agent_id(spawn):
+    p = spawn("scout-1", role="scout", status="idle", phase=None)
+    ev = runner.fire("agent_kill", params={"selector": {"agent": "scout-1"}, "wait_s": 1})
+    assert ev["status"] == "ok" and ev["result"]["agent"] == "scout-1" and _killed(p)
+
+
+def test_fallback_to_any_busy_worker(spawn):
+    p = spawn("worker-web-1", specialty="web", phase="diagnosing")
+    ev = runner.fire("agent_kill", params={"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0.3})
+    assert ev["status"] == "ok" and ev["result"]["matched"] == "fallback_busy_worker" and _killed(p)
+
+
+def test_no_kill_for_stale_or_dead_agents(spawn):
+    stale = spawn("worker-mainframe-1", phase="step_sent", last_seen=now() - timedelta(minutes=5))
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    col("agents").insert_one({"_id": "worker-unix-1", "role": "worker", "status": "working",
+                              "phase": "step_sent", "pid": gone.pid, "last_seen": now()})
+    ev = runner.fire("agent_kill", params={"wait_s": 0.3})
+    assert ev["status"] == "failed" and ev["result"]["error"] == "no live agent matched"
+    assert stale.poll() is None  # a stale heartbeat means the swarm already considers it gone
+
+
+def test_refuses_recycled_pid(spawn):
+    # agent doc claims a last heartbeat long before this process was started -> pid was reused
+    p = spawn("worker-mainframe-1", phase="step_sent")
+    col("agents").update_one({"_id": "worker-mainframe-1"},
+                             {"$set": {"last_seen": now() - timedelta(seconds=10)}})  # still "fresh"
+    ev = runner.fire("agent_kill", params={"wait_s": 0.2})
+    assert ev["status"] == "failed" and p.poll() is None
