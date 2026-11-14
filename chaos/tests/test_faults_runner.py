@@ -211,3 +211,14 @@ def test_agent_lie_uses_vetted_log_hook_only_when_enabled(systems, monkeypatch):
     monkeypatch.setenv("CHAOS_AGENT_LIE", "1")
     assert runner.fire("lie_to_agent", "unix")["status"] == "ok"
     assert systems.calls == [("/unix/_chaos/false_log", {"params": {"prompt_injection": True}})]
+
+
+@pytest.mark.parametrize("fault", ["false_log", "credential_exploit"])
+def test_red_fleet_system_attacks_require_master_switch(fault, systems, monkeypatch):
+    monkeypatch.delenv("RED_FLEET", raising=False)
+    with pytest.raises(faults.FaultError, match="switched off"):
+        runner.fire(fault)
+    assert not systems.calls
+    monkeypatch.setenv("RED_FLEET", "1")
+    assert runner.fire(fault)["status"] == "ok"
+    assert len(systems.calls) == 1

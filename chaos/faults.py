@@ -17,6 +17,7 @@ the runner can always record a ``chaos_events`` document).
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import os
 import signal
 import threading
@@ -88,11 +89,11 @@ FAULTS: dict[str, Fault] = {f.name: f for f in [
           "A 'false comment': plausible log lines (an ABEND, a SOAP fault, an operator note) that blame the wrong "
           "system. Nothing else changes.",
           "Knowing what actually happened: trusting read-back over what the logs claim.",
-          {}),
+          {}, switch="RED_FLEET"),
     Fault("credential_exploit", "system", ("mainframe",), "mainframe",
           "An intruder logs on with the factory-default OPERATOR password and moves money in the ledger.",
           "Security incident from logs + probe; destructive fix (rotate_credential) behind an approval.",
-          {}),
+          {}, switch="RED_FLEET"),
     Fault("agent_kill", "agent", ("swarm",), "swarm",
           "SIGKILL a live bee process (by id, or the worker that just sent a step).",
           "Lease expiry, Undertaker detection, Nurse takeover from a MongoDB checkpoint.",
@@ -347,8 +348,16 @@ def _frozen():
     return col("frozen_agents")
 
 
-def _thaw(pid: int, started: float | None = None) -> bool:
-    if started is None or _proc_start_epoch(pid) != started:
+def _proc_start_ticks(pid: int) -> int | None:
+    """Kernel process identity, independent of wall-clock corrections."""
+    try:
+        return int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[19])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _thaw(pid: int, started: int | None = None) -> bool:
+    if started is None or _proc_start_ticks(pid) != started:
         return False
     try:
         os.kill(pid, signal.SIGCONT)
@@ -369,6 +378,16 @@ def thaw_overdue(all_: bool = False) -> list[int]:
     return thawed
 
 
+def _reap_guardian(guardian) -> None:
+    """The caller has already thawed (or failed to freeze); do not leak a guardian."""
+    import subprocess
+    try:
+        guardian.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        guardian.kill()
+        guardian.wait(timeout=5)
+
+
 def freeze_agent(params: dict) -> dict:
     try:
         selector = clean_selector(params.get("selector") or DEFAULT_SELECTOR)
@@ -382,7 +401,7 @@ def freeze_agent(params: dict) -> dict:
                 else "no live agent matched", "how": how, "skipped": True, "selector": selector,
                 "waited_s": round(waited, 2)}
     pid = agent["pid"]
-    started = _proc_start_epoch(pid)
+    started = _proc_start_ticks(pid)
     if started is None:
         return {"ok": False, "error": "cannot verify process identity"}
     _frozen().replace_one({"_id": pid}, {"_id": pid, "agent": agent["_id"], "started": started, "since": now(),
@@ -391,7 +410,7 @@ def freeze_agent(params: dict) -> dict:
     import sys
     try:
         guardian = subprocess.Popen([sys.executable, "-m", "chaos.thaw", str(pid), str(started), str(freeze_s)],
-                                    start_new_session=True)
+                                    cwd=Path(__file__).resolve().parents[1], start_new_session=True)
     except OSError:
         _frozen().delete_one({"_id": pid})
         raise
@@ -399,14 +418,16 @@ def freeze_agent(params: dict) -> dict:
         os.kill(pid, signal.SIGSTOP)   # alive in the process table, silent everywhere else
     except OSError as e:
         _frozen().delete_one({"_id": pid})
-        guardian.wait(timeout=5)
+        _reap_guardian(guardian)
         return {"ok": False, "error": f"freeze failed: {e}", "agent": agent["_id"], "pid": pid}
     try:
         time.sleep(freeze_s)
     finally:
         _thaw(pid, started)
-        _frozen().delete_one({"_id": pid})
-        guardian.wait(timeout=5)
+        try:
+            _frozen().delete_one({"_id": pid, "started": started})
+        finally:
+            _reap_guardian(guardian)
     return {"ok": True, "effect": f"SIGSTOP {agent['_id']} (pid {pid}) for {freeze_s:g}s, then SIGCONT",
             "signal": "SIGSTOP", "agent": agent["_id"], "pid": pid, "role": agent.get("role"),
             "phase": agent.get("phase"), "incident": agent.get("incident"), "task": agent.get("task"),

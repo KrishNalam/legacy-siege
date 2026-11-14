@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timezone
 from functools import lru_cache
 
-from pymongo import MongoClient, ReturnDocument  # noqa: F401  (re-export)
+from pymongo import timeout, MongoClient, ReturnDocument  # noqa: F401  (re-export)
 from pymongo.collection import Collection
 from pymongo.database import Database
 
@@ -26,7 +26,10 @@ def now() -> datetime:
 
 @lru_cache(maxsize=1)
 def client() -> MongoClient:
-    return MongoClient(config.MONGODB_URI, tz_aware=True, serverSelectionTimeoutMS=5000, appname="legacy-siege")
+    # A selected server can still stop replying. Keep this above all change-stream
+    # maxAwaitTimeMS values (currently 500 ms); do not cap index-build execution.
+    return MongoClient(config.MONGODB_URI, tz_aware=True, serverSelectionTimeoutMS=5000,
+                       connectTimeoutMS=5000, socketTimeoutMS=15000, appname="legacy-siege")
 
 
 def world() -> Database:
@@ -52,7 +55,9 @@ def txn(fn):
     both happen on a real Atlas replica set, so every transaction in the project goes through here.
     ``fn`` must therefore be safe to re-run (only DB writes through ``session``).
     """
-    with client().start_session() as s:
+    # Bound PyMongo's otherwise 120-second transaction retry window as well as
+    # each socket read. Expiry aborts; the agent loop can reconcile/retry later.
+    with timeout(15), client().start_session() as s:
         return s.with_transaction(fn)
 
 

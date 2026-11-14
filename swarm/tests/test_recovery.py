@@ -8,9 +8,9 @@ def test_recovery_switch(monkeypatch):
     monkeypatch.delenv('SWARM_RECOVERY', raising=False)
     assert not recovery.enabled()
     monkeypatch.setenv('RED_FLEET', '1')
+    assert not recovery.enabled()  # RED_FLEET alone must not change the lie / round-2 timing
+    monkeypatch.setenv('SWARM_RECOVERY', '1')
     assert recovery.enabled()
-    monkeypatch.setenv('SWARM_RECOVERY', '0')
-    assert not recovery.enabled()
 
 
 def test_lies_slow_apply_then_disk_fill(db, fake):

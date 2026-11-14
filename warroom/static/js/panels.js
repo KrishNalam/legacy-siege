@@ -49,7 +49,7 @@ export class Panels {
     const faults = {
       batch_abort: ["mainframe"], lying_success: ["mainframe", "unix", "portal"], slow_apply: ["mainframe", "unix", "portal"],
       disk_fill: ["unix"], cron_stop: ["unix"], session_leak: ["portal"], sqli_exploit: ["portal"], config_exploit: ["unix"],
-      schema_drift: ["unix"], false_log: ["mainframe", "unix", "portal"], credential_exploit: ["mainframe"],
+      schema_drift: ["unix"],
     };
     const fs = $("#fault-sel"), tsel = $("#target-sel");
     fs.innerHTML = Object.keys(faults).map((f) => `<option>${f}</option>`).join("");
@@ -418,12 +418,12 @@ export class Panels {
     const ov = $("#atlas"); ov.hidden = false;
     $("#atlas-grid").innerHTML = '<div class="empty">loading…</div>';
     try {
-      const r = await api("GET", "/api/atlas");
+      const [r, sp] = await Promise.all([api("GET", "/api/atlas"), api("GET", "/api/spine").catch(() => null)]);
       $("#atlas-sub").textContent = `${r.uri_host} · ${r.collections.length} collections · counts, indexes and one real document each`;
-      $("#atlas-grid").innerHTML = r.collections.map((c) => `
+      $("#atlas-grid").innerHTML = spineCard(sp) + r.collections.map((c) => `
         <div class="acoll" data-db="${c.db}" data-coll="${c.coll}" ${focus === c.coll ? 'style="border-color:#00ed64;box-shadow:0 0 20px rgba(0,237,100,.3)"' : ""}>
           <h3>${esc(c.coll)}<span class="db">${esc(c.db_name)}</span><span class="cnt">${c.count.toLocaleString()}</span></h3>
-          <div class="ix">${c.validator ? '<span class="val">$jsonSchema</span>' : ""}${c.search_indexes.map((s) => `<span class="vec">${esc(s.type || "search")}: ${esc(s.name)}${s.queryable ? "" : " (building)"}</span>`).join("")}
+          <div class="ix">${c.validator ? '<span class="val">$jsonSchema</span>' : ""}${c.pre_images ? '<span class="val">pre-images</span>' : ""}${c.search_indexes.map((s) => `<span class="vec">${esc(s.type || "search")}: ${esc(s.name)}${s.queryable ? "" : " (building)"}</span>`).join("")}
             ${c.indexes.filter((i) => i.name !== "_id_").map((i) => `<span title="${esc(JSON.stringify(i.keys))}">${esc(i.name)}${i.unique ? " · unique" : ""}${i.partial ? " · partial" : ""}${i.ttl_s ? ` · TTL ${Math.round(i.ttl_s / 3600)}h` : ""}</span>`).join("")}</div>
           <pre>${c.sample ? esc(JSON.stringify(c.sample, null, 1)).slice(0, 600) : "(empty)"}</pre></div>`).join("");
       $("#atlas-grid").querySelectorAll(".acoll").forEach((el) => el.addEventListener("click", () => {
@@ -433,6 +433,29 @@ export class Panels {
       if (focus) $(`.acoll[data-coll="${focus}"]`)?.scrollIntoView({ block: "center" });
     } catch (e) { $("#atlas-grid").textContent = String(e.message || e); }
   }
+}
+
+// MONGO_SPINE=1: what MongoDB itself computed about the Hive ($facet + $setWindowFields + $percentile) and the
+// lease chain of custody recorded from change-stream pre-images. Hidden when the switch is off.
+function spineCard(sp) {
+  if (!sp || !sp.enabled) return "";
+  const n = (v, d = 1) => (typeof v === "number" ? v.toFixed(d) : "–");
+  const learn = (sp.learning || []).slice(0, 4).map((l) =>
+    `${l.fault_class || "?"} night ${l.night}: ${n(l.ttr_s)} s` +
+    (l.speedup ? ` (was ${n(l.prev_ttr_s)} s, ×${l.speedup})` : "") + (l.recall ? " · recall" : "")).join("\n");
+  const rounds = (sp.rounds || []).map((r) =>
+    `round ${r.round}: p50 ${n(r.ttr_p50_s)} s · p90 ${n(r.ttr_p90_s)} s · diag median ${n(r.diag_median_s)} s`).join("\n");
+  const tk = sp.takeovers || {}, cu = sp.custody || {}, kinds = cu.by_kind || {};
+  const last = (cu.recent || [])[0];
+  const custody = Object.keys(kinds).length
+    ? Object.entries(kinds).map(([k, v]) => `${k} ${v}`).join(" · ") +
+      (last ? `\nlast takeover ${last.doc_id}: ${last.from_owner || "?"} gen ${last.gen_before} → ${last.to_owner || "?"} gen ${last.gen_after} · #${last.seq} sha256 ${last.hash || ""}…` : "")
+    : "no lease changes recorded yet";
+  const pre = Object.entries(sp.pre_images || {}).filter(([, v]) => v).map(([k]) => k).join(", ") || "off";
+  return `<div class="acoll" style="grid-column:1/-1;border-color:#00ed64">
+    <h3>spine analytics<span class="db">computed by MongoDB, one $facet per question</span></h3>
+    <div class="ix"><span class="val">$facet</span><span class="val">$setWindowFields · $shift · $documentNumber</span><span class="val">$percentile · $median</span><span class="val">change-stream pre-images: ${esc(pre)}</span></div>
+    <pre>${sp.error ? esc(sp.error) : esc(`LEARNING CURVE (per fault class)\n${learn || "no resolved incidents yet"}\n\nP50 / P90 PER ROUND\n${rounds || "–"}\n\nNURSE TAKEOVERS: ${tk.n || 0} · median ${n(tk.median_s)} s · max ${n(tk.max_s)} s · verified steps skipped ${tk.skipped_steps || 0}\n\nLEASE CHAIN OF CUSTODY (hash-chained)\n${custody}`)}</pre></div>`;
 }
 
 function highlight(obj) {

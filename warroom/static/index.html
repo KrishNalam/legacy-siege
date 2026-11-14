@@ -40,6 +40,7 @@
       </div>
     </div>
     <button class="btn ghost atlas" id="btn-atlas">Atlas</button>
+    <a class="btn ghost" href="./diagram" style="text-decoration:none" title="The live diagram of the agents at work">Diagram view</a>
   </nav>
 </header>
 
@@ -70,6 +71,10 @@
     <section class="card" id="garden-card" hidden>
       <div class="card-h"><span class="kicker green">GARDENER</span><span id="upg-id" class="mono"></span><span id="upg-status" class="pill"></span></div>
       <div id="garden-body"></div>
+    </section>
+    <section class="card roster-card" id="roster-card" hidden>
+      <div class="card-h"><span class="kicker">COMMS ROSTER</span><span class="mono dim">swarm.roster</span><span id="roster-count" class="pill"></span></div>
+      <ol id="roster"></ol>
     </section>
     <section class="card grow" id="activity-card">
       <div class="card-h"><span class="kicker">HIVE ACTIVITY</span><span class="mono dim">swarm.thoughts &middot; change stream</span></div>

@@ -203,12 +203,14 @@ def cancel(run_id: str | None = None) -> list[str]:
     """Stop pending steps of one run (or all runs). Already-fired faults stay fired.
     Cancelling everything (a reset) also calls off manual kills still hunting for a victim."""
     if run_id is None:
-        faults.cancel_pending_hunts()
-        faults.clear_planted_memory()
-        try:
-            faults.thaw_overdue(all_=True)   # a reset wakes every frozen bee
-        except Exception:
-            log.exception("thaw on reset failed")
+        # Thaw first: memory cleanup must never prevent waking a stopped bee.
+        for label, cleanup in [("thaw", lambda: faults.thaw_overdue(all_=True)),
+                               ("cancel hunts", faults.cancel_pending_hunts),
+                               ("clear planted memory", faults.clear_planted_memory)]:
+            try:
+                cleanup()
+            except Exception:
+                log.exception("%s on reset failed", label)
     with _active_lock:
         targets = [run_id] if run_id else list(_active)
         for rid in targets:
