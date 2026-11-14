@@ -14,11 +14,11 @@
 <div id="fit">
 <div id="frame">
   <header class="top">
-    <div class="l row" style="top:14px"><span><span class="brand">LEGACY SIEGE</span><a class="why" href="./why" title="Why this matters">WHY IT MATTERS →</a><span id="night" class="chip">READY</span><span id="conn" class="conn"><i></i><span id="conn-txt">CONNECTING…</span></span></span>
+    <div class="l row" style="top:14px"><span><span class="brand">LEGACY SIEGE</span><a class="why" href="./why" title="Why this matters">WHY IT MATTERS →</a><span id="conn" class="conn"><i></i><span id="conn-txt">CONNECTING…</span></span></span>
       <nav class="controls">
         <button id="btn-start" class="btn inv" title="S">START</button>
-        <button id="btn-kill" class="btn" title="Kill the worker that is in the middle of a job (K)">KILL A WORKER</button>
-        <button id="btn-queen" class="btn" title="Kill the queen, the coordinator; the backup queen takes over (Q)">KILL THE QUEEN</button>
+        <button id="btn-kill" class="btn kill" title="Kill the worker that is in the middle of a job (K)">KILL A WORKER</button>
+        <button id="btn-queen" class="btn kill" title="Kill the queen, the coordinator; the backup queen takes over (Q)">KILL THE QUEEN</button>
         <button id="btn-next" class="btn" title="N">NEXT NIGHT</button>
         <button id="btn-help" class="btn" title="What every button does (?)">? HELP</button>
         <span class="more">
@@ -47,7 +47,18 @@
     <section id="v-overview" class="layer">
       <svg id="ov-wires" class="wires" viewBox="0 0 1600 900" aria-hidden="true"></svg>
       <div id="ov-nodes"></div>
-      <div class="l hint" style="top:826px"><span>CLICK A BOX TO ZOOM IN&nbsp;&nbsp;·&nbsp;&nbsp;ESC BACK&nbsp;&nbsp;·&nbsp;&nbsp;<button class="lnk" data-help>? HELP</button></span></div>
+      <!-- the MongoDB spine: the shared store under everything; a cell lights when a matching change arrives -->
+      <div id="spine" class="spine">
+        <div class="sp-h"><span class="sp-t">MONGODB</span><span class="dim">THE SPINE UNDER EVERYTHING · EVERY BOX ABOVE READS AND WRITES HERE</span></div>
+        <div class="sp-cells">
+          <div class="sp-c" data-cell="ledger"><b>LEDGER</b><span>incidents · steps · receipts</span></div>
+          <div class="sp-c" data-cell="leases"><b>LEASES</b><span>who owns which job</span></div>
+          <div class="sp-c" data-cell="checkpoints"><b>CHECKPOINTS</b><span>resume a dead agent's job</span></div>
+          <div class="sp-c" data-cell="playbooks"><b>PLAYBOOKS + VECTOR SEARCH</b><span>remembered fixes</span></div>
+          <div class="sp-c" data-cell="chaos_events"><b>CHAOS_EVENTS</b><span>every attack + result</span></div>
+          <div class="sp-c" data-cell="streams"><b>CHANGE STREAMS</b><span>this page, live</span></div>
+        </div>
+      </div>
     </section>
 
     <!-- level 1: inside the Bees (the agents as seats around the systems they work on) -->
@@ -74,7 +85,6 @@
     <section id="v-how" class="layer" hidden><div id="how-body"></div></section>
 
     <div id="lens" class="lens" hidden></div>
-    <div class="l now" style="top:862px"><span class="now-k">NOW</span><span id="now" class="now-t" aria-live="polite">CONNECTING TO THE LIVE FEED…</span></div>
   </main>
 
   <div id="approval" class="approval" hidden>
@@ -106,7 +116,7 @@
         <tr><td>&lt; OVERVIEW · Esc · 0</td><td>Zoom back out.</td></tr>
         <tr><td>LIVE / HOW IT WORKS · V</td><td>Inside a box: what is happening now, or how that part is built (its agents, MongoDB collections and flows).</td></tr>
       </table>
-      <h3>Buttons (top right, small)</h3>
+      <h3>Buttons (top right)</h3>
       <table>
         <tr><td>START · S</td><td>Starts Night 1: the attack begins. After a night it reads START OVER (wipes everything, runs Night 1 again).</td></tr>
         <tr><td>KILL A WORKER · K</td><td>Really kills (SIGKILL) the worker agent that is in the middle of a fix. Glows red when one is mid-job. A nurse agent takes over its job from the saved progress in MongoDB.</td></tr>

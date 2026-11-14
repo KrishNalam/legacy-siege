@@ -709,8 +709,9 @@ function rosterRowsHtml(n = 5) {
 // CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES (the swarm), THE GARDENER below Legacy pointing up into it: a separate
 // system OUTSIDE the swarm; help/repeats, pause and tools/known fixes are arrows across the swarm boundary.
 const BOXR = {
-  chaos: { x: 40, y: 104, w: 360, h: 420 }, legacy: { x: 500, y: 104, w: 600, h: 420 },
-  bees: { x: 1200, y: 104, w: 360, h: 420 }, gardener: { x: 580, y: 608, w: 440, h: 206 },
+  // Chaos | (Legacy over Gardener) | Bees; Legacy + gap + Gardener = the Bees' height. The MongoDB spine runs below.
+  chaos: { x: 40, y: 104, w: 340, h: 600 }, legacy: { x: 500, y: 104, w: 560, h: 360 },
+  bees: { x: 1220, y: 104, w: 340, h: 600 }, gardener: { x: 500, y: 514, w: 560, h: 190 },
 };
 const FULL = { x: 0, y: 84, w: 1600, h: 760 };
 const ZOOMS = ["overview", "chaos", "legacy", "bees", "gardener"];
@@ -762,6 +763,23 @@ function watchForPulses(m, prev) {
     if (m.doc.status === "proven" && prev?.status !== "proven") pulse("code", "var(--green)");
   }
   if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") pulse("fix", "var(--green)");
+}
+
+// the MongoDB spine band: light the cell whose collection a change just touched
+const spineT = {};
+function lightCell(cell) {
+  const el = document.querySelector(`#spine [data-cell="${cell}"]`); if (!el) return;
+  el.classList.remove("hit"); void el.offsetWidth; el.classList.add("hit");
+  clearTimeout(spineT[cell]); spineT[cell] = setTimeout(() => el.classList.remove("hit"), 1200);
+}
+function spineFor(m, prev) {
+  const c = m.coll, d = m.doc || {};
+  if (["ledger", "incidents", "op_receipts"].includes(c)) lightCell("ledger");
+  if (c === "tasks" || c === "custody" || (c === "incidents" && d.owner)) lightCell("leases");
+  if (c === "checkpoints" || c === "checkpoint_writes") lightCell("checkpoints");
+  if (c === "playbooks" || (c === "incidents" && d.recall && !prev?.recall) || (c === "thoughts" && (/recall|playbook/i.test(d.kind || "") || /^(Remembered|Recalled)/i.test(d.text || "")))) lightCell("playbooks");
+  if (c === "chaos_events") lightCell("chaos_events");
+  lightCell("streams");
 }
 
 // the Bees box's hive grid: one cell per swarm agent (the Gardener is a separate system outside the swarm)
@@ -877,22 +895,22 @@ function renderOverview() {
   const fixNow = state.thoughts.some((t) => (t.kind === "verify" || /^Verified /.test(t.text || "")) && serverNow() - ts(t.ts) < 8000);
   const deployed = u && ["deployed", "proven"].includes(u.status);
   const cx = B.chaos.x + B.chaos.w, lx1 = B.legacy.x, lx2 = B.legacy.x + B.legacy.w, bx = B.bees.x;
-  const gy = B.gardener.y, gyb = B.gardener.y + B.gardener.h;
+  const gy = B.gardener.y, gx2 = B.gardener.x + B.gardener.w;
   const WIRES = {
     atk: { d: `M${cx + 6} 250 L${lx1 - 12} 250`, cls: `red ${atkNow ? "on" : ""}`, label: "ATTACKS", lx: (cx + lx1) / 2, ly: 242 },
     fix: { d: `M${bx - 6} 250 L${lx2 + 12} 250`, cls: `${fixNow ? "grn on" : live ? "on" : ""}`, label: "WATCH + FIX", lx: (bx + lx2) / 2, ly: 242 },
     lie: { d: `M${bx - 6} 330 L${lx2 + 12} 330`, cls: `${rejects.length ? "red" : ""} ${lieFresh ? "on" : ""}`, label: rejects.length ? "LIE CAUGHT" : "CHECKS", lx: (bx + lx2) / 2, ly: 322 },
     kill: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y - 6} L${B.chaos.x + B.chaos.w / 2} 92 L${B.bees.x + B.bees.w / 2} 92 L${B.bees.x + B.bees.w / 2} ${B.bees.y - 12}`, cls: `red ${killFresh ? "on" : ""}`, label: "KILLS A BEE", lx: 800, ly: 88 },
-    code: { d: `M800 ${gy - 6} L800 ${B.legacy.y + B.legacy.h + 12}`, cls: `${deployed ? "amb" : ""} ${u?.status === "deployed" ? "on" : ""}`, label: deployed ? `NEW CODE V${u.version_after ?? 2}` : "NEW CODE", lx: 810, ly: (gy + B.legacy.y + B.legacy.h) / 2 + 4, anchor: "start" },
-    req: { d: `M${B.bees.x + B.bees.w / 2} ${B.bees.y + B.bees.h + 6} L${B.bees.x + B.bees.w / 2} ${gy + 60} L${B.gardener.x + B.gardener.w + 12} ${gy + 60}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "ASKS FOR HELP · REPEATS", lx: B.bees.x + B.bees.w / 2 - 10, ly: gy + 52, anchor: "end" },
-    tools: { d: `M${B.gardener.x + B.gardener.w + 6} ${gy + 110} L1460 ${gy + 110} L1460 ${B.bees.y + B.bees.h + 20}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: "TOOLS + KNOWN FIXES → SCOUTS", lx: B.gardener.x + B.gardener.w + 20, ly: gy + 102, anchor: "start" },
-    pause: { d: `M${B.gardener.x + B.gardener.w + 6} ${gy + 160} L1530 ${gy + 160} L1530 ${B.bees.y + B.bees.h + 20}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: "PAUSE WHILE UPGRADING", lx: B.gardener.x + B.gardener.w + 20, ly: gy + 152, anchor: "start" },
-    prove: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y + B.chaos.h + 6} L${B.chaos.x + B.chaos.w / 2} ${gy + 60} L${B.gardener.x - 12} ${gy + 60}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? "REPLAYED: NOTHING BROKE" : "PROOF: REPLAY", lx: B.chaos.x + B.chaos.w / 2 + 10, ly: gy + 52 },
+    code: { d: `M${B.legacy.x + B.legacy.w / 2} ${gy - 6} L${B.legacy.x + B.legacy.w / 2} ${B.legacy.y + B.legacy.h + 12}`, cls: `${deployed ? "amb" : ""} ${u?.status === "deployed" ? "on" : ""}`, label: deployed ? `NEW CODE V${u.version_after ?? 2}` : "NEW CODE", lx: B.legacy.x + B.legacy.w / 2 + 10, ly: (gy + B.legacy.y + B.legacy.h) / 2 + 4, anchor: "start" },
+    req: { d: `M${bx - 6} ${gy + 42} L${gx2 + 12} ${gy + 42}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: ["ASKS FOR HELP", "· REPEATS"], lx: (gx2 + bx) / 2, ly: gy + 20 },
+    tools: { d: `M${gx2 + 6} ${gy + 100} L${bx - 12} ${gy + 100}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: ["TOOLS + FIXES", "→ SCOUTS"], lx: (gx2 + bx) / 2, ly: gy + 78 },
+    pause: { d: `M${gx2 + 6} ${gy + 158} L${bx - 12} ${gy + 158}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: ["PAUSE WHILE", "UPGRADING"], lx: (gx2 + bx) / 2, ly: gy + 136 },
+    prove: { d: `M${cx + 6} ${gy + 100} L${B.gardener.x - 12} ${gy + 100}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? ["REPLAYED:", "NOTHING BROKE"] : ["PROOF:", "REPLAY"], lx: (cx + B.gardener.x) / 2, ly: gy + 78 },
   };
   const mk = (cls) => (cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i");
   const W = [{ k: "defs", html: `<defs>${[["r", "var(--red)"], ["a", "var(--amber)"], ["g", "var(--green)"], ["i", "var(--faint)"]].map(([n, c]) => `<marker id="ah-${n}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("")}</defs>` }];
-  W.push({ k: "swarm-edge", html: `<g><rect class="swarm-edge" x="${B.bees.x - 16}" y="${B.bees.y - 4}" width="${B.bees.w + 30}" height="${B.bees.h + 18}"/><text class="wl swarm-edge-l" x="${B.bees.x - 10}" y="${B.bees.y + B.bees.h + 34}" text-anchor="end">THE SWARM = DOTTED LINE ↗</text></g>` });
-  for (const [k, w] of Object.entries(WIRES)) W.push({ k, html: `<g><path id="wire-${k}" class="w ${w.cls}" d="${w.d}" marker-end="url(#ah-${mk(w.cls)})"/><text class="wl ${w.cls.replace(/\bon\b/, "")}" x="${w.lx}" y="${w.ly}" text-anchor="${w.anchor || "middle"}">${esc(w.label)}</text></g>` });
+  W.push({ k: "swarm-edge", html: `<g><rect class="swarm-edge" x="${B.bees.x - 16}" y="${B.bees.y - 4}" width="${B.bees.w + 30}" height="${B.bees.h + 18}"/><text class="wl swarm-edge-l" x="${B.bees.x + B.bees.w / 2}" y="${B.bees.y + B.bees.h + 18}" text-anchor="middle">THE SWARM = DOTTED LINE</text></g>` });
+  for (const [k, w] of Object.entries(WIRES)) W.push({ k, html: `<g><path id="wire-${k}" class="w ${w.cls}" d="${w.d}" marker-end="url(#ah-${mk(w.cls)})"/><text class="wl ${w.cls.replace(/\bon\b/, "")}" x="${w.lx}" y="${w.ly}" text-anchor="${w.anchor || "middle"}">${[].concat(w.label).map((t, i) => `<tspan x="${w.lx}" dy="${i ? 14 : 0}">${esc(t)}</tspan>`).join("")}</text></g>` });
   const now = Date.now();
   for (let i = pulses.length - 1; i >= 0; i--) if (now - pulses[i].at > 1400) pulses.splice(i, 1);
   for (const p of pulses) if (WIRES[p.wire]) W.push({ k: p.id, html: `<circle class="pulse" r="5" fill="${p.color}" style="color:${p.color}"><animateMotion begin="indefinite" dur="1.1s" fill="freeze" path="${WIRES[p.wire].d}"/></circle>` });
@@ -908,7 +926,7 @@ const HOW = {
       ["plan", 60, 170, 210, 90, "SCENARIO", "seeded nights 1 · 2 · 3", "ext"],
       ["scouts", 340, 170, 220, 90, "2 SCOUTS", "hive · systems", "agent"],
       ["cmd", 630, 170, 260, 90, "COMMANDER", "observe → think → act → reflect", "ai"],
-      ["strikers", 960, 170, 260, 90, "5 STRIKERS", "saboteur · liar · assassin · hacker · drifter", "agent"],
+      ["strikers", 960, 170, 260, 90, "6 STRIKERS", "saboteur · liar · assassin · hacker · drifter · memory", "agent"],
       ["runner", 1290, 170, 250, 90, "RUNNER", "chaos.runner.fire()", "agent"],
       ["legacy", 1290, 380, 250, 80, "LEGACY SYSTEMS", "faults land here", "sys"],
       ["bees", 960, 380, 260, 80, "THE BEES", "SIGKILL a real process", "sys"],
@@ -1151,7 +1169,6 @@ function nightBusy() {
 }
 function renderTop() {
   const r = state.current?.round, mr = maxRound(), busyNight = nightBusy();
-  $("#night").textContent = r ? `Night ${r}${busyNight ? " · running" : ""}` : "Ready";
   const start = $("#btn-start"), next = $("#btn-next");
   start.textContent = mr === 0 ? "Start" : "Start over";
   start.disabled = busy.has(start) || (mr > 0 && busyNight);
@@ -1211,7 +1228,7 @@ function render() {
   if (raf) return;
   raf = requestAnimationFrame(() => {
     raf = 0;
-    for (const [name, fn] of [["top", renderTop], ["diagram", renderDiagram], ["now", () => { $("#now").innerHTML = nowLine(); }], ["approval", renderApproval]]) {
+    for (const [name, fn] of [["top", renderTop], ["diagram", renderDiagram], ["approval", renderApproval]]) {
       try { fn(); } catch (e) { console.error(name, e); }
     }
   });
@@ -1224,10 +1241,11 @@ on("change", (m, prev) => {
   if (m.coll === "stats" && String(m.key || "").startsWith("progress:") && m.doc) noteProgress({ area: String(m.key).slice(9), ...m.doc }, ts(m.doc.ts) || serverNow());
   if (m.coll === "roster") { if (m.op === "delete") localRoster.delete(m.key); else if (m.doc) localRoster.set(m.key, m.doc); }
   try { watchForPulses(m, prev); } catch (e) { console.error(e); }
+  try { spineFor(m, prev); } catch (e) { console.error(e); }
   if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") refreshScore();
   render();
 });
-on("status", (s) => { const c = $("#conn"); c.classList.toggle("live", s === "live"); c.classList.toggle("down", s !== "live"); $("#conn-txt").textContent = s === "live" ? "LIVE FROM MONGODB" : "RECONNECTING…"; render(); });
+on("status", (s) => { const c = $("#conn"); c.classList.toggle("live", s === "live"); c.classList.toggle("down", s !== "live"); $("#conn-txt").textContent = s === "live" ? "" : "RECONNECTING…"; render(); });
 on("tick", render);
 
 bind();
