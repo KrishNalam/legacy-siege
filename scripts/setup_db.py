@@ -185,6 +185,10 @@ def ensure() -> None:
         IndexModel([("incident", ASCENDING), ("ts", ASCENDING)]),
     ])
     s.messages.create_index([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h")
+    from common import progress
+    if progress.enabled():  # PROGRESS_ETA: duration history as time-series (Red's in world, Blue's in swarm)
+        progress.ensure(w)
+        progress.ensure(s)
     from common import comms
     if comms.enabled():
         _ensure(s, "gardener_notes")
@@ -251,6 +255,8 @@ def reset() -> None:
         except OperationFailure:
             pass
     s.gardener_notes.delete_many({})
+    from common import progress
+    progress.wipe()  # PROGRESS_ETA duration history goes too (kept on next_round, so round 2 estimates better)
     s.lessons.delete_many({})  # failure memory goes with the playbooks on a full reset (kept on next_round)
 
 
