@@ -8,7 +8,9 @@ Vector Search index works either way. Switching providers requires re-embedding 
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import os
 import re
 import threading
 import time
@@ -67,6 +69,20 @@ def _voyage(text: str, input_type: str) -> list[float]:
     return box["vec"]
 
 
+def _trace(input_type: str, ok: bool, t0: float, err: str = "") -> None:
+    """Opt-in call log (EMBED_TRACE=/path/file.jsonl): one line per real Voyage call, no text, no secrets.
+    Used to count calls and spacing against Voyage's rate limit."""
+    path = os.environ.get("EMBED_TRACE")
+    if not path:
+        return
+    try:
+        with open(path, "a") as f:
+            f.write(json.dumps({"ts": round(time.time(), 2), "pid": os.getpid(), "input_type": input_type, "ok": ok,
+                                "ms": round((time.monotonic() - t0) * 1000), "err": err}) + "\n")
+    except OSError:
+        pass
+
+
 def embed_with_model(text: str, input_type: str = "document") -> tuple[list[float], str]:
     """Embed ``text`` and say which model ACTUALLY produced the vector.
 
@@ -76,9 +92,13 @@ def embed_with_model(text: str, input_type: str = "document") -> tuple[list[floa
     never stored or queried under Voyage's label (the two vector spaces must never mix)."""
     global _voyage_down_until
     if config.VOYAGE_API_KEY and time.monotonic() >= _voyage_down_until:
+        t0 = time.monotonic()
         try:
-            return _voyage(text, input_type), config.VOYAGE_MODEL
-        except Exception:
+            vec = _voyage(text, input_type)
+            _trace(input_type, True, t0)
+            return vec, config.VOYAGE_MODEL
+        except Exception as e:
+            _trace(input_type, False, t0, type(e).__name__)
             _voyage_down_until = time.monotonic() + config.EMBED_COOLDOWN_S
     return _local(text), LOCAL_MODEL
 

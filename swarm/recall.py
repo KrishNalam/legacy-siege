@@ -8,6 +8,22 @@ NUM_CANDIDATES = 50
 LIMIT = 3
 
 
+def _cross_space(symptom_text: str, model: str) -> list[dict]:
+    """Playbooks embedded by a DIFFERENT model than the query (a Voyage call fell back to local-hash, or was
+    rate-limited when the playbook was written). The vector index can't compare across spaces, so score those
+    by local-hash cosine of the stored symptom_text vs the query text. Tiny scan (non-stale playbooks only)."""
+    q = embed._local(symptom_text)
+    out = []
+    for pb in col("playbooks").find({"stale": False, "embedding_model": {"$ne": model}}, {"embedding": 0}).limit(200):
+        if not pb.get("symptom_text"):
+            continue
+        v = embed._local(pb["symptom_text"])
+        pb["score"] = sum(a * b for a, b in zip(q, v))
+        pb["via"] = "text-match"
+        out.append(pb)
+    return sorted(out, key=lambda h: -h["score"])[:LIMIT]
+
+
 def search(symptom_text: str) -> tuple[dict, list[dict]]:
     """$vectorSearch over swarm.playbooks by symptom text. Returns (filter, hits-with-scores).
     We pre-filter on the embedding model (vector spaces never mix) and staleness; we do NOT filter on
@@ -21,7 +37,11 @@ def search(symptom_text: str) -> tuple[dict, list[dict]]:
         {"$project": {"embedding": 0}},
         {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
     ]
-    return flt, list(col("playbooks").aggregate(pipeline))
+    hits = list(col("playbooks").aggregate(pipeline))
+    if not any(h["score"] >= config.RECALL_THRESHOLD for h in hits):
+        # Mixed vector spaces (partial Voyage outage / rate limit): never lose the round-2 speedup for it.
+        hits = sorted(hits + _cross_space(symptom_text, model), key=lambda h: -h["score"])[:LIMIT]
+    return flt, hits
 
 
 def evaluate(hits: list[dict], current_version) -> tuple[dict | None, list[dict]]:
@@ -39,7 +59,8 @@ def evaluate(hits: list[dict], current_version) -> tuple[dict | None, list[dict]
         ok = h["score"] >= config.RECALL_THRESHOLD and ok_version and not h.get("stale")
         summary.append({"playbook_id": h["_id"], "score": round(float(h["score"]), 4), "stale": bool(h.get("stale")),
                         "fault_class": h.get("fault_class"), "system": sys, "system_version": h.get("system_version"),
-                        "current_version": versions[sys], "usable": ok})
+                        "current_version": versions[sys], "usable": ok,
+                        **({"via": h["via"]} if h.get("via") else {})})
         if ok and usable is None:
             usable = h
     return usable, summary
