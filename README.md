@@ -205,6 +205,15 @@ PACE=0 .venv/bin/python -m pytest systems/tests chaos/tests gardener/tests warro
 PACE=0 .venv/bin/python -m pytest swarm/tests -q        # real agent processes, ~90 s
 ```
 
+## MongoDB MCP server (dev tool, read-only, opt-in)
+
+`.mcp.json` registers the official [MongoDB MCP server](https://www.mongodb.com/docs/mcp-server/get-started/)
+(pinned `mongodb-mcp-server@3.2.2`) in **read-only** mode for AI coding assistants (Claude Code asks before
+enabling a project server, so it is off until you approve it). It points at local Mongo unless you export
+`MDB_MCP_CONNECTION_STRING`. With it, a coding agent can inspect live collections, schemas, indexes and
+`explain` plans; it exposes no insert/update/delete/drop tools. It is not part of the swarm's runtime: the
+agents talk to Atlas through PyMongo directly.
+
 ## Tracing (LangSmith)
 
 Optional and **off by default**: with the flag unset (or the key missing) `langsmith` is never configured,

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mongodb-readonly": {
+      "command": "npx",
+      "args": ["-y", "mongodb-mcp-server@3.2.2", "--readOnly", "--telemetry", "disabled"],
+      "env": { "MDB_MCP_CONNECTION_STRING": "${MDB_MCP_CONNECTION_STRING:-mongodb://localhost:27027/?directConnection=true}" }
+    }
+  }
+}
