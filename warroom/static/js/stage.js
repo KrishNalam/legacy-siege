@@ -608,13 +608,15 @@ export class Stage {
       ctx.fillText(ev.fault, 24, yy + 16);
       const fw = ctx.measureText(ev.fault).width;
       ctx.font = FONT.mono(12, 500); ctx.fillStyle = "#e08a95";
-      const tgt = ev.fault === "agent_kill" ? (ev.result?.agent || "hunting…") : ev.target;
+      const tgt = ev.fault === "agent_kill"
+        ? (ev.result?.agent || (ev.result?.how === "gave_up" ? "skipped: no worker mid-step" : ev.result ? "no victim" : "hunting…"))
+        : ev.target;
       ctx.fillText(ellipsize(ctx, `→ ${tgt}`, 248 - fw - 8), 24 + fw + 8, yy + 16);
       ctx.font = FONT.mono(10.5, 500); ctx.fillStyle = "#9a5a64";
       const when = ev.ts ? new Date(ts(ev.ts)).toLocaleTimeString([], { hour12: false }) : "";
       ctx.fillText(`${when}  ${ev._id || ""}  ${ev.manual ? "manual" : ev.scenario || ""}`, 24, yy + 31);
-      const st = ev.status || (ev.result ? (ev.result.ok ? "ok" : "failed") : "firing");
-      ctx.textAlign = "right"; ctx.fillStyle = st === "ok" ? "#ff8a95" : st === "failed" ? "#7a4a52" : "#fff";
+      const st = ev.result?.how === "gave_up" ? "skipped" : ev.status || (ev.result ? (ev.result.ok ? "ok" : "failed") : "firing");
+      ctx.textAlign = "right"; ctx.fillStyle = st === "ok" ? "#ff8a95" : st === "failed" || st === "skipped" ? "#7a4a52" : "#fff";
       ctx.fillText(st.toUpperCase(), 274, yy + 31); ctx.textAlign = "left";
       this.hit({ x: 14, y: yy, w: 268, h: 38, tip: `world.chaos_events · ${ev._id}`, kind: "doc", db: "world", coll: "chaos_events", id: ev._id });
     });

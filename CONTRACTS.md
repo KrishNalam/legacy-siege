@@ -144,7 +144,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
 - `chaos/faults.py` fault library (code only): `batch_abort`, `disk_fill`, `cron_stop`, `session_leak`, `lying_success` (params `{count:1}`), `slow_apply`, `sqli_exploit`, `config_exploit`, `agent_kill`.
 - `chaos/runner.py`: `start_run(scenario, round) -> run_id`, `run_scenario(name, round=None)` (background-thread friendly), `fire(fault, target, params, manual=True, run_id=None)`. Every fault writes `world.chaos_events`.
 - `chaos/scenarios.py: seed()` writes: `bank-night-1` (t=0 lying_success{count:1} on mainframe, t=1 batch_abort mainframe), `bank-night-2` (batch_abort mainframe — same class, no lying, for fair round-2 timing), `bank-night-3` (replay batch_abort after Gardener upgrade → no incident), `free-play` (empty; manual buttons).
-- Agent kill: selector `{"agent": id}` or `{"role":"worker", "phase":"step_sent"}` (waits up to 30 s for a matching agent, then kills any busy worker). Reads `swarm.agents.pid`, `os.kill(pid, SIGKILL)`. No warning to the swarm.
+- Agent kill: selector `{"agent": id}` or `{"role":"worker", "phase":"step_sent"}` (waits up to 30 s for a matching agent, then gives up: nobody is killed and the event records `result.how:"gave_up"`, `selector`, `waited_s`, error "kill skipped: …"; no fallback to another worker). Reads `swarm.agents.pid`, `os.kill(pid, SIGKILL)`. No warning to the swarm.
 - CLI: `python -m chaos.cli run bank-night-1 | fire batch_abort mainframe | kill worker`.
 
 ## 4. Swarm (B) — processes, not threads

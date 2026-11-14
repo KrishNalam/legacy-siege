@@ -64,10 +64,25 @@ def test_kill_by_agent_id(spawn):
     assert ev["status"] == "ok" and ev["result"]["agent"] == "scout-1" and _killed(p)
 
 
-def test_fallback_to_any_busy_worker(spawn):
-    p = spawn("worker-web-1", specialty="web", phase="diagnosing")
+def test_gives_up_instead_of_killing_a_random_busy_worker(spawn):
+    """No worker reaches step_sent within the wait: the kill is skipped. A busy worker in another
+    phase is NOT killed as a fallback (a late press must not spoil the round-2 timing)."""
+    busy = spawn("worker-web-1", specialty="web", phase="diagnosing")
     ev = runner.fire("agent_kill", params={"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0.3})
-    assert ev["status"] == "ok" and ev["result"]["matched"] == "fallback_busy_worker" and _killed(p)
+    r = ev["result"]
+    assert ev["status"] == "failed" and r["ok"] is False and r["how"] == "gave_up" and r["skipped"] is True
+    assert r["selector"] == {"role": "worker", "phase": "step_sent"} and r["waited_s"] >= 0.3
+    assert r["error"].startswith("kill skipped: no worker mid-step")
+    assert "agent" not in r and "pid" not in r
+    time.sleep(0.2)
+    assert busy.poll() is None  # still alive
+    assert world().chaos_events.find_one({"_id": ev["_id"]})["result"]["how"] == "gave_up"
+
+
+def test_agent_id_selector_unchanged_when_missing(spawn):
+    ev = runner.fire("agent_kill", params={"selector": {"agent": "queen-9"}, "wait_s": 0.2})
+    assert ev["status"] == "failed" and ev["result"]["how"] == "none"
+    assert ev["result"]["error"] == "no live agent matched"
 
 
 def test_no_kill_for_stale_or_dead_agents(spawn):
@@ -77,7 +92,8 @@ def test_no_kill_for_stale_or_dead_agents(spawn):
     col("agents").insert_one({"_id": "worker-unix-1", "role": "worker", "status": "working",
                               "phase": "step_sent", "pid": gone.pid, "last_seen": now()})
     ev = runner.fire("agent_kill", params={"wait_s": 0.3})
-    assert ev["status"] == "failed" and ev["result"]["error"] == "no live agent matched"
+    assert ev["status"] == "failed" and ev["result"]["how"] == "gave_up"
+    assert ev["result"]["error"].startswith("kill skipped")
     assert stale.poll() is None  # a stale heartbeat means the swarm already considers it gone
 
 
@@ -92,7 +108,7 @@ def test_refuses_recycled_pid(spawn):
 
 def test_stray_kill_never_crosses_into_the_next_night(spawn):
     """A kill requested in night 1 (here from another process's point of view: no in-process reset
-    epoch bump) must not strike a worker in night 2, even via the busy-worker fallback."""
+    epoch bump) must not strike a worker in night 2."""
     w = world()
     w.runs.insert_one({"_id": "RUN-0001", "started_at": now() - timedelta(minutes=2), "ended_at": None})
 
@@ -114,6 +130,7 @@ def test_stray_kill_never_crosses_into_the_next_night(spawn):
 
 def test_kill_within_the_same_night_still_lands(spawn):
     world().runs.insert_one({"_id": "RUN-0002", "started_at": now(), "ended_at": None})
-    p = spawn("worker-web-1", specialty="web", phase="diagnosing")
-    ev = runner.fire("agent_kill", params={"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0.3})
-    assert ev["status"] == "ok" and ev["result"]["matched"] == "fallback_busy_worker" and _killed(p)
+    p = spawn("worker-web-1", specialty="web", phase="step_sent")
+    ev = runner.fire("agent_kill", params={"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0.3},
+                     run_id="RUN-0002")
+    assert ev["status"] == "ok" and ev["result"]["matched"] == "selector" and _killed(p)
