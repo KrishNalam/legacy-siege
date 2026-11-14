@@ -233,3 +233,19 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   No flag / no key / timeout / error → field absent or `status:"offline"`. `common.llm.complete_json()` is the
   structured-output sibling of `complete()` (no sampling params, thinking off, effort low, no retries).
   `scripts.demo_check --check-ai` adds an opt-in row (not one of the 26 beats; skipped without flag + key).
+- **AI drives (W2, `AI_DRIVES=1`, default off; needs a key).** In the Scout's `plan` node (walk path only; a usable
+  recall hit skips it, so Night 2 stays fast) `second_opinion.decide()` asks Claude synchronously, hard cap
+  `AI_DRIVE_TIMEOUT_S` (6 s), for ranked hypotheses (`ai.hypotheses[{system, fault_class, evidence, why}]`), the root
+  system and a plan. If the root matches the walk's proven root AND every op is accepted by the judge AND no plan
+  step is missing, Claude's plan is what runs (steps carry `source:"ai"`, `ai_why`); otherwise, or on timeout/error/
+  schema mismatch, the rules plan runs (`source:"policy"`). `ai.drives:true`, `ai.decision: "ai_plan"|"rules_plan"`,
+  `ai.decision_reason`. The Guard still verifies every step. The reasoning is posted as `thoughts` lines
+  ("Claude H1 … [E8, E12]", "Claude proposes …", "Guardrail: …"). Both AI paths skip an incident whose `ai.kind` is
+  another feature's (W3's `schema_mapping`), so neither clobbers the other.
+- **LLM guardrails (`common/llm.py`, reusable).** `guarded_json(task, system, prompt, schema, max_tokens, timeout)
+  → (dict|None, meta)`: hard wall-clock timeout, output validated against the JSON schema locally (mismatch →
+  None), `max_tokens` capped (`LLM_MAX_TOKENS_CAP`, 1500), `UNTRUSTED_NOTE` appended to the system prompt,
+  `redact()` strips env secrets / key shapes / URI credentials from everything sent, outcome counter
+  (`guard_stats()`, `swarm.stats{_id:"llm_guard"}` `{<task>.<outcome>, all.calls}`). Wrap untrusted system or log
+  text with `fence(source, text)` (control/bidi chars stripped, truncated, no tags). Provider seam
+  `PROVIDERS[LLM_PROVIDER]` (only `anthropic` today; add e.g. `openrouter` with the same signature).
