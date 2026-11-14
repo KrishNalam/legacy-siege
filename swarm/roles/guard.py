@@ -137,8 +137,10 @@ def build_graph(agent: Agent):
                     return {"verdict": "rejected"}
                 return {"verdict": "moot"}
         else:  # accepted, not applied yet: accepted is not done
-            if _age(st.get("sent_at")) > shared.SLOW_APPLY_S + 10:
-                reason = f"{op} accepted but never applied after {int(_age(st.get('sent_at')))}s: {facts}"
+            # timed from the ACK, not from mark_sent: the POST can go out late (step hold, a nurse's resend)
+            since = st.get("responded_at") or st.get("sent_at")
+            if _age(since) > shared.SLOW_APPLY_S + 10:
+                reason = f"{op} accepted but never applied after {int(_age(since))}s: {facts}"
             elif aid not in noted_slow:
                 noted_slow.add(aid)
                 agent.think(f"Accepted is not done: {op} on {sys} hasn't landed yet ({facts}); re-checking.",
