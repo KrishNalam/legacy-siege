@@ -183,14 +183,18 @@ def test_poison_is_opt_in_wrong_system_and_reset_restores_real_memory(monkeypatc
     batch = {"_id": "PB-batch", "fault_class": "batch_abort", "system": "mainframe", "stale": False,
              "fix": [{"system": "mainframe", "op": "quarantine_record", "params": {"record_id": "TX123456"}}]}
     swarm().playbooks.insert_one(batch)
-    assert runner.fire("poison_memory", manual=False)["result"]["skipped"]   # rebind would neutralise it: never
+    ev = runner.fire("poison_memory", manual=False, params={"shape": "wrong_record"})
+    assert ev["status"] == "ok" and ev["result"]["shape"] == "wrong_record"     # W27: the second shape
+    assert ev["result"]["wrong_fix"] == [{"system": "mainframe", "op": "quarantine_record",
+                                          "params": {"record_id": "TX000000"}}]
+    assert swarm().playbooks.find_one({"_id": "PB-batch"})["stale"]             # hidden behind the plant
     disk = {"_id": "PB-disk", "fault_class": "disk_fill", "system": "unix", "stale": False, "created_at": 1,
             "fix": [{"system": "unix", "op": "purge_spool", "params": {"path": "/var/spool/xfer"}}]}
     swarm().playbooks.insert_one(disk)
     ev = runner.fire("poison_memory", manual=False)
-    assert ev["status"] == "ok" and ev["result"]["wrong_fix"] == [{"system": "mainframe", "op": "purge_spool"}]
-    planted = swarm().playbooks.find_one({"red_planted": True})
-    assert planted["_id"] == "RED-POISON:PB-disk" and planted["fix"][0]["system"] == "mainframe"
+    assert ev["status"] == "ok" and ev["result"]["shape"] == "wrong_system" and ev["result"]["wrong_fix"] == [{"system": "mainframe", "op": "purge_spool"}]
+    planted = swarm().playbooks.find_one({"_id": "RED-POISON:PB-disk"})
+    assert planted["red_planted"] and planted["fix"][0]["system"] == "mainframe"
     assert planted["fix"][0]["params"] == {"path": "/var/spool/xfer"} and not planted["stale"]
     hidden = swarm().playbooks.find_one({"_id": "PB-disk"})
     assert hidden["stale"] and hidden["fix"] == disk["fix"]           # genuine repair hidden, never edited
