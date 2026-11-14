@@ -21,6 +21,7 @@ from langgraph.types import Command, interrupt
 from pymongo.errors import DuplicateKeyError
 
 from common import config as shared
+from common import comms
 from common.db import col, next_id, now, txn
 from common.events import say as bus
 
@@ -570,16 +571,25 @@ def drive(agent: Agent, graph, inc_id: str, generation: int) -> dict | None:
         inp = Command(resume={"status": a["status"], "decided_by": a.get("decided_by")})
 
 
+def claim_query(agent_id: str) -> dict:
+    return {"active": True, "status": "open",
+            "$and": [{"$or": [{"assigned_to": agent_id},
+                              {"assigned_to": None, "opened_at": {"$lt": now() - timedelta(seconds=2)}}]}]}
+
+
+def claim_sort() -> list:
+    """Oldest first. SWARM_COMMS=1: the incident the Queen assigned me (her priority pick) before any older
+    unassigned one (the query only matches assigned_to == me or None, and null sorts lowest)."""
+    return ([("assigned_to", -1)] if comms.enabled() else []) + [("opened_at", 1)]
+
+
 def run(agent: Agent) -> None:
     graph = build_graph(agent)
     second_opinion.prewarm()  # no-op unless an AI switch is on and a key is set
     def tick():
         # Take an incident the queen assigned to me — or any unassigned one if the queen is slow/absent.
-        inc = leases.claim(col("incidents"), {
-            "active": True, "status": "open",
-            "$and": [{"$or": [{"assigned_to": agent.id},
-                              {"assigned_to": None, "opened_at": {"$lt": now() - timedelta(seconds=2)}}]}],
-        }, agent.id, extra_set={"status": "claimed", "claimed_at": now()}, sort=[("opened_at", 1)])
+        inc = leases.claim(col("incidents"), claim_query(agent.id), agent.id,
+                           extra_set={"status": "claimed", "claimed_at": now()}, sort=claim_sort())
         if not inc:
             return
         agent.hold("incidents", inc["_id"], inc["generation"])

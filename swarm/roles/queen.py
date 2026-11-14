@@ -43,6 +43,9 @@ def build_graph(agent: Agent):
     def assign(state: QueenState, config) -> dict:
         cutoff = now() - timedelta(seconds=settings.DEAD_AFTER_S)
         busy = {i["owner"] for i in col("incidents").find({"active": True, "owner": {"$ne": None}}, {"owner": 1})}
+        if comms.enabled():  # a scout handed an incident it has not claimed yet is not free for the next one
+            busy |= {i["assigned_to"] for i in col("incidents").find(
+                {"active": True, "status": "open", "assigned_to": {"$ne": None}}, {"assigned_to": 1})}
         idle = [a["_id"] for a in col("agents").find({"role": "scout", "status": "idle", "last_seen": {"$gte": cutoff},
                                                       "phase": {"$ne": "retiring"}},
                                                      {"_id": 1}).sort("_id", 1) if a["_id"] not in busy]
