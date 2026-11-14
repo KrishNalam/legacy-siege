@@ -251,6 +251,14 @@ def build_graph(agent: Agent):
         path, findings = state["path"], state["findings"]
         culprits = [s for s in path if (findings.get(s) or {}).get("fault_class")]
         if not culprits:
+            if recovery.enabled() and path and all((findings.get(s) or {}).get("status") == "up" for s in path):
+                # SWARM_RECOVERY: a transient blip (another incident's fix landed meanwhile): nothing is wrong
+                # any more, so close it as self-healed instead of handing the Beekeeper a false alarm
+                fenced(config, inc_id, {"$set": {"status": "resolved", "active": False, "closed_at": now(),
+                                                  "resolution": "self_healed", "lease_until": leases.EPOCH}})
+                say(inc_id, f"Walked {' → '.join(path)}: every system reads healthy now, no fault left to fix. "
+                            f"Closing {inc_id} as self-healed (no playbook learned).", kind="action", pause=False)
+                return {"outcome": "failed"}  # ends the graph; the incident itself is resolved
             return escalate(config, inc_id, f"walked {' → '.join(path)} but found no known fault")
         root = culprits[-1]  # most upstream system with a diagnosed fault
         f = findings[root]
