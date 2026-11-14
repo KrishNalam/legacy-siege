@@ -47,3 +47,30 @@ def test_poison_rejection_requires_both_switches(monkeypatch):
     monkeypatch.setenv('SWARM_RECOVERY', '1')
     monkeypatch.setenv('FAILURE_MEMORY', '0')
     assert recovery.reject_bad_memory('I', 'failure', 'guard-1') is None
+
+
+def test_good_batch_abort_playbook_survives_a_lie(db, monkeypatch):
+    """Dynamic-fact class: today's record id differs from the remembered one. A lying ACK alone must not
+    retire the good playbook; a remembered op of the wrong kind still does."""
+    from common.db import col, now
+    from swarm import recovery
+    monkeypatch.setenv('SWARM_RECOVERY', '1')
+    monkeypatch.setenv('FAILURE_MEMORY', '1')
+    col('lessons').delete_many({})
+    fix = [{'system': 'mainframe', 'op': 'quarantine_record', 'params': {'record_id': 'TX900001'}},
+           {'system': 'mainframe', 'op': 'restart_batch', 'params': {'job': 'NIGHTBAT'}},
+           {'system': 'unix', 'op': 'rerun_transfer', 'params': {}},
+           {'system': 'portal', 'op': 'refresh_cache', 'params': {}}]
+    today = [{**f, 'step_id': f'S{i}', 'status': 'planned'} for i, f in enumerate(fix)]
+    today[0] = {**today[0], 'params': {'record_id': 'TX900007'}, 'status': 'failed'}
+    for pid, pfix in (('PB-GOOD', fix), ('PB-BAD', [{**fix[0], 'op': 'purge_spool'}] + fix[1:])):
+        col('playbooks').insert_one({'_id': pid, 'fix': pfix, 'system': 'mainframe', 'system_version': 1,
+                                     'fault_class': 'batch_abort', 'stale': False, 'created_at': now()})
+        col('incidents').insert_one({'_id': f'INC-{pid}', 'fault_class': 'batch_abort', 'steps': today,
+                                     'status': 'fixing', 'system': 'portal', 'opened_at': now(),
+                                     'recall': {'used': True, 'query': 'q', 'hits': [{'playbook_id': pid, 'usable': True}]}})
+    assert recovery.reject_bad_memory('INC-PB-GOOD', 'ACK ≠ APPLIED: quarantined=[]', 'guard-1') is None
+    assert not col('playbooks').find_one({'_id': 'PB-GOOD'})['stale']
+    assert recovery.reject_bad_memory('INC-PB-BAD', 'ACK ≠ APPLIED: quarantined=[]', 'guard-1') == 'PB-BAD'
+    assert col('playbooks').find_one({'_id': 'PB-BAD'})['stale']
+    col('lessons').delete_many({})
