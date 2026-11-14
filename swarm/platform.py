@@ -47,8 +47,18 @@ def build(agent):
             judged(agent, run['incident'], failed, False)
         elif tagged and all(s['status'] == 'verified' for s in tagged):
             judged(agent, run['incident'], tagged[-1], True)
-    query = {'stale': False, 'count': {'$gte': 2}, 'fault_class': {'$in': list(SUPPORTED)}}
-    candidates = list(col('lessons').find(query).limit(50)) + list(col('platform_signals').find(query).limit(50))
+    # Repeated = at least 2 independent observations of the same fault on the same system version,
+    # summed across Guard-caught failures (lessons) and slow verified steps (platform_signals): night 1's
+    # lie + slow restart already qualifies, so night 2 can use the tool before the Gardener upgrade.
+    query = {'stale': False, 'count': {'$gte': 1}, 'fault_class': {'$in': list(SUPPORTED)}}
+    groups: dict = {}
+    for ev in list(col('lessons').find(query).limit(50)) + list(col('platform_signals').find(query).limit(50)):
+        groups.setdefault((ev['fault_class'], ev['system'], ev['system_version']), []).append(ev)
+    candidates = []
+    for evs in groups.values():
+        total = sum(e['count'] for e in evs)
+        if total >= 2:
+            candidates.append({**evs[0], 'count': total, 'evidence_docs': evs})
     for ls in candidates:
         fault = ls['fault_class']
         if ls['system'] != SUPPORTED[fault] or agent.systems.version(ls['system']) != ls['system_version']:
@@ -72,7 +82,8 @@ def build(agent):
         if proposal and valid(proposal['ops'], fault):
             name, why, source = proposal['name'], proposal['why'], 'claude'
         doc = {'_id': key, 'name': name, 'explanation': why, 'source': source, 'ai': meta,
-               'built_from': [{'lesson': ls['_id'], 'count': ls['count'], 'evidence': ls.get('evidence')}],
+               'built_from': [{'lesson': e['_id'], 'count': e['count'], 'evidence': e.get('evidence')}
+                              for e in ls['evidence_docs']],
                'ops': ops, 'fault_class': fault, 'preconditions': {'system': ls['system'],
                'system_version': ls['system_version'], 'fault_class': fault, 'requires_current_diagnosis': True},
                'version': 1, 'status': 'active', 'uses': 0, 'successes': 0, 'failures': 0,
@@ -81,7 +92,8 @@ def build(agent):
             col('tools').insert_one(doc)
         except DuplicateKeyError:
             continue
-        agent.think(f"Platform engineer built tool {name} from {ls['count']} {'slow steps' if ls['_id'].startswith('SLOW:') else 'failures'} ({source}); "
+        slow = sum(e['count'] for e in ls['evidence_docs'] if str(e['_id']).startswith('SLOW:'))
+        agent.think(f"Platform engineer built tool {name} from {ls['count'] - slow} failures + {slow} slow steps ({source}); "
                     f"{len(ops)} whitelisted ops, every step still Guard-verified.", kind='learn', pause=False,
                     system=ls['system'])
 

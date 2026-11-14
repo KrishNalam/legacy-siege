@@ -157,3 +157,23 @@ def test_delivery_replays_after_publish_crash_and_revokes(engineer, db):
     assert db.gardener_requests.count_documents({'kind': 'tool'}) == 2
     assert db.messages.find_one({'kind': 'tool', 'body.payload.status': 'retired'})
     db.agents.delete_one({'_id': agent.id})
+
+
+def test_lie_plus_slow_step_on_same_fault_builds_tool(engineer, db):
+    """Night 1 alone (one Guard-caught lie + one slow verified restart) qualifies, so night 2 can use the tool."""
+    from datetime import timedelta
+    agent, _ = engineer
+    lessons.record_failure('INC-N1', {'step_id': 'INC-N1-s1', 'system': 'mainframe', 'op': 'quarantine_record',
+                                      'params': {'record_id': 'OLD'}, 'response': {'accepted': True, 'applied': True}}, 'a1',
+                           'ACK ≠ APPLIED: still poisoned', 'guard-1', 1, 'batch_abort')
+    platform.build(agent)
+    assert db.tools.count_documents({}) == 0  # a single observation is not repeated
+    db.incidents.insert_one({'_id': 'INC-N1', 'system': 'mainframe', 'status': 'resolved',
+                             'opened_at': now(), 'fault_class': 'batch_abort'})
+    platform.judged(agent, 'INC-N1', {'system': 'mainframe', 'op': 'restart_batch', 'action_id': 's1',
+                                      'sent_at': now() - timedelta(seconds=11)}, True)
+    platform.build(agent)
+    tool = db.tools.find_one()
+    assert tool and sorted(b['count'] for b in tool['built_from']) == [1, 1]
+    assert db.gardener_requests.count_documents({'kind': 'tool'}) == 1
+    db.incidents.delete_one({'_id': 'INC-N1'})
