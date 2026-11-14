@@ -39,7 +39,7 @@ _slots = threading.BoundedSemaphore(2)  # at most two calls in flight per proces
 OPS = {
     "mainframe": {"quarantine_record": ["record_id"], "restart_batch": ["job"], "rotate_credential": ["account"]},
     "unix": {"purge_spool": ["path"], "restart_cron": ["job"], "chmod_config": ["file", "mode"], "rerun_transfer": []},
-    "portal": {"flush_sessions": [], "apply_patch": ["patch"], "refresh_cache": []},
+    "portal": {"flush_sessions": [], "apply_patch": ["patch"], "refresh_cache": [], "map_field": ["field", "source"]},
 }
 FIXED = {("restart_batch", "job"): "NIGHTBAT", ("rotate_credential", "account"): "OPERATOR",
          ("purge_spool", "path"): "/var/spool/xfer", ("restart_cron", "job"): "xfer_pull",
@@ -386,15 +386,16 @@ def consult(ev: dict, plan: list[dict], root: str, fault_class: str, budget_s: f
     catalog, readback, logs = _gather(left)
     evidence_at = now()
     evidence = number_evidence(ev, logs)
-    if left() < 1.0:
+    window = min(llm_timeout, left())  # the time Claude actually gets (reported on the card if it runs out)
+    if window < 1.0:
         out, meta = None, {"outcome": "timeout"}
     else:
         out, meta = llm.guarded_json(task, SYSTEM_PROMPT, build_prompt(ev, evidence, catalog), _schema(),
-                                     max_tokens=1100, timeout=min(llm_timeout, left()))
+                                     max_tokens=1100, timeout=window)
     latency = int((time.monotonic() - t0) * 1000)
     if out is None:
         return {"status": "offline", "latency_ms": latency, "guard": meta["outcome"],
-                "error": {"timeout": f"no answer within {llm_timeout:.1f}s", "schema": "answer failed schema validation",
+                "error": {"timeout": f"no answer within {max(window, 0):.1f}s", "schema": "answer failed schema validation",
                           "bad_json": "answer was not valid JSON", "refusal": "model declined",
                           "truncated": "answer was cut off"}.get(meta["outcome"], "LLM call failed")}
     prop = normalize(out, {e["id"] for e in evidence})
@@ -444,9 +445,10 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
     rules = [dict(s, source="policy") for s in rules_plan]
     cap = config.AI_DRIVE_TIMEOUT_S
     t0 = time.monotonic()
+    rid = uuid.uuid4().hex[:12]
+    mine = {"_id": inc.get("_id"), "opened_at": inc.get("opened_at"), "ai.request_id": rid}
     try:
         inc_id, opened_at = inc["_id"], inc["opened_at"]
-        rid = uuid.uuid4().hex[:12]
         base = {"kind": KIND, "model": config.LLM_MODEL, "request_id": rid, "started_at": now(), "drives": True}
         with pymongo.timeout(1.0):
             r = col("incidents").update_one(  # never clobber another AI feature's doc (e.g. W3's schema_mapping)
@@ -454,7 +456,6 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
                 {"$set": {"ai": {**base, "status": "thinking"}}})
         if r.matched_count != 1:
             return {"plan": rules, "decision": "rules_plan", "reason": "another AI step already owns this incident"}
-        mine = {"_id": inc_id, "opened_at": opened_at, "ai.request_id": rid}
         plan_n = [dict(s, n=i) for i, s in enumerate(rules_plan, 1)]
         ev = findings_of(inc, state)
         box: queue.Queue = queue.Queue(maxsize=1)
@@ -467,8 +468,8 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
                 box.put({"status": "offline", "guard": "error", "error": type(e).__name__,
                          "latency_ms": int((time.monotonic() - t0) * 1000)})
         threading.Thread(target=work, name=f"ai-drive-{inc_id}", daemon=True).start()
-        say(f"Asking Claude to reason over the evidence (hard limit {cap:.1f}s); its plan runs only if it "
-            f"passes every guardrail.")
+        say(f"Asking Claude to reason over the evidence (waits at most {cap:.1f}s, evidence included); its plan "
+            f"runs only if it passes every guardrail.")
         try:
             got = box.get(timeout=max(0.1, cap - (time.monotonic() - t0)))
         except queue.Empty:  # deadline: whatever arrives later is ignored
@@ -493,6 +494,10 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
                                                   f"{', '.join(m['op'] for m in ai['missed_ops'])}); rules plan runs")
             elif not ai["verdicts"]:
                 decision, reason = "rules_plan", "Claude proposed no ops; rules plan runs"
+            elif any(v.get("note") == "params completed by policy" for v in ai["verdicts"]):
+                filled = [v["op"] for v in ai["verdicts"] if v.get("note") == "params completed by policy"]
+                decision, reason = "rules_plan", (f"Claude left params of {', '.join(filled)} to the policy, so it isn't "
+                                                  f"Claude's plan; rules plan runs")
             else:
                 decision, reason = "ai_plan", "Claude's plan passed P1–P6; executing it, the Guard verifies every step"
         ai.update(decision=decision, decision_reason=reason)
@@ -512,8 +517,15 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
             return {"plan": plan, "decision": decision, "reason": reason}
         return {"plan": rules, "decision": decision, "reason": reason}
     except Exception as e:
+        reason = f"AI step failed ({type(e).__name__}); rules plan runs"
         _log(agent_id, f"AI drive failed, rules plan runs: {type(e).__name__}: {e}")
-        return {"plan": rules, "decision": "rules_plan", "reason": f"AI step failed ({type(e).__name__})"}
+        try:  # don't leave the card on "thinking" while the rules plan already runs
+            with pymongo.timeout(1.0):
+                col("incidents").update_one(mine, {"$set": {"ai.status": "offline", "ai.error": type(e).__name__,
+                                                            "ai.decision": "rules_plan", "ai.decision_reason": reason}})
+        except Exception:
+            pass
+        return {"plan": rules, "decision": "rules_plan", "reason": reason}
 
 
 # ---------------------------------------------------------------------------------------------- background

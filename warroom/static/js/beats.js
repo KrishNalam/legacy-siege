@@ -82,7 +82,9 @@ export function installBeats(stage, panels, caption) {
     }
     // AI card landed (first observed completion: change-stream lookups can skip "thinking"; absent status = done)
     const aiDone = (a) => a && (!a.status || a.status === "done");
-    if (aiDone(doc.ai) && !aiDone(prev.ai)) {
+    // (skipped while a lie is being caught, so it never covers the "ACK ≠ APPLIED" caption)
+    const lieInFlight = (doc.steps || []).some((st) => (st.attempts || []).length > 1 && st.status !== "verified");
+    if (aiDone(doc.ai) && !aiDone(prev.ai) && !lieInFlight) {
       const ai = doc.ai, ops = ai.proposed_ops || [];
       const bad = ops.map((o, i) => ({ ...o, ...((ai.verdicts || [])[i] || {}) })).filter((v) => v.verdict === "overruled");
       const missed = ai.missed_ops || [];

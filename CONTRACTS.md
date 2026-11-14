@@ -234,11 +234,12 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   structured-output sibling of `complete()` (no sampling params, thinking off, effort low, no retries).
   `scripts.demo_check --check-ai` adds an opt-in row (not one of the 26 beats; skipped without flag + key).
 - **AI drives (W2, `AI_DRIVES=1`, default off; needs a key).** In the Scout's `plan` node (walk path only; a usable
-  recall hit skips it, so Night 2 stays fast) `second_opinion.decide()` asks Claude synchronously, hard cap
-  `AI_DRIVE_TIMEOUT_S` (6 s), for ranked hypotheses (`ai.hypotheses[{system, fault_class, evidence, why}]`), the root
+  recall hit skips it, so Night 2 stays fast) `second_opinion.decide()` asks Claude synchronously; one deadline
+  `AI_DRIVE_TIMEOUT_S` (6 s) covers evidence + Claude (≈7 s worst case with bookkeeping); late answers are discarded. It asks for ranked hypotheses (`ai.hypotheses[{system, fault_class, evidence, why}]`), the root
   system and a plan. If the root matches the walk's proven root AND every op is accepted by the judge AND no plan
   step is missing, Claude's plan is what runs (steps carry `source:"ai"`, `ai_why`); otherwise, or on timeout/error/
-  schema mismatch, the rules plan runs (`source:"policy"`). `ai.drives:true`, `ai.decision: "ai_plan"|"rules_plan"`,
+  schema mismatch, or when Claude left params to the policy, the rules plan runs (`source:"policy"`). With both
+  switches off, steps carry no `source`/`ai_why` field (identical to before). `ai.drives:true`, `ai.decision: "ai_plan"|"rules_plan"`,
   `ai.decision_reason`. The Guard still verifies every step. The reasoning is posted as `thoughts` lines
   ("Claude H1 … [E8, E12]", "Claude proposes …", "Guardrail: …"). Both AI paths skip an incident whose `ai.kind` is
   another feature's (W3's `schema_mapping`), so neither clobbers the other.
