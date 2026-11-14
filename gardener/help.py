@@ -65,7 +65,7 @@ def hand_off_repeat(sentinel_id: str, sig: str, group: dict) -> dict | None:
 
 def ask(agent_id: str, incident: str, step: dict, evidence: list[str], fault_class: str | None) -> tuple[dict, bool]:
     """Worker: post (idempotently) a help request for this step. Returns (request, newly_posted)."""
-    rid = f"GH-{incident}-{step['step_id']}"
+    rid = f"GH-{step['step_id']}"  # step ids already carry the incident (INC-0001-s1)
     res = col("gardener_requests").update_one({"_id": rid}, {"$setOnInsert": {
         "kind": "help", "from": agent_id, "status": "open", "ts": now(), "answer": None,
         "incident": incident, "step_id": step["step_id"], "system": step["system"], "op": step["op"],
