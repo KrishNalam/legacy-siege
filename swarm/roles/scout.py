@@ -169,7 +169,9 @@ def build_graph(agent: Agent):
         for line in skipped:
             say(inc_id, line, kind="recall", system=inc["system"], pause=False)
         if usable:
-            agree = gardener_help.enabled() and (inc.get("known_fix") or {}).get("playbook_id") == usable["_id"]
+            kf = (inc.get("known_fix") or {}) if gardener_help.enabled() else {}
+            agree = bool(kf) and (kf.get("playbook_id") == usable["_id"]
+                                  or (kf.get("system"), kf.get("fault_class")) == (usable["system"], usable["fault_class"]))
             if agree:
                 fenced(config, inc_id, {"$set": {"known_fix.used": True}})
             say(inc_id, f"Recall hit {usable['_id']} (score {usable['score']:.2f}, {usable['system']} "
