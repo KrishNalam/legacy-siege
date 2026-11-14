@@ -95,6 +95,8 @@ class Supervisor:
         self.retired: set[str] = set()   # extra nurses stopped on a roster restore: never respawned
         self.restore_seen = None
         self.restore_checked = 0.0
+        self.nights = 0                  # roster restores so far
+        self.bench_born: dict[str, int] = {}  # replacement nurse -> self.nights when it was started
         # dynamic scaling
         self.dynamic = dynamic()
         self.warm: list[subprocess.Popen] = []      # pre-imported spares waiting for an assignment on stdin
@@ -121,6 +123,8 @@ class Supervisor:
         if p is None:
             p = subprocess.Popen([sys.executable, "-m", "swarm.agent", *args], cwd=ROOT, preexec_fn=_PREEXEC)
         self.children[agent_id] = (role, p)
+        if standby_for:
+            self.bench_born[agent_id] = self.nights
         if ephemeral:
             self.ephemeral.add(agent_id)
         log(f"spawned {agent_id} ({role}) pid={p.pid}" + (f" standby for {standby_for}" if standby_for else "")
@@ -303,11 +307,15 @@ class Supervisor:
         base_ids = {i for _, i in base}
         # A bee that died this night is still owed its replacement nurse on the bench: start it now instead of
         # dropping it (at stage pace the next night's reset lands before NURSE_RESPAWN_S, and the dead bee's
-        # roster slot is refilled in its own role below). It is an extra, so the NEXT reset retires it.
+        # roster slot is refilled in its own role below). Replacement nurses of the night now ending survive
+        # this reset (demo_check / the war room still look for them) and retire at the next one.
         owed = [(role, aid, sb) for _, role, aid, sb in self.pending if sb]
         self.pending = []
         for agent_id, (_role, p) in list(self.children.items()):
+            if agent_id in self.bench_born and self.bench_born[agent_id] == self.nights:
+                continue  # replacement for a bee that died in the night now ending: keep it one more night
             if agent_id not in base_ids and p.poll() is None:
+                self.bench_born.pop(agent_id, None)
                 self.retired.add(agent_id)
                 p.send_signal(signal.SIGTERM)
                 log(f"roster restore: retiring {agent_id}")
@@ -317,6 +325,7 @@ class Supervisor:
         for role, agent_id, standby_for in owed:
             if agent_id not in self.children:
                 self.spawn(role, agent_id, standby_for)
+        self.nights += 1
         try:
             col("stats").delete_one({"_id": "roster_reset", "at": self.restore_seen})
         except Exception:
