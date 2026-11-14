@@ -316,3 +316,11 @@ def test_outcome_counts_a_rejected_recalled_repair_as_a_guard_catch(systems):
                                   'recall': {'used': True, 'rejected': 'RED-POISON:PB-0001'}})
     observed = outcome(event)
     assert observed['guard_caught'] is True and observed['incidents'][0]['memory_rejected'] == 'RED-POISON:PB-0001'
+    # the plant is recalled a night later (RUN-0002): the outcome follows the planted playbook, not the run
+    later = {**event, '_id': 'CHX-poison-2', 'run_id': 'RUN-0001', 'result': {'playbook': 'RED-POISON:PB-0009'}}
+    swarm().incidents.insert_one({'_id': 'INC-0003', 'run_id': 'RUN-0002', 'opened_at': now(), 'status': 'resolved',
+                                  'closed_at': now(), 'steps': [],
+                                  'recall': {'used': True, 'memory_rejected': ['RED-POISON:PB-0009'],
+                                             'rejected': 'RED-POISON:PB-0009'}})
+    observed = outcome(later)
+    assert observed['guard_caught'] is True and [r['incident'] for r in observed['incidents']] == ['INC-0003']
