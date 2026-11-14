@@ -26,6 +26,7 @@ from common.events import say as bus
 
 from .. import leases, policy, recall, settings, steps
 from ..harness import Agent, checkpointer, main_loop, retrying
+from .. import lessons
 
 
 class ScoutState(TypedDict, total=False):
@@ -142,11 +143,19 @@ def build_graph(agent: Agent):
         q = state["symptom_text"]
         flt, hits = recall.search(q)
         usable, summary = recall.evaluate(hits, sysc.version)
+        skipped = []
+        if lessons.enabled():  # failure memory: a playbook that didn't fit these symptoms before is skipped
+            try:
+                usable, skipped = lessons.skip_misfits(hits, summary, usable, q, inc_id)
+            except Exception:
+                skipped = []
         fenced(config, inc_id, {"$set": {"recall": {
             "query": q, "filter": flt, "hits": summary, "used": usable is not None, "model": flt.get("embedding_model"),
             "threshold": shared.RECALL_THRESHOLD, "num_candidates": recall.NUM_CANDIDATES, "limit": recall.LIMIT,
             "ts": now()}}})
         inc = inc_doc(inc_id)
+        for line in skipped:
+            say(inc_id, line, kind="recall", system=inc["system"], pause=False)
         if usable:
             say(inc_id, f"Recall hit {usable['_id']} (score {usable['score']:.2f}, {usable['system']} "
                         f"v{usable['system_version']}): {usable['fault_class']} — skipping the chain walk.",
@@ -162,6 +171,9 @@ def build_graph(agent: Agent):
             text = f"No usable playbook ({why}). Walking the chain from {inc['system']}."
         else:
             text = f"Memory is empty for these symptoms. Walking the chain from {inc['system']}."
+        if lessons.enabled():  # visible staleness: say which memory a version bump retired
+            note = lessons.stale_note(q)
+            text = f"{text} {note}" if note else text
         say(inc_id, text, kind="recall", system=inc["system"])
         return {"hit": None, "diag_started": time.time(), "current": inc["system"]}
 
@@ -196,6 +208,14 @@ def build_graph(agent: Agent):
             return {"path": path, "findings": findings, "root": hit["system"], "fault_class": f["fault_class"],
                     "root_cause": f.get("root_cause"), "params": f.get("params") or {}, "diag_s": diag_s}
         inc = inc_doc(state["incident"])
+        if lessons.enabled():  # failure memory: a wrong hypothesis is remembered, so the next recall skips it
+            try:
+                ls = lessons.record_misfit(state["incident"], hit, state["symptom_text"], f, agent.id,
+                                           sysc.version(hit["system"]))
+                say(state["incident"], f"Remembered {ls['_id']}: {ls['why']}.", kind="learn", system=hit["system"],
+                    pause=False)
+            except Exception:
+                pass
         say(state["incident"], f"{hit['playbook_id']} doesn't fit what {hit['system']} shows; walking the chain "
                                f"from {inc['system']} instead.", kind="recall")
         return {"hit": None, "path": [], "findings": {}, "current": inc["system"]}
@@ -241,12 +261,20 @@ def build_graph(agent: Agent):
                 "params": s["params"], "destructive": bool(s["destructive"] or (s["system"], s["op"]) in policy.DESTRUCTIVE),
                 "task_id": None, "status": "planned", "action_id": None, "attempts": [], "agent": None,
                 "evidence": None, "approval_id": None, "ts": now()} for i, s in enumerate(raw, 1)]
+            memory = []
+            if lessons.enabled():  # failure memory: annotate steps with what failed before (stored on the incident)
+                try:
+                    _, memory = lessons.for_plan(plan_steps, sysc.version, inc_id)
+                except Exception:
+                    memory = []
             fenced(config, inc_id, {"$set": {
                 "steps": plan_steps, "status": "fixing", "root_cause_system": state["root"],
                 "fault_class": state["fault_class"], "root_cause": state.get("root_cause"),
                 "metrics.diagnosis_s": state.get("diag_s", 0.0), "metrics.hops": len(state.get("path") or [])}})
             desc = "; ".join(f"{s['op']}{' (needs approval)' if s['destructive'] else ''}" for s in plan_steps)
             say(inc_id, f"Plan, {len(plan_steps)} steps: {desc}.", system=state["root"])
+            for line in memory:
+                say(inc_id, line, kind="recall", system=state["root"], pause=False)
         return {}
 
     def next_group(st: list[dict]) -> list[dict]:

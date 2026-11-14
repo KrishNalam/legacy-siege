@@ -8,7 +8,7 @@ from pymongo.client_session import ClientSession
 
 from common.db import col, now, txn
 
-from . import leases
+from . import leases, lessons
 
 
 class StepConflict(RuntimeError):
@@ -96,7 +96,13 @@ def _judge(incident: str, step: dict, action_id: str, status: str, evidence: str
 
 
 def verify(incident: str, step: dict, action_id: str, evidence: str, agent: str) -> bool:
-    return _judge(incident, step, action_id, "verified", evidence, agent)
+    ok = _judge(incident, step, action_id, "verified", evidence, agent)
+    if ok and lessons.enabled():
+        try:  # failure memory: a retry after a failed attempt worked -> the lesson records what did
+            lessons.note_recovery(incident, step, action_id)
+        except Exception:
+            pass
+    return ok
 
 
 def reject(incident: str, step: dict, action_id: str, evidence: str, agent: str) -> bool:

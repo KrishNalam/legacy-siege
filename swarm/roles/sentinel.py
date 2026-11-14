@@ -28,6 +28,7 @@ from common.events import say
 
 from .. import leases, policy, settings
 from ..harness import Agent, checkpointer, log
+from .. import lessons
 
 
 class DetectState(TypedDict, total=False):
@@ -275,6 +276,12 @@ def run(agent: Agent) -> None:
                 if r.modified_count:
                     agent.think(f"{s} is now v{v} (was v{versions.get(s, v - 1)}): marked {r.modified_count} "
                                 f"playbook(s) stale until re-verified.", kind="learn", system=s, pause=False)
+                if lessons.enabled():  # failure memory carries versions too: old lessons retire with the code
+                    n = lessons.mark_stale(s, v)
+                    if n:
+                        agent.think(f"{s} is now v{v}: marked {n} lesson(s) learned on older versions stale — "
+                                    f"what failed on the old code may not fail on the new.", kind="learn",
+                                    system=s, pause=False)
                 versions[s] = v
         confirmed = [s for s in health if streak.get(s, 0) >= settings.CONFIRM_POLLS]
         for seg in policy.segments(confirmed):
