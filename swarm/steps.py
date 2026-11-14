@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pymongo.client_session import ClientSession
 
+from common import progress
 from common.db import col, now, txn
 
 from . import leases, lessons
@@ -115,8 +116,32 @@ def _judge(incident: str, step: dict, action_id: str, status: str, evidence: str
     return txn(fn)
 
 
+def _judged(incident: str, step: dict, action_id: str, status: str, agent: str) -> None:
+    """PROGRESS_ETA: one duration record per judged attempt (sent -> verified|failed) + i/n verified line."""
+    if not progress.enabled():
+        return
+    try:
+        inc = col("incidents").find_one({"_id": incident}, {"steps": 1}) or {}
+        all_steps = inc.get("steps") or []
+        cur = next((x for x in all_steps if x.get("step_id") == step["step_id"]), step)
+        sent = cur.get("sent_at") or step.get("sent_at")
+        took = (now() - sent).total_seconds() if sent else None
+        if took is not None:
+            progress.record("swarm", f"step:{cur['op']}", cur["system"], "worker", took, status,
+                            incident=incident, action_id=action_id)
+        done = sum(1 for x in all_steps if x.get("status") == "verified")
+        progress.emit(agent, "guard", f"{incident}: {done}/{len(all_steps)} steps verified"
+                      + (f" ({cur['op']} {status} in {took:.1f} s)" if took is not None else ""),
+                      action_type=f"step:{cur['op']}", system=cur["system"], incident=incident, phase="done",
+                      step=done, of=len(all_steps), elapsed_s=took, outcome=status)
+    except Exception:
+        pass
+
+
 def verify(incident: str, step: dict, action_id: str, evidence: str, agent: str) -> bool:
     ok = _judge(incident, step, action_id, "verified", evidence, agent)
+    if ok:
+        _judged(incident, step, action_id, "verified", agent)
     if ok and lessons.enabled():
         try:  # failure memory: a retry after a failed attempt worked -> the lesson records what did
             lessons.note_recovery(incident, step, action_id)
@@ -126,4 +151,7 @@ def verify(incident: str, step: dict, action_id: str, evidence: str, agent: str)
 
 
 def reject(incident: str, step: dict, action_id: str, evidence: str, agent: str) -> bool:
-    return _judge(incident, step, action_id, "failed", evidence, agent)
+    ok = _judge(incident, step, action_id, "failed", evidence, agent)
+    if ok:
+        _judged(incident, step, action_id, "failed", agent)
+    return ok
