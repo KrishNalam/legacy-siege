@@ -75,8 +75,9 @@ async def ws(websocket: WebSocket) -> None:
 
 @app.get("/")
 async def index(classic: str | None = None) -> FileResponse:
-    """Default page: the simple stage view. ``?classic=1`` (or ``/classic``) serves the full classic war room."""
-    page = "hive.html" if classic is None or classic.lower() in ("0", "false", "no") else "index.html"
+    """Default page: the flow view (a flowchart of what the agents do, lit live).
+    ``?classic=1`` (or ``/classic``) serves the full classic war room."""
+    page = "flow.html" if classic is None or classic.lower() in ("0", "false", "no") else "index.html"
     return FileResponse(STATIC / page, headers={"Cache-Control": "no-cache"})
 
 
