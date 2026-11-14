@@ -17,7 +17,7 @@ from common.db import now, world
 from common.events import think
 
 from .. import runner
-from . import core, learning
+from . import commander, core, learning
 from .personas import KEYS, Persona, validate
 
 log = logging.getLogger("chaos.redfleet")
@@ -40,6 +40,7 @@ class RedState(TypedDict, total=False):
     strike: dict | None
     planner: str
     event: dict | None
+    order: dict | None
 
 
 class Attacker:
@@ -96,9 +97,26 @@ class Attacker:
             self._pending = reg.get("pending_reflection")
         self._finish_reflection()
         snap = core.scout(self.p.id)
+        order = commander.my_order(self.p.id, snap.get("run_id")) if commander.enabled() else None
+        if order:
+            return {"snap": snap, "order": order, "hold": self._order_gate(snap, order)}
         return {"snap": snap, "hold": ("observing Hive defence" if self._pending else core.gate(snap, self.cfg, self.p.stagger_s))}
 
+    def _order_gate(self, snap: dict, order: dict) -> str | None:
+        """A Commander order skips my own cooldown, but never the no-permanent-damage rules."""
+        if order["status"] == "queued":
+            return f"standing by for Commander campaign {order['combo']} (step {order['step'] + 1}/{order['of']})"
+        if not snap.get("night_running"):
+            return "no night running"
+        if snap.get("upgrade_busy"):
+            return "the Gardener is mid-upgrade"
+        if any(a.get("status") == "firing" for a in snap.get("red_attacks") or []):
+            return "my last attack is still in flight"
+        return None
+
     def _plan(self, state: RedState) -> RedState:
+        if state.get("order"):
+            return self._plan_order(state)
         strike, planner, rejected = self.plan(state["snap"])
         if rejected:
             think(self.p.id, core.ROLE, f"{self.p.name}: {rejected}; using my own playbook.", kind="reject")
@@ -115,18 +133,44 @@ class Attacker:
               system=strike["target"] if strike["target"] != "swarm" else None)
         return {"strike": strike, "planner": planner}
 
+    def _plan_order(self, state: RedState) -> RedState:
+        """Execute the Commander's step from my own menu (params from the menu, never the model)."""
+        order, snap = state["order"], state["snap"]
+        strike, why = commander.order_strike(self.p.id, order, snap, self.cfg)
+        if strike is None:
+            self._heartbeat("holding", f"waiting to execute Commander step: {why}")
+            return {"strike": None, "planner": "commander"}
+        if not commander.take_order(self.p.id, order):
+            return {"strike": None, "planner": "commander"}
+        if self._pending:
+            self._finish_reflection(force=True)   # reflect early: the next strike would overwrite it
+        world().red_agents.update_one({"_id": self.p.id}, {"$set": {"planner": "commander",
+            "intent": {"fault": strike["fault"], "target": strike["target"], "ts": now()}}}, upsert=True)
+        where = strike.get("victim") or strike["target"]
+        think(self.p.id, core.ROLE, f"{self.p.name} (on Red Commander's orders, {order['combo']} step "
+                                    f"{order['step'] + 1}/{order['of']}): {strike['fault']} on {where}.",
+              system=strike["target"] if strike["target"] != "swarm" else None)
+        return {"strike": strike, "planner": "commander"}
+
     def _strike(self, state: RedState) -> RedState:
-        s, snap = state["strike"], state["snap"]
+        s, snap, order = state["strike"], state["snap"], state.get("order")
         self._heartbeat("striking", None, force=True)
+        red = {"persona": self.p.name, "planner": state.get("planner"), "question": s["question"], "reason": s["reason"],
+               "incident_ids": [i["id"] for i in snap.get("incidents", [])]}
+        if order:
+            red["campaign"] = {"id": order["campaign"], "step": order["step"] + 1, "of": order["of"],
+                               "combo": order["combo"], "ordered_by": commander.COMMANDER_ID}
         try:
             ev = runner.fire(s["fault"], s["target"], s["params"], manual=False, run_id=snap["run_id"],
-                             extra={"by": self.p.id, "red": {"persona": self.p.name, "planner": state.get("planner"),
-                                                             "question": s["question"], "reason": s["reason"],
-                                                             "incident_ids": [i["id"] for i in snap.get("incidents", [])]}})
+                             extra={"by": self.p.id, "red": red})
         except Exception as e:  # never crash an attacker on one bad strike
             log.exception("strike failed")
             think(self.p.id, core.ROLE, f"{self.p.name}: {s['fault']} misfired ({type(e).__name__}).", kind="reject")
+            if order:
+                commander.report_order(self.p.id, order, None)
             return {"event": None}
+        if order:
+            commander.report_order(self.p.id, order, ev)
         return {"event": ev}
 
     def _observe(self, state: RedState) -> RedState:
@@ -152,9 +196,9 @@ class Attacker:
         self._finish_reflection()
         return {}
 
-    def _finish_reflection(self):
+    def _finish_reflection(self, force: bool = False):
         ev = self._pending
-        if not ev or (now() - ev["ts"]).total_seconds() < float(os.environ.get("RED_FLEET_REFLECT_S", "12")):
+        if not ev or (not force and (now() - ev["ts"]).total_seconds() < float(os.environ.get("RED_FLEET_REFLECT_S", "12"))):
             return
         if not world().chaos_events.find_one({"_id": ev["_id"], "ts": ev["ts"]}):
             self._pending = None  # reset erased this attack; never attach its lesson to a reused CHX id
