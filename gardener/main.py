@@ -18,7 +18,7 @@ import time
 from common import config
 from common.db import col, now
 
-from . import pipeline
+from . import help as help_desk, pipeline
 from .pipeline import AGENT, ROLE
 
 log = logging.getLogger("gardener")
@@ -100,6 +100,8 @@ def serve() -> None:
     register()
     stop = threading.Event()
     threading.Thread(target=heartbeat, args=(stop,), daemon=True, name="heartbeat").start()
+    if help_desk.enabled():  # GARDENER_HELP=1: answer Sentinel #2 / Worker requests while upgrades run
+        threading.Thread(target=help_desk.serve, args=(stop,), daemon=True, name="help").start()
     pipeline.say("Gardener online in the workshop; watching upgrade_requests")
     stream = open_stream()  # opened before the first scan so nothing is missed in between
     try:

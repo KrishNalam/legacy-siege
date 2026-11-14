@@ -26,6 +26,7 @@ from pymongo.errors import DuplicateKeyError
 from common.db import col, next_id, now
 from common.events import say
 from common import comms
+from gardener import help as gardener_help
 
 from .. import leases, policy, recovery, schema, settings
 from ..harness import Agent, checkpointer, log
@@ -349,6 +350,12 @@ def run(agent: Agent) -> None:
             except Exception as e:
                 log(agent.id, f"schema sample error: {type(e).__name__}: {e}")
 
+        if gardener_help.enabled():  # Sentinel #2: push a remembered fix to the Scout that just took an incident
+            try:
+                push_known_fixes(agent, versions)
+            except Exception as e:
+                log(agent.id, f"known-fix push error: {type(e).__name__}: {e}")
+
         if time.monotonic() - last_slow > 3:
             last_slow = time.monotonic()
             note_repeated_problems(agent)
@@ -371,14 +378,17 @@ def run(agent: Agent) -> None:
 
 
 def note_repeated_problems(agent):
-    """Sentinel #2 mode: durable advisory notes only, independent of FAILURE_MEMORY."""
-    if not comms.enabled():
+    """Sentinel #2 mode: durable advisory notes, independent of FAILURE_MEMORY. With GARDENER_HELP=1 each
+    problem seen 3+ times is also handed to the Gardener as a real request (gardener.help answers it)."""
+    handoff = gardener_help.enabled()
+    if not (comms.enabled() or handoff):
         return
     groups = {}
     for inc in col('incidents').find({}, {'root_cause_system': 1, 'system': 1, 'fault_class': 1, 'symptoms': 1}):
         sig = lessons.problem_signature(inc)
         g = groups.setdefault('incident:' + sig, {'system': inc.get('root_cause_system') or inc.get('system'),
-            'problem': inc.get('fault_class') or '; '.join(inc.get('symptoms') or [])[:160], 'evidence': [], 'count': 0})
+            'problem': inc.get('fault_class') or '; '.join(inc.get('symptoms') or [])[:160], 'evidence': [], 'count': 0,
+            'fault_class': inc.get('fault_class') if inc.get('fault_class') not in (None, 'unknown') else None})
         g['count'] += 1
         g['evidence'].append(inc['_id'])
     for ls in col('lessons').find({'count': {'$gte': 3}, 'stale': False}):
@@ -394,3 +404,49 @@ def note_repeated_problems(agent):
         if result.upserted_id is not None:
             say(agent.id, 'gardener', 'gardener_note', text, system=g['system'])
             agent.think(text, kind='gardener_note', system=g['system'], pause=False)
+        if handoff and gardener_help.hand_off_repeat(agent.id, sig, g) is not None:
+            where = f" on {g['system']}" if g.get('system') and g['system'] not in str(g['problem']) else ''
+            agent.think(f"Sentinel #2 → Gardener: {g['problem']}{where} repeated {g['count']}× "
+                        f"({', '.join(g['evidence'][-4:])}).", kind='upgrade', system=g['system'], pause=False)
+
+
+def known_fix_for(symptoms: list[str], versions: dict) -> dict | None:
+    """The newest current playbook whose remembered symptom lines match these verbatim (symptom lines are
+    canonical and number-free, so the same fault reads the same way twice). One shared downstream line that
+    doesn't point at the playbook's root system is not enough."""
+    lines = set(symptoms or [])
+    if not lines:
+        return None
+    for pb in col("playbooks").find({"stale": False, "system": {"$ne": None}},
+                                    {"embedding": 0}).sort("verified_at", -1).limit(50):
+        seen, root = set(pb.get("symptoms") or []), pb["system"]
+        cur = versions.get(root)
+        # whole remembered cascade present, or an early part of it that already points at the remembered root
+        # (the Scout's confirm hop checks the fault class either way, so a near-miss costs one read)
+        early = lines <= seen and any(ln.split(" ", 1)[0] == root or f"blames {root}" in ln for ln in lines)
+        if seen and (seen <= lines or early) and (cur is None or pb.get("system_version") == cur) and pb.get("fix"):
+            return pb
+    return None
+
+
+def push_known_fixes(agent, versions: dict) -> None:
+    """Sentinel #2 cuts duplicate work: when a Scout has taken an incident whose symptoms match a fix the
+    hive already verified, push that fix onto the incident (known_fix) and the bus, so the Scout uses it instead
+    of rediscovering it. The Scout still confirms it with one read and the Guard still verifies every step."""
+    for inc in col("incidents").find({"active": True, "kind": {"$ne": "security"}, "owner": {"$ne": None},
+                                      "status": {"$in": ["claimed", "diagnosing"]}, "known_fix": {"$exists": False}},
+                                     {"symptoms": 1, "owner": 1}):
+        pb = known_fix_for(inc.get("symptoms"), versions)
+        if pb is None:
+            continue
+        fix = {"from": agent.id, "source": "playbook", "playbook_id": pb["_id"], "system": pb["system"],
+               "fault_class": pb.get("fault_class"), "system_version": pb.get("system_version"),
+               "learned_in": pb.get("incident"), "fix": pb.get("fix") or [], "to": inc["owner"], "ts": now()}
+        r = col("incidents").update_one({"_id": inc["_id"], "known_fix": {"$exists": False}}, {"$set": {"known_fix": fix}})
+        if not r.modified_count:
+            continue
+        say(agent.id, inc["owner"], "known_fix", {k: fix[k] for k in ("playbook_id", "system", "fault_class")},
+            incident=inc["_id"], system=pb["system"])
+        agent.think(f"Sentinel #2 → {inc['owner']}: {inc['_id']} shows the same symptoms as {pb.get('incident')} "
+                    f"({pb.get('fault_class')} on {pb['system']}); pushed known fix {pb['_id']} so nobody rediscovers it.",
+                    kind="recall", incident=inc["_id"], system=pb["system"], pause=False)

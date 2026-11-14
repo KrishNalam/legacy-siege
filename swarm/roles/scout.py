@@ -25,7 +25,7 @@ from common.db import col, next_id, now, txn
 from common.events import say as bus
 
 from .. import leases, policy, recall, recovery, scale, second_opinion, settings, steps
-
+from gardener import help as gardener_help
 from ..harness import Agent, checkpointer, main_loop, retrying
 from .. import lessons
 
@@ -169,12 +169,33 @@ def build_graph(agent: Agent):
         for line in skipped:
             say(inc_id, line, kind="recall", system=inc["system"], pause=False)
         if usable:
+            kf = (inc.get("known_fix") or {}) if gardener_help.enabled() else {}
+            agree = bool(kf) and (kf.get("playbook_id") == usable["_id"]
+                                  or (kf.get("system"), kf.get("fault_class")) == (usable["system"], usable["fault_class"]))
+            if agree:
+                fenced(config, inc_id, {"$set": {"known_fix.used": True}})
             say(inc_id, f"Recall hit {usable['_id']} (score {usable['score']:.2f}, {usable['system']} "
-                        f"v{usable['system_version']}): {usable['fault_class']} — skipping the chain walk.",
+                        f"v{usable['system_version']}): {usable['fault_class']} — skipping the chain walk"
+                        + (" (Sentinel #2 pushed the same fix)." if agree else "."),
                 kind="recall", system=usable["system"])
             return {"hit": {"playbook_id": usable["_id"], "system": usable["system"],
                             "fault_class": usable["fault_class"], "fix": usable.get("fix") or []},
                     "diag_started": time.time(), "current": usable["system"]}
+        pushed = (inc.get("known_fix") or {}) if gardener_help.enabled() else {}
+        if pushed.get("playbook_id"):  # Sentinel #2 pushed a verified fix for these exact symptoms
+            pb = col("playbooks").find_one({"_id": pushed["playbook_id"], "stale": False}, {"embedding": 0})
+            try:
+                cur = sysc.version(pushed["system"])
+            except Exception:
+                cur = None
+            if pb and pb.get("system_version") == cur:
+                say(inc_id, f"No vector hit, but Sentinel #2 pushed {pb['_id']} ({pb.get('fault_class')} on "
+                            f"{pb['system']}, from {pb.get('incident')}) — using it instead of walking the chain.",
+                    kind="recall", system=pb["system"])
+                fenced(config, inc_id, {"$set": {"known_fix.used": True}})
+                return {"hit": {"playbook_id": pb["_id"], "system": pb["system"], "fault_class": pb.get("fault_class"),
+                                "fix": pb.get("fix") or [], "via": "sentinel-2"},
+                        "diag_started": time.time(), "current": pb["system"]}
         if summary:
             best = summary[0]
             why = (f"best {best['playbook_id']} scored {best['score']:.2f}" if best["score"] < shared.RECALL_THRESHOLD
