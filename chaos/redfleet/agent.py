@@ -169,6 +169,16 @@ class Attacker:
             if order:
                 commander.report_order(self.p.id, order, None)
             return {"event": None}
+        if ev.get("status") in ("hold", "deny"):   # RUNNER_DECIDES=1: the Runner held or denied this strike
+            think(self.p.id, core.ROLE, f"{self.p.name}: the Runner {ev['status']}s my {s['fault']}: "
+                                        f"{(ev.get('result') or {}).get('error', '')[len('Runner ' + ev['status'] + ': '):]}",
+                  kind="reject")
+            if order and ev["status"] == "hold":   # keep the campaign step: retry next tick (the 90 s step timeout still applies)
+                world().red_agents.update_one({"_id": self.p.id, "order.campaign": order["campaign"],
+                                               "order.step": order["step"]}, {"$set": {"order.status": "assigned"}})
+            elif order:
+                commander.report_order(self.p.id, order, None)
+            return {"event": None}
         if order:
             commander.report_order(self.p.id, order, ev)
         return {"event": ev}

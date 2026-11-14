@@ -21,7 +21,7 @@ from pymongo import DESCENDING, ReturnDocument
 from common import config
 from common.db import next_id, now, swarm, world
 
-from . import faults, scenarios
+from . import decider, faults, scenarios
 
 log = logging.getLogger("chaos.runner")
 
@@ -105,6 +105,12 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
     run = _runs().find_one({"_id": run_id}) if run_id else current_run()
     extra = extra or {}
     red = str(extra.get("by") or "").startswith("red-")
+    if red and decider.enabled() and not extra.get("runner_decision"):   # RUNNER_DECIDES=1: admit every Red fire
+        planner = (extra.get("red") or {}).get("campaign") and "commander"
+        decision = decider.admit(f.name, target, params, extra["by"], source=planner or "striker")
+        if decision["verdict"] != "execute":
+            return decider.refused(decision, f.name, target, params)
+        extra = {**extra, "runner_decision": decision["_id"]}
     source = "red-fleet" if red else ("manual" if manual else "scenario")
     who = who or extra.get("by") or ("beekeeper" if manual else f"scenario:{(run or {}).get('scenario') or '?'}")
     why = why or ((extra.get("red") or {}).get("reason") if red else None) or f.tests
@@ -117,6 +123,8 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
     }
     event = {**{k: v for k, v in extra.items() if k not in event}, **event}
     _events().insert_one(event)
+    if event.get("runner_decision"):
+        decider.link(event["runner_decision"], event["_id"])
     try:
         result = faults.execute(f, target, params)
     except Exception as e:  # never lose the event record because a fault blew up
@@ -160,6 +168,8 @@ def _play(run_id: str, scn: dict, stop: threading.Event, on_event=None) -> None:
                 break
             if stop.is_set():
                 break
+            if decider.enabled():
+                decider.seeded_step(step, scn["_id"])
             ev = fire(step["fault"], step["target"], step.get("params"), manual=False, run_id=run_id,
                       who=f"scenario:{scn['_id']}", why=step.get("why"))
             _runs().update_one({"_id": run_id}, {"$inc": {"steps_fired": 1}})
