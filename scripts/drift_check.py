@@ -11,6 +11,9 @@ Separate from scripts.demo_check on purpose: the four scored beats are untouched
   d. swarm.schema_mappings holds balance -> acct_bal at v2; the guard says "mapping learned v2"
   e. incident resolved, portal up, playbook saved; no Gardener upgrade request for schema_drift
   f. (default) a second vendor patch acct_bal -> ledger_bal is diffed against the LEARNED schema -> v3
+  g. (default) next round, the same balance -> acct_bal patch again: $vectorSearch recall (1 hop) and the mapping
+     comes from MongoDB memory (playbook), no Claude call
+With AI_SECOND_OPINION=1 + a key on the stack, an extra row checks incident.ai (kind schema_mapping, Guard verdict).
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ import argparse
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -80,6 +84,12 @@ class Drift(Demo):
                    f"schema_mappings {MID}: source={m.get('source')} v{m.get('version')} "
                    f"history={len(m.get('history') or [])}; war room line: {(said or {}).get('text', 'MISSING')[:80]}")
         health = {s: self.sys_http.get(f"/{s}/health").json().get("status") for s in ("unix", "portal")}
+        ai = (self.s.incidents.find_one({"_id": inc_id}, {"ai": 1}) or {}).get("ai")
+        if ai:
+            self.r.add(f"v{version} ai", ai.get("kind") == "schema_mapping"
+                       and (ai.get("guard") or {}).get("verdict") == "verified",
+                       f"proposed_by={ai.get('proposed_by')} model={ai.get('model')} "
+                       f"verdict={(ai.get('verdicts') or [{}])[0].get('verdict')} guard={(ai.get('guard') or {}).get('reason')}")
         upg = self.s.upgrade_requests.count_documents({"fault_class": "schema_drift"})
         return self.r.add(f"v{version} e. resolved", inc.get("status") == "resolved" and bool(inc.get("playbook_id"))
                           and all(v == "up" for v in health.values()) and upg == 0,
@@ -87,12 +97,40 @@ class Drift(Demo):
                           f"{inc.get('playbook_id')}, health {health}, upgrade requests {upg}", secs)
 
 
+def _repeat(self, timeout: float) -> bool:
+    """Next round (estate back to v1, mappings cleared, playbooks kept), same rename again."""
+    log("POST /api/reset {mode: next_round}")
+    self.post("/api/reset", {"mode": "next_round"})
+    if not self.wait_good_sample():
+        return False
+    t0, started = time.monotonic(), datetime.now(timezone.utc)
+    self.post("/api/scenario/bank-drift")
+    inc, secs = self.wait("repeat", lambda: self.s.incidents.find_one(
+        {"fault_class": "schema_drift", "active": False, "opened_at": {"$gt": started}}), timeout)
+    if not inc:
+        return self.r.add("repeat g. memory", False, f"no resolved repeat incident in {timeout:.0f}s",
+                          time.monotonic() - t0)
+    said = self.s.tasks.find_one({"incident": inc["_id"], "kind": "diagnose",
+                                  "findings.params.proposed_by": "memory"}, {"findings.facts": 1})
+    said = said and {"text": next((f for f in said["findings"]["facts"] if f.startswith("memory:")), "memory")}
+    m = self.s.schema_mappings.find_one({"_id": MID}) or {}
+    return self.r.add("repeat g. memory", inc["status"] == "resolved" and (inc.get("recall") or {}).get("used")
+                      and len(inc.get("diagnosis_path") or []) == 1 and bool(said) and m.get("source") == "acct_bal",
+                      f"{inc['_id']}: recall used={(inc.get('recall') or {}).get('used')}, path "
+                      f"{'→'.join(inc.get('diagnosis_path') or [])}, TTR {(inc.get('metrics') or {}).get('ttr_s')}s, "
+                      f"mapping v{m.get('version')} {m.get('source')}; {(said or {}).get('text', 'no memory line')[:70]}",
+                      time.monotonic() - t0)
+
+
+Drift.repeat = _repeat
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default=os.environ.get("WARROOM_URL", f"http://127.0.0.1:{config.WARROOM_PORT}"))
     ap.add_argument("--no-reset", action="store_true")
     ap.add_argument("--keep", action="store_true", help="don't full-reset at the end")
-    ap.add_argument("--once", action="store_true", help="skip the second drift (v3)")
+    ap.add_argument("--once", action="store_true", help="skip the second drift (v3) and the repeat round")
     ap.add_argument("--timeout", type=float, default=150)
     a = ap.parse_args()
     rep = Report()
@@ -103,8 +141,10 @@ def main() -> int:
             ok = d.drift(lambda: d.post("/api/scenario/bank-drift"), "balance", "acct_bal", 2, a.timeout)
             if ok and not a.once:
                 time.sleep(12)  # let the sentinel re-sample the healthy v2 feed
-                d.drift(lambda: d.post("/api/chaos/schema_drift", {"target": "unix", "params": {}}),
-                        "acct_bal", "ledger_bal", 3, a.timeout)
+                ok = d.drift(lambda: d.post("/api/chaos/schema_drift", {"target": "unix", "params": {}}),
+                             "acct_bal", "ledger_bal", 3, a.timeout)
+            if ok and not a.once:
+                d.repeat(a.timeout)
         if not a.keep:
             log("POST /api/reset {mode: full}")
             d.post("/api/reset", {"mode": "full"})

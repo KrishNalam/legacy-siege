@@ -263,5 +263,14 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     "unix renamed X → Y · mapping learned vN". The resolved incident's playbook (with embedding) is the memory that
     a repeat drift recalls via `$vectorSearch`. `schema_drift` is excluded from the sentinel's Gardener upgrade
     requests (the mapping is the adaptation).
+  - Who proposes the mapping (`findings.params.proposed_by`): **memory** (a non-stale schema_drift playbook already maps
+    to one of the new fields: reused, no Claude call) → **claude** (key + `AI_SECOND_OPINION=1`: Claude names the field
+    that means the same thing, `common.llm.complete`, `SCHEMA_AI_TIMEOUT_S` budget (6 s) in a side thread; the rules
+    pre-check it, field exists + numeric + values line up, and overrule it otherwise) → **rules** (no key/flag, timeout,
+    error, overruled: best type + value match). With the flag on, the worker writes `incident.ai` in the shared shape
+    with `kind:"schema_mapping"` (+ `proposed_by`, `guard:{verdict, rule, reason, version}` stamped by the Guard after
+    the read-back). The Guard narrates the chain: "rules: no playbook/op for unknown field acct_bal → Claude proposed
+    balance→acct_bal → Guard verified (3/3 values match) → mapping v2 stored". W2: `second_opinion` should skip an
+    incident that already has `ai.kind == "schema_mapping"`.
   - War room watches `swarm.schema_mappings` (caption + "MAPPING LEARNED" stamp on unix).
-    Rehearsal: `python -m scripts.drift_check` (12 checks, separate from demo_check).
+    Rehearsal: `python -m scripts.drift_check` (14 checks incl. the repeat-from-memory round; separate from demo_check).
