@@ -141,11 +141,12 @@ def inc(db, monkeypatch):
     col("incidents").delete_many({"_id": "INC-0099"})
 
 
-def wait_ai(status, timeout=5):
+def wait_ai(status, timeout=5, need=None):
     t = time.monotonic() + timeout
     while time.monotonic() < t:
         d = col("incidents").find_one({"_id": "INC-0099"}) or {}
-        if (d.get("ai") or {}).get("status") == status:
+        ai = d.get("ai") or {}
+        if ai.get("status") == status and (need is None or need in ai):  # _finish writes ai.tally just after ai
             return d["ai"]
         time.sleep(0.05)
     raise AssertionError(f"ai.status never became {status}: {d.get('ai')}")
@@ -189,7 +190,7 @@ def test_done_path_writes_verdict_and_thought(inc, monkeypatch):
     monkeypatch.setattr(so.config, "AI_SECOND_OPINION", True)
     monkeypatch.setattr(so.llm, "guarded_json", fake)
     assert so.start("scout-1", doc, state, PLAN, "mainframe", "batch_abort")
-    ai = wait_ai("done")
+    ai = wait_ai("done", need="tally")
     assert ai["kind"] == "second_opinion" and ai["root_agrees"] and not ai["agrees_with_policy"]
     assert len(ai["verdicts"]) == len(ai["proposed_ops"]) == 5
     assert [v["op"] for v in ai["verdicts"] if v["verdict"] == "overruled"] == ["flush_sessions"]
