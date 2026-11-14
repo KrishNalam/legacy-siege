@@ -89,6 +89,8 @@ def build_graph(agent: Agent):
             except Exception:
                 pass
         agent.think(narrate_findings(f), incident=inc_id, system=sys, pause=task.get("mode") != "confirm")
+        for doubt in diagnosis.log_doubts(sys, h, logs):  # planted log blame / instructions: called out, not used
+            agent.think(doubt, incident=inc_id, system=sys, kind="reject", pause=False)
         return {"findings": f}
 
     def report(state: WorkerState, config) -> dict:
