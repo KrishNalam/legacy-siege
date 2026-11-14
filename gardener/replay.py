@@ -126,7 +126,74 @@ def app_replay() -> bool:
         return ok
 
 
+def _faults(system: str) -> list[str]:
+    from common.db import col
+
+    return [f.get("fault") for f in (col("systems").find_one({"_id": system}) or {}).get("faults_active") or []]
+
+
+def tool_replay(fault: str, system: str, ops: list[dict]) -> bool:
+    """Tool upgrade test: fire `fault` on an isolated estate, run the tool's ops, read back.
+
+    Passes only if the fault was really active before the ops and is resolved after them, the system reads
+    back healthy and every op was accepted. `$record_id` placeholders bind to the poison records the
+    mainframe reports at that moment (as a Scout binds them from today's diagnosis)."""
+    from fastapi.testclient import TestClient
+
+    from systems.app import app
+
+    with TestClient(app) as c:
+        log(f"tool: reset -> {c.post('/_admin/reset').status_code}")
+        r = c.post(f"/{system}/_chaos/{fault}", json={"params": {}})
+        log(f"tool: fire {fault} on {system} -> {r.status_code} {r.text[:160]}")
+        if r.status_code >= 400:
+            return False
+        c.post("/_admin/tick", params={"n": 2})
+        before = _faults(system)
+        log(f"tool: active faults before = {before}; health = {c.get(f'/{system}/health').json().get('status')}")
+        if fault not in before:
+            log("tool replay: FAIL, the fault never became active, nothing to prove")
+            return False
+        poison = (c.get("/mainframe/state").json().get("batch") or {}).get("poison_records") or []
+        ok = True
+        for i, op in enumerate(ops, 1):
+            targets = [dict(op["params"], record_id=rec) for rec in poison] \
+                if op["params"].get("record_id") == "$record_id" else [op["params"]]
+            for params in targets:
+                r = c.post(f"/{op['system']}/ops/{op['op']}",
+                           json={"action_id": f"GARDENER-TOOL-{int(time.time())}-{i}-{len(params)}", "params": params})
+                body = r.json() if r.content else {}
+                good = r.status_code < 400 and body.get("accepted") is True
+                ok &= good
+                log(f"  {'ok ' if good else 'BAD'} {op['system']}.{op['op']} {params} -> {r.status_code} "
+                    f"{str(body.get('message') or body)[:120]}")
+            c.post("/_admin/tick", params={"n": 1})
+        c.post("/_admin/tick", params={"n": 3})
+        after, health = _faults(system), c.get(f"/{system}/health").json().get("status")
+        log(f"tool: active faults after = {after}; health = {health}")
+        ok &= fault not in after and health == "up"
+        log(f"tool replay: {'PASS' if ok else 'FAIL'}")
+        return ok
+
+
+def main_tool(argv: list[str]) -> int:
+    """`python -m gardener.replay --tool <fault> <system> <ops.json>`"""
+    fault, system, ops_path = argv[0], argv[1], argv[2]
+    sys.path.insert(0, os.getcwd())
+    result = {"tool": None}
+    try:
+        result["tool"] = tool_replay(fault, system, json.loads(Path(ops_path).read_text()))
+    except Exception:
+        log(traceback.format_exc(limit=6))
+        result["error"] = True
+    result["passed"] = bool(result["tool"]) and "error" not in result
+    log("REPLAY_RESULT " + json.dumps(result))
+    return 0 if result["passed"] else 1
+
+
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "--tool":
+        return main_tool(sys.argv[2:])
     system = sys.argv[1] if len(sys.argv) > 1 else "mainframe"
     sys.path.insert(0, os.getcwd())  # the sandbox's `systems` must win over the repo copy
     result = {"unit": None, "app": None}

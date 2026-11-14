@@ -110,6 +110,30 @@ def run_replay(sandbox: Path, system: str) -> tuple[bool, str]:
     return code == 0, f"$ regression replay (batch_abort, WORLD_DB={REPLAY_WORLD_DB})  (exit {code})\n{out}"
 
 
+def run_tool_tests(fault: str, system: str, ops: list[dict], systems_dir: Path) -> dict:
+    """Sandbox replay of a tool upgrade: an unchanged copy of the estate, the fault, then the tool's ops."""
+    import json
+
+    global SANDBOX_URI
+    SANDBOX_URI = _resolve_sandbox()
+    tmp = make_sandbox(systems_dir, system, (systems_dir / f"{system}.py").read_text())
+    try:
+        sandbox = Path(tmp.name)
+        (sandbox / "tool_ops.json").write_text(json.dumps(ops))
+        code, out = _run([sys.executable, "-m", "gardener.replay", "--tool", fault, system, "tool_ops.json"],
+                         sandbox, REPLAY_TIMEOUT_S)
+        out = f"$ tool replay ({fault} on {system}, WORLD_DB={REPLAY_WORLD_DB})  (exit {code})\n{out}"
+    finally:
+        tmp.cleanup()
+        try:
+            drop_replay_dbs()
+        except Exception:  # pragma: no cover - cleanup is best effort
+            pass
+    ok = code == 0
+    return {"passed": ok, "summary": f"tool replay: {'pass' if ok else _summary(out)}", "pytest_passed": None,
+            "replay_passed": ok, "sandbox": sandbox_label(), "output": _tail(out)}
+
+
 def sandbox_label() -> str:
     """Where the sandbox ran, for the upgrade doc / war room (never includes credentials)."""
     if not SANDBOX_URI:

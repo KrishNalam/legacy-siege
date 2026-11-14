@@ -109,8 +109,7 @@ def answer_repeat(req: dict) -> dict:
         "gardener_ack": {"request": req["_id"], "at": now()}}})
     rem = _remediation(sys, fc)
     if rem is None:
-        return {"kind": "none", "upgrade": None,
-                "text": f"noted; no vetted code remediation covers {req.get('problem') or fc} on {sys} yet"}
+        return _tool_upgrade(req)
     existing = col("upgrade_requests").find_one({"system": sys, "fault_class": fc})
     if existing is None:
         uid = next_id("UPG")
@@ -137,6 +136,45 @@ def answer_repeat(req: dict) -> dict:
     st = col("upgrade_requests").find_one({"_id": existing["_id"]}, {"status": 1})["status"]
     return {"kind": "upgrade", "upgrade": existing["_id"], "remediation": rem.NAME,
             "text": f"noted; {existing['_id']} already covers it (status {st})"}
+
+
+def _tool_upgrade(req: dict) -> dict:
+    """No code remediation covers the repeat: ship an accepted platform tool through the upgrade pipeline."""
+    from . import tools  # noqa: PLC0415
+    sys, fc, n = req.get("system"), req.get("fault_class"), req.get("count")
+    tool = tools.accepted(sys, fc)
+    if tool is None:
+        return {"kind": "none", "upgrade": None,
+                "text": f"noted; no vetted code remediation or accepted tool covers {req.get('problem') or fc} "
+                        f"on {sys} yet"}
+    existing = col("upgrade_requests").find_one({"system": sys, "fault_class": fc, "tool_id": tool["_id"]})
+    if existing is None:
+        uid = next_id("UPG")
+        col("upgrade_requests").update_one({"system": sys, "fault_class": fc, "tool_id": tool["_id"]}, {
+            "$setOnInsert": {
+                "_id": uid, "system": sys, "weakness": f"{fc} on {sys} repeated {n}x (Sentinel #2)",
+                "fault_class": fc, "remediation_kind": "tool", "tool_id": tool["_id"],
+                "evidence": req.get("evidence") or [], "status": "requested", "diff": None, "tests": None,
+                "approval_id": None, "version_before": _version(sys), "version_after": None, "prove": None,
+                "requested_by": f"{AGENT} (from {req.get('from')})", "gardener_request": req["_id"],
+                "ts": now()}}, upsert=True)
+        existing = col("upgrade_requests").find_one({"system": sys, "fault_class": fc, "tool_id": tool["_id"]})
+        if existing["_id"] == uid:
+            return {"kind": "upgrade", "upgrade": uid, "remediation": f"tool:{tool['name']}",
+                    "text": f"noted; no code fix for {fc}, so started {uid} with tool {tool['name']}: "
+                            f"sandbox replay, then approval, then adopt it as the standing recovery"}
+    if existing["status"] == "rejected":
+        from . import pipeline  # noqa: PLC0415
+        try:
+            pipeline.requeue(existing["_id"])
+        except pipeline.StepError:
+            pass
+        else:
+            return {"kind": "upgrade", "upgrade": existing["_id"], "remediation": f"tool:{tool['name']}",
+                    "text": f"noted; re-queued {existing['_id']} (tool {tool['name']}) after "
+                            f"{existing.get('reason') or 'a rejection'}"}
+    return {"kind": "upgrade", "upgrade": existing["_id"], "remediation": f"tool:{tool['name']}",
+            "text": f"noted; {existing['_id']} (tool {tool['name']}) already covers it (status {existing['status']})"}
 
 
 def answer_help(req: dict) -> dict:
@@ -167,7 +205,17 @@ def answer_help(req: dict) -> dict:
         return {"kind": "runbook", "ref": "lying-ack", "advice": {"fast": True},
                 "text": f"{sys} ACKed {op} {lies}x without applying it: a lying ACK, not a wrong fix. "
                         f"Resend the same op at once under a new action id; only the Guard's read-back counts"}
-    # 4. a proven upgrade / vetted remediation for this system (context, nothing to change in the step)
+    # 4. an accepted platform tool that runs this op on this system (vetted params; the Guard still checks)
+    from . import tools  # noqa: PLC0415
+    tool = tools.for_op(sys, op)
+    if tool is not None:
+        tparams = next((o.get("params") for o in tool["ops"] if o.get("system") == sys and o.get("op") == op), None)
+        advice = {"params": tparams} if tparams and tparams != params and "$" not in str(tparams) else {}
+        return {"kind": "tool", "ref": tool["_id"], "advice": advice,
+                "text": f"tool {tool['name']} (vetted, {tool.get('successes', 0)} verified runs) does {op} on {sys}"
+                        + (f" with {tparams}; use those params" if advice else "; same params as your step, "
+                           "retry as planned and let the Guard read back")}
+    # 5. a proven upgrade / vetted remediation for this system (context, nothing to change in the step)
     upg = col("upgrade_requests").find_one({"system": sys, "status": "proven", "reverted_at": {"$exists": False}})
     if upg:
         return {"kind": "upgrade", "ref": upg["_id"], "advice": {},
@@ -189,13 +237,19 @@ def handle(req: dict) -> dict | None:
     if doc is None:
         return None
     try:
-        ans = answer_repeat(doc) if doc["kind"] == "repeat" else answer_help(doc)
+        if doc["kind"] == "tool":
+            from . import tools  # noqa: PLC0415
+            ans = tools.receive(doc)
+        else:
+            ans = answer_repeat(doc) if doc["kind"] == "repeat" else answer_help(doc)
     except Exception as e:  # never leave a Worker waiting on a crashed answer
         log.exception("gardener request %s failed", doc["_id"])
         ans = {"kind": "none", "advice": {}, "text": f"none (gardener error: {type(e).__name__})"}
     col("gardener_requests").update_one({"_id": doc["_id"]}, {"$set": {
         "status": "answered", "answer": ans, "answered_at": now()}})
-    if doc["kind"] == "repeat":
+    if doc["kind"] == "tool":
+        _say(f"Gardener ← {doc.get('from')}: {ans['text']}.", doc.get("system"))
+    elif doc["kind"] == "repeat":
         _say(f"Gardener ← Sentinel #2: {doc.get('problem')} repeated {doc.get('count')}× — {ans['text']}.",
              doc.get("system"))
     else:
