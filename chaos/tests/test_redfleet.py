@@ -14,6 +14,11 @@ from chaos.redfleet.agent import Attacker
 from common import config
 from common.db import now, swarm, world
 
+@pytest.fixture(autouse=True)
+def fleet_switch(monkeypatch):
+    monkeypatch.setenv("RED_FLEET", "1")
+
+
 P = PERSONAS
 
 
@@ -204,6 +209,7 @@ def _open_night(scenario="free-play"):
 
 
 def _no_llm(monkeypatch):
+    monkeypatch.setenv("RED_FLEET", "1")
     from chaos.redfleet import agent as agent_mod
     monkeypatch.setattr(agent_mod.llm, "llm_available", lambda: False)
 

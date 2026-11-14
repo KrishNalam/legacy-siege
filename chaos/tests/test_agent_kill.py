@@ -194,4 +194,33 @@ def test_freeze_guardian_thaws_even_if_attacker_dies(spawn, monkeypatch):
         if attacker.poll() is None:
             attacker.kill()
         attacker.wait(5)
-        faults._thaw(p.pid, faults._proc_start_epoch(p.pid))
+        faults._thaw(p.pid, faults._proc_start_ticks(p.pid))
+
+
+def test_thaw_identity_survives_wall_clock_changes(spawn, monkeypatch):
+    import os
+    import signal
+    from chaos import faults
+    p = spawn('worker-mainframe-1', phase='step_sent')
+    ticks = faults._proc_start_ticks(p.pid)
+    assert ticks is not None
+    monkeypatch.setattr(faults, '_proc_start_epoch', lambda pid: -999999)
+    os.kill(p.pid, signal.SIGSTOP)
+    try:
+        assert not faults._thaw(p.pid, ticks + 1)  # recycled PID must not match
+        assert faults._thaw(p.pid, ticks)
+    finally:
+        os.kill(p.pid, signal.SIGCONT)
+
+
+def test_reset_continues_cleanup_after_memory_failure(monkeypatch):
+    from chaos import faults
+    calls = []
+    monkeypatch.setattr(faults, 'thaw_overdue', lambda **kw: calls.append('thaw'))
+    monkeypatch.setattr(faults, 'cancel_pending_hunts', lambda: calls.append('hunts'))
+    def fail():
+        calls.append('memory')
+        raise RuntimeError('Mongo unavailable')
+    monkeypatch.setattr(faults, 'clear_planted_memory', fail)
+    assert runner.cancel() == []
+    assert calls == ['thaw', 'hunts', 'memory']

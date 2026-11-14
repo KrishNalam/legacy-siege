@@ -49,7 +49,7 @@ export class Panels {
     const faults = {
       batch_abort: ["mainframe"], lying_success: ["mainframe", "unix", "portal"], slow_apply: ["mainframe", "unix", "portal"],
       disk_fill: ["unix"], cron_stop: ["unix"], session_leak: ["portal"], sqli_exploit: ["portal"], config_exploit: ["unix"],
-      schema_drift: ["unix"], false_log: ["mainframe", "unix", "portal"], credential_exploit: ["mainframe"],
+      schema_drift: ["unix"],
     };
     const fs = $("#fault-sel"), tsel = $("#target-sel");
     fs.innerHTML = Object.keys(faults).map((f) => `<option>${f}</option>`).join("");
