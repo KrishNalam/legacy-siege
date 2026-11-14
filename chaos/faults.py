@@ -470,7 +470,8 @@ def poison_memory(params: dict) -> dict:
       provenance check sees the fix was never Guard-verified in its source incident and rejects it.
 
     The defence needs SWARM_RECOVERY=1 + FAILURE_MEMORY=1. ``params``: ``playbook`` (victim id) or ``shape``.
-    Never edits the genuine repair; any reset deletes the plant and un-hides the original."""
+    Never edits the genuine repair. A next-round reset keeps the plant (it is the Hive's memory); a full reset (or
+    ``runner.cancel()`` without ``keep_memory``) deletes it and un-hides the original."""
     if os.environ.get("CHAOS_POISON_MEMORY", "").strip().lower() not in ("1", "true", "yes", "on"):
         return {"ok": False, "error": "memory poison switched off"}
     import copy
