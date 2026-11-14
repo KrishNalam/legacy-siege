@@ -716,7 +716,7 @@ const BOXR = {
 const FULL = { x: 0, y: 84, w: 1600, h: 760 };
 const ZOOMS = ["overview", "chaos", "legacy", "bees", "gardener"];
 const KEYZ = { 1: "chaos", 2: "legacy", 3: "bees", 4: "gardener" };
-const TITLE = { overview: "EXHIBIT A: THE WHOLE NIGHT", chaos: "EXHIBIT A.1: INSIDE CHAOS MONKEY", legacy: "EXHIBIT A.2: INSIDE THE LEGACY SYSTEMS", bees: "EXHIBIT A.3: INSIDE THE BEES", gardener: "EXHIBIT A.4: INSIDE THE GARDENER" };
+const TITLE = { overview: "", chaos: "EXHIBIT A.1: INSIDE CHAOS MONKEY", legacy: "EXHIBIT A.2: INSIDE THE LEGACY SYSTEMS", bees: "EXHIBIT A.3: INSIDE THE BEES", gardener: "EXHIBIT A.4: INSIDE THE GARDENER" };
 let zoom = (() => { try { const z = new URLSearchParams(location.search).get("zoom"); return ZOOMS.includes(z) ? z : "overview"; } catch { return "overview"; } })();
 let zooming = false;
 // transform that maps the FULL exhibit onto box b (and its inverse)
@@ -839,7 +839,6 @@ function renderOverview() {
   const r = rounds(), liveR2 = [...state.incidents.values()].find((i) => i.active && i.round === 2);
   const t1 = r[1]?.ttr, t2 = r[2]?.ttr ?? (liveR2 ? (serverNow() - ts(liveR2.opened_at)) / 1000 : null);
   const mx = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / mx) * 150);
-  const look = (n) => `<div class="look"><span>${n}</span>LOOK INSIDE +</div>`;
   const ETAF = { chaos: ["chaos"], legacy: ["bees", fixing], bees: ["bees"], gardener: ["gardener"] };
   const liveLine = (k, html) => `<div class="nowl"><span class="lk">NOW</span>${html} <span class="eta" data-eta="${k}">${etaChip(...ETAF[k])}</span></div>`; // W24 progress/ETA
   const B = BOXR;
@@ -857,8 +856,7 @@ function renderOverview() {
     <div class="pers">${["SABOTEUR", "LIAR", "ASSASSIN", "HACKER", "DRIFTER", "MEMORY"].map((n) => `<span class="${struck.has(n) ? "on" : ""}">${n}</span>`).join("")}</div>
     <div class="bl-k">ATTACK <span class="ar">→</span> DEFENCE</div>
     ${ds.length ? ds.slice(-2).map((d) => `<div class="duo"><div><span class="pn">${esc(d.who)}</span> ${esc(d.atk)}</div><div class="def ${d.def.c}">↳ ${esc(d.def.t)}</div></div>`).join("") : '<div class="bl dim">—</div>'}
-    ${liveLine("chaos", lastDuel ? `<span class="r">${esc(lastDuel.who)}</span> ${esc(lastDuel.atk)}` : '<span class="dim">READY</span>')}
-    ${look(1)}</div>`;
+    ${liveLine("chaos", lastDuel ? `<span class="r">${esc(lastDuel.who)}</span> ${esc(lastDuel.atk)}` : '<span class="dim">READY</span>')}</div>`;
 
   // LEGACY SYSTEMS
   const cascade = live ? (live.root_cause_system ? `REAL CAUSE: ${sn(live.root_cause_system)}` : `${sn(live.system)} IN TROUBLE · TRACING…`) : inc?.status === "resolved" ? "ALL GREEN AGAIN" : "ALL UP";
@@ -867,8 +865,7 @@ function renderOverview() {
     <div class="chainL">${legacyChain(inc, lieSys)}</div>
     <div class="bl-k" style="margin-top:22px">FIXES${steps.length ? ` · ${steps.filter((s) => s.status === "verified").length}/${steps.length} VERIFIED` : ""}</div>
     <div class="bl">${steps.length ? steps.slice(0, 4).map((s) => `${tickMark(s)} ${U(sop(s.op))}${(s.attempts || []).length > 1 ? ' <b class="r">LIED</b>' : ""}`).join("&nbsp;&nbsp;") : inc?.status === "resolved" ? '<span class="g">ALL FIXED ✓</span>' : '<span class="dim">—</span>'}</div>
-    ${liveLine("legacy", esc(cascade.toUpperCase()))}
-    ${look(2)}</div>`;
+    ${liveLine("legacy", esc(cascade.toUpperCase()))}</div>`;
 
   // THE BEES
   const bees = `<div class="big bees ${live || working ? "hot" : ""}" data-zoom="bees" style="${pos(B.bees)}">
@@ -877,16 +874,14 @@ function renderOverview() {
     <div class="cnt"><span class="${rejects.length ? "r" : ""} ${lieFresh ? "flash" : ""}">LIES <b>${rejects.length}</b></span><span class="${dead ? "r" : ""} ${killFresh ? "flash" : ""}">KILLED <b>${dead}</b></span><span class="${hos ? "a" : ""}">TAKEOVERS <b>${hos}</b></span></div>
     <div class="ttf"><span class="dim">FIX TIME</span><span>N1 ${t1 != null ? secs(t1).toUpperCase() : "—"}</span>${t1 != null ? `<i style="width:${bw(t1)}px"></i>` : ""}</div>
     <div class="ttf"><span class="dim" style="visibility:hidden">FIX TIME</span><span>N2 ${t2 != null ? secs(t2).toUpperCase() : "—"}</span>${t2 != null ? `<i class="g2" style="width:${bw(t2)}px"></i>` : ""}${r[1] && r[2] && r[2].ttr < r[1].ttr ? `<span class="x">${(r[1].ttr / r[2].ttr).toFixed(1)}×</span>` : ""}</div>
-    ${liveLine("bees", beeNow(agents, live))}
-    ${look(3)}</div>`;
+    ${liveLine("bees", beeNow(agents, live))}</div>`;
 
   // THE GARDENER
   const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
   const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="${pos(B.gardener)}">
     <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">OUTSIDE THE SWARM</span></div>
     <div class="gsteps">${["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"].map((n, i) => `<span class="${u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "cur" : ""}">${n}</span>`).join("")}</div>
-    ${liveLine("gardener", u ? (u.status === "proven" ? `<span class="g">${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}: ATTACK REPLAYED, NOTHING BROKE</span>` : esc((gThought ? (translate(gThought)?.text || "").replace(/<[^>]+>/g, "") : String(u.status)).toUpperCase())) : '<span class="dim">WAITING FOR A REPEAT</span>')}
-    <div class="look" style="height:24px;line-height:22px"><span>4</span>LOOK INSIDE +</div></div>`;
+    ${liveLine("gardener", u ? (u.status === "proven" ? `<span class="g">${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}: ATTACK REPLAYED, NOTHING BROKE</span>` : esc((gThought ? (translate(gThought)?.text || "").replace(/<[^>]+>/g, "") : String(u.status)).toUpperCase())) : '<span class="dim">WAITING FOR A REPEAT</span>')}</div>`;
 
   patch($("#ov-nodes"), [{ k: "chaos", html: chaos }, { k: "legacy", html: legacy }, { k: "bees", html: bees }, { k: "gard", html: gard }]);
 
@@ -1122,7 +1117,7 @@ function renderGardener() {
 function renderDiagram() {
   const fit = $("#fit"), fr = $("#frame");
   const s = Math.min(fit.clientWidth / FW, fit.clientHeight / FH);
-  fr.style.transform = `translate(${Math.max(0, (fit.clientWidth - FW * s) / 2)}px, ${Math.max(0, (fit.clientHeight - FH * s) / 2)}px) scale(${s})`;
+  fr.style.transform = `translate(${Math.max(0, (fit.clientWidth - FW * s) / 2)}px, 0px) scale(${s})`;
   const rid = runId();
   $("#ex-title").textContent = TITLE[zoom];
   $("#z-back").hidden = zoom === "overview";
@@ -1245,7 +1240,7 @@ on("change", (m, prev) => {
   if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") refreshScore();
   render();
 });
-on("status", (s) => { const c = $("#conn"); c.classList.toggle("live", s === "live"); c.classList.toggle("down", s !== "live"); $("#conn-txt").textContent = s === "live" ? "" : "RECONNECTING…"; render(); });
+on("status", () => render()); // reconnects silently (store.js); no on-screen connection dot
 on("tick", render);
 
 bind();

@@ -440,3 +440,5 @@ main > .l { z-index: 5; }
 .sp-c.hit { background: var(--green); border-color: var(--green); transition: none; }
 .sp-c.hit b, .sp-c.hit span { color: #04150a; }
 .big .bt, .big .bh .dim { white-space: nowrap; }
+/* ledger 61: the Chaos subtitle sits under its title instead of colliding with it */
+.big.chaos .bh { flex-direction: column; align-items: flex-start; gap: 2px; }
