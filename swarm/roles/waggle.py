@@ -12,6 +12,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from pymongo.errors import OperationFailure, PyMongoError
 
+from common import tracing
 from common.db import col, swarm
 from common.events import say
 
@@ -100,7 +101,7 @@ def build_graph(agent: Agent):
 
 
 def run(agent: Agent) -> None:
-    graph = build_graph(agent)
+    graph = tracing.traced_graph(build_graph(agent), agent)
     while not agent.stop.is_set():
         token = (col("stats").find_one({"_id": "waggle_resume"}) or {}).get("token")
         try:

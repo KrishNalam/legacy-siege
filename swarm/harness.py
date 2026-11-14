@@ -15,7 +15,7 @@ import threading
 import time
 from datetime import datetime
 
-from common import config, events, llm
+from common import config, events, llm, tracing
 from common.db import client, col, now
 
 from . import leases, settings
@@ -65,6 +65,7 @@ class Agent:
         }, upsert=True)
 
     def start(self) -> "Agent":
+        tracing.bind(self.role, self.id)
         self.register()
         signal.signal(signal.SIGTERM, self._on_term)
         self._hb = threading.Thread(target=self._heartbeat, name="heartbeat", daemon=True)
@@ -89,6 +90,7 @@ class Agent:
                               {"$set": {"lease_until": leases.EPOCH}})
         col("agents").update_one({"_id": self.id, "pid": self.pid},
                                  {"$set": {"status": "dead", "phase": "shutdown", "died_at": now()}})
+        tracing.flush()
         log(self.id, "shut down")
 
     # ------------------------------------------------------------------ heartbeat + leases

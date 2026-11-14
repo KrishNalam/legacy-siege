@@ -19,6 +19,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from common import config as shared
+from common import tracing
 from common.db import col, now, txn
 
 from .. import leases, settings
@@ -126,7 +127,7 @@ def _live(role: str, **extra) -> bool:
 def run(agent: Agent) -> None:
     worker_graph = worker_role.build_graph(agent)
     scout_graph = scout_role.build_graph(agent)
-    graph = build_graph(agent, worker_graph, scout_graph)
+    graph = tracing.traced_graph(build_graph(agent, worker_graph, scout_graph), agent)
 
     def take_task(t: dict) -> bool:
         won = leases.takeover(col("tasks"), t["_id"], t.get("owner"), t["generation"], agent.id)

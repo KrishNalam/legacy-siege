@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
+from common import tracing
 from common.db import col, next_id, now
 from common.events import say
 
@@ -216,7 +217,8 @@ RECURRING = [
 
 
 def run(agent: Agent) -> None:
-    detect, reap, upgrade = build_graphs(agent)
+    detect, reap, upgrade = (tracing.traced_graph(g, agent, f"{n}:{agent.id}")
+                             for g, n in zip(build_graphs(agent), ("sentinel-detect", "undertaker", "sentinel-upgrade")))
     sysc = agent.systems
     streak: dict[str, int] = {}
     versions: dict[str, int] = {}
