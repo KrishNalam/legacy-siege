@@ -25,7 +25,7 @@ import threading
 import time
 from typing import TypedDict
 
-from common import config, llm
+from common import config, llm, pause
 from common.db import now, world
 from common.events import think
 
@@ -542,6 +542,10 @@ class Commander:
         self._say("Red Commander online: plans campaigns of vetted faults for the Strikers; Hive and Systems "
                   "Scouts report in.")
         while not self._stop.is_set():
+            # GARDENER_PAUSE=1: no campaigns while the Gardener upgrades a system (lease: auto-resume if it dies)
+            if pause.wait_while_paused(self._stop.is_set, on_pause=lambda d: self._set(
+                    status="paused", hold=f"Gardener upgrading {d.get('system')}", last_seen=now())):
+                continue
             try:
                 self.step()
             except Exception:
