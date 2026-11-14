@@ -360,6 +360,7 @@ def run(agent: Agent) -> None:
 
     agent.set(target="hive")
     while not agent.stop.is_set():
+        agent.pause_point()
         t0 = time.monotonic()
         try:
             sweep()

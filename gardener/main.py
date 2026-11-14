@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 
-from common import config
+from common import config, pause
 from common.db import col, now
 
 from . import pipeline
@@ -98,6 +98,8 @@ def wait_for_request(stream, timeout: float):
 
 def serve() -> None:
     register()
+    if pause.enabled():  # a previous Gardener died mid-upgrade: don't wait for its pause lease to lapse
+        pause.end(AGENT)
     stop = threading.Event()
     threading.Thread(target=heartbeat, args=(stop,), daemon=True, name="heartbeat").start()
     pipeline.say("Gardener online in the workshop; watching upgrade_requests")

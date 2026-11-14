@@ -230,6 +230,7 @@ def run(agent: Agent) -> None:
                                         max_await_time_ms=int(settings.POLL_S * 1000)) as stream:
                 while not agent.stop.is_set():
                     stream.try_next()
+                    agent.pause_point()
                     pending = list(col("incidents").aggregate(SENT_STEPS))
                     for p in pending:
                         st = p["step"]
