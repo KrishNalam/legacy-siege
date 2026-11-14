@@ -44,6 +44,7 @@ function applySnapshot(s) {
   state.thoughts = s.thoughts || [];
   state.logs = s.logs || {};
   state.current = s.current || null;
+  state.comms = s.comms || null;
   state.counts = s.counts || {};
   state.meta = s.meta || {};
   if (s.meta?.server_time) state.serverOffsetMs = Date.parse(s.meta.server_time) - Date.now();
@@ -67,6 +68,8 @@ function applyChange(m) {
     const arr = (state.logs[doc.system] ||= []); arr.push(doc); if (arr.length > 6) arr.shift();
   } else if (coll === "stats" && key === "current") {
     prev = state.current; state.current = doc;
+  } else if (coll === "stats" && key === "comms") {
+    prev = state.comms; state.comms = op === "delete" ? null : doc;
   } else if (coll === "checkpoints" && doc) {
     state.lastCheckpoint = doc;
   }
