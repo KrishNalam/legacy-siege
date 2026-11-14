@@ -1,4 +1,5 @@
 """A poisoned recalled repair fails Guard read-back, is retired, and gets a fresh policy plan."""
+import pytest
 from swarm.tests.conftest import reset_runtime, run_until_resolved, start_swarm, wait_for
 
 
@@ -74,3 +75,41 @@ def test_good_batch_abort_playbook_survives_a_lie(db, monkeypatch):
     assert recovery.reject_bad_memory('INC-PB-BAD', 'ACK ≠ APPLIED: quarantined=[]', 'guard-1') == 'PB-BAD'
     assert col('playbooks').find_one({'_id': 'PB-BAD'})['stale']
     col('lessons').delete_many({})
+
+
+@pytest.mark.parametrize('fault,first,second,shape', [
+    ('batch_abort', {'record_id': 'REC-00042'}, {'record_id': 'REC-00077'}, 'wrong_record'),
+    ('disk_fill', {}, {}, 'wrong_system'),
+])
+def test_red_poison_each_shape_is_visibly_rejected(db, fake, monkeypatch, fault, first, second, shape):
+    """Red's Memory Striker (chaos.faults.poison_memory) in both shapes -> 'Rejected memory', stale, lesson, recovery."""
+    from chaos import faults
+    from common.db import col
+    from swarm import recall
+    reset_runtime()
+    col('lessons').delete_many({})
+    fake.post('/_admin/reset')
+    hive = start_swarm({'SWARM_RECOVERY': '1', 'FAILURE_MEMORY': '1', 'RECOVERY_BACKOFF_S': '0.1'},
+                       log_name=f'poison-{shape}')
+    try:
+        system = 'mainframe' if fault == 'batch_abort' else 'unix'
+        fake.post(f'/{system}/_chaos/{fault}', json={'params': first})
+        pb = col('playbooks').find_one({'incident': run_until_resolved(1)['_id']})
+        monkeypatch.setenv('CHAOS_POISON_MEMORY', '1')
+        res = faults.poison_memory({'playbook': pb['_id']})
+        assert res['ok'] and res['shape'] == shape
+        planted = res['playbook']
+        wait_for(lambda: any(h['_id'] == planted for h in recall.search(pb['symptom_text'])[1]), 30)
+        fake.post(f'/{system}/_chaos/{fault}', json={'params': second})
+        inc = run_until_resolved(2)
+        assert planted in ((inc['recall'].get('memory_rejected') or []) + [inc['recall'].get('rejected')])
+        assert col('playbooks').find_one({'_id': planted})['stale']
+        assert col('lessons').find_one({'kind': 'misfit', 'playbook': planted})
+        assert col('thoughts').find_one({'incident': inc['_id'], 'kind': 'reject',
+                                         'text': {'$regex': f'^Rejected memory {planted}'}})
+        if shape == 'wrong_record':  # today's record was quarantined, never the planted one
+            assert [s['params']['record_id'] for s in inc['steps'] if s['op'] == 'quarantine_record'] == ['REC-00077']
+    finally:
+        hive.stop()
+        faults.clear_planted_memory()
+        col('lessons').delete_many({})
