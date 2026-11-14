@@ -240,7 +240,7 @@ def reset() -> None:
     faults.thaw_overdue(all_=True)
     faults.clear_planted_memory()
     w, s = world(), swarm()
-    for n in ["systems", "system_state", "system_logs", "op_receipts", "chaos_events", "runs"]:
+    for n in ["systems", "system_state", "system_logs", "op_receipts", "chaos_events", "runs", "red_agents"]:
         w[n].delete_many({})
     for n in ["incidents", "tasks", "agents", "thoughts", "messages", "ledger", "playbooks", "approvals",
               "schema_samples", "schema_mappings",
