@@ -224,40 +224,58 @@ export class Panels {
   // Claude proposes a root cause + op plan from the Hive's evidence; the deterministic policy and fresh
   // read-backs dispose. Nothing Claude says is executed. Absent field (no key) → card hidden.
   renderAI(inc) {
+    // Shared shape (CONTRACTS §8): {kind, status?, model, hypothesis, cites, confidence, latency_ms,
+    // proposed_ops[{op, target}], verdicts[{op, target, verdict: accepted|overruled, rule, reason}], evidence?}
     const card = $("#ai-card"), ai = inc?.ai;
     if (!ai) { card.hidden = true; this.aiKey = null; return; }
     card.hidden = false;
+    const mapping = ai.kind === "schema_mapping";
     const age = (serverNow() - ts(ai.started_at)) / 1000;
-    const status = ai.status === "thinking" && age > 30 ? "offline" : ai.status;
-    const ops = ai.proposed_ops || [], bad = ops.filter((o) => o.verdict !== "agree"), missed = ai.missed_ops || [];
-    const key = `${inc._id}|${ai.request_id}|${status}|${ops.length}`;
+    const status = !ai.status ? "done" : ai.status === "thinking" && age > 30 ? "offline" : ai.status;
+    const ops = ai.proposed_ops || [];
+    const vs = ops.map((o, i) => ({ ...o, ...((ai.verdicts || [])[i] || {}) }));
+    const bad = vs.filter((v) => v.verdict === "overruled"), missed = ai.missed_ops || [];
+    const key = `${inc._id}|${ai.kind}|${ai.request_id || ""}|${status}|${vs.length}|${JSON.stringify(ai.tally || {})}|${ai.done_at || ai.latency_ms || ""}`;
     if (this.aiKey === key) return;
     this.aiKey = key;
-    $("#ai-model").textContent = `${ai.model || "claude"}${ai.latency_ms != null ? ` · ${(ai.latency_ms / 1000).toFixed(1)}s` : ""}`;
+    $("#ai-card .kicker").textContent = mapping ? "AI FIELD MAPPING" : "AI SECOND OPINION";
+    $("#ai-model").textContent = `${ai.model || "claude"}${ai.latency_ms != null ? ` · ${(ai.latency_ms / 1000).toFixed(1)}s` : ""}${ai.confidence != null ? ` · conf ${(+ai.confidence).toFixed(2)}` : ""}`;
     const pill = $("#ai-verdict");
     if (status === "thinking") { pill.textContent = "Claude is thinking…"; pill.className = "pill violet pulse"; }
     else if (status !== "done") { pill.textContent = "offline"; pill.className = "pill"; }
-    else if (ai.agrees_with_policy) { pill.textContent = "agrees ✓"; pill.className = "pill green"; }
-    else { pill.textContent = bad.length ? `${bad.length} overruled` : `${missed.length} added by policy`; pill.className = `pill ${bad.length ? "red" : "blue"}`; }
-    const flow = '<div class="ai-flow"><b>Claude proposes</b> → <i>policy + read-back check</i> → <i>Guard verifies</i> · nothing Claude says is executed</div>';
+    else if (bad.length) { pill.textContent = `${bad.length} overruled`; pill.className = "pill red"; }
+    else if (mapping || ai.agrees_with_policy) { pill.textContent = mapping ? "verified ✓" : "agrees ✓"; pill.className = "pill green"; }
+    else { pill.textContent = missed.length ? `${missed.length} added by policy` : "root differs"; pill.className = "pill blue"; }
+    const flow = mapping
+      ? '<div class="ai-flow"><b>rules had no fix</b> → <i>Claude proposed a mapping</i> → <i>Guard verified by read-back</i></div>'
+      : '<div class="ai-flow"><b>Claude proposes</b> → <i>guardrail + read-back check</i> → <i>Guard verifies</i> · nothing Claude says runs unchecked</div>';
+    const t = ai.tally;
+    const tally = t ? `<div class="ai-tally">all incidents · ${esc(t.proposed)} proposed · <b class="ok">${esc(t.accepted)} accepted</b> · <b class="bad">${esc(t.overruled)} overruled</b></div>` : "";
     if (status !== "done") {
-      $("#ai-body").innerHTML = flow + `<div class="ai-off">${status === "thinking" ? "Asking Claude for an independent diagnosis from the evidence the Hive gathered…" : "No answer (timeout or error). The Hive carries on: policy decides every op anyway."}</div>`;
+      $("#ai-body").innerHTML = flow + `<div class="ai-off">${status === "thinking" ? "Asking Claude for an independent diagnosis from the evidence the Hive gathered…" : "No answer (timeout or error). The Hive carries on: policy decides every op anyway."}</div>` + tally;
       return;
     }
     const pol = ai.policy || {};
-    const root = ai.root_agrees
-      ? `<span class="ok">✓</span><span>root cause ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">same as policy</span>`
-      : `<span class="bad">${XMARK}</span><span>Claude: ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">policy: ${esc(pol.root_system || "?")} · ${esc(pol.fault_class || "?")}</span>`;
-    const label = (o) => `${esc(o.op)} <i>@ ${esc(o.system)}</i>`;
-    // agreed + policy-added ops as one wrap of chips; each overruled op gets its own row with the reason
-    const chips = ops.filter((o) => o.verdict === "agree").map((o) => `<span class="ai-chip ok" title="${esc(o.why || "")}">✓ ${label(o)}${o.gated ? '<b>approval first</b>' : ""}</span>`)
+    const root = mapping || !ai.root_system ? "" : ai.root_agrees
+      ? `<div class="ai-root"><span class="ok">✓</span><span>root cause ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">same as policy</span></div>`
+      : `<div class="ai-root"><span class="bad">${XMARK}</span><span>Claude: ${esc(ai.root_system)} · ${esc(ai.fault_class)}</span><span class="dim">policy: ${esc(pol.root_system || "?")} · ${esc(pol.fault_class || "?")}</span></div>`;
+    const ev = new Map((ai.evidence || []).map((e) => [e.id, e]));
+    const cited = (ai.cites || []).slice(0, 8);
+    const lead = cited.map((c) => ev.get(c)).find((e) => e && /logs/.test(e.src)) || ev.get(cited[0]);
+    const cites = cited.map((c) => { const e = ev.get(c); return `<span class="ai-cite" title="${esc(e ? `${e.src}: ${e.text}` : c)}">${esc(c)}</span>`; }).join("")
+      + (lead ? `<div class="ai-lead" title="${esc(lead.text)}"><b>${esc(lead.id)}</b> ${esc(lead.src)}: ${esc(lead.text)}</div>` : "");
+    const label = (o) => `${esc(o.op)}${o.target ? ` <i>@ ${esc(o.target)}</i>` : ""}`;
+    // accepted + policy-added ops as one wrap of chips; each overruled op gets its own row with rule + reason
+    const chips = vs.filter((o) => o.verdict !== "overruled").map((o) => `<span class="ai-chip ok" title="${esc([o.rule, o.reason, o.note].filter(Boolean).join(" · "))}">✓ ${label(o)}${o.gated ? '<b>approval first</b>' : ""}</span>`)
       .concat(missed.map((m) => `<span class="ai-chip add" title="Claude didn't propose it; the policy plan includes it">+ ${label(m)}<b>policy adds</b></span>`)).join("");
-    const rows = bad.map((o) => `<li class="ai-op overruled"><span class="mk">${XMARK}</span><span class="nm">${label(o)}</span><span class="tg">overruled</span><span class="why">${esc(o.reason || "refused by policy")}</span></li>`).join("");
+    const rows = bad.map((o) => `<li class="ai-op overruled"><span class="mk">${XMARK}</span><span class="nm">${label(o)}</span><span class="tg">${esc(o.rule || "overruled")}</span><span class="why">${esc(o.reason || "refused by the guardrail")}</span></li>`).join("");
     $("#ai-body").innerHTML = `${flow}
       ${ai.hypothesis ? `<div class="ai-hyp" title="${esc(ai.hypothesis)}">“${esc(ai.hypothesis)}”</div>` : ""}
-      <div class="ai-root">${root}</div>
+      ${cites ? `<div class="ai-cites"><span class="dim">cites</span>${cites}</div>` : ""}
+      ${root}
       ${chips ? `<div class="ai-chips">${chips}</div>` : ""}
-      ${rows ? `<ol class="ai-ops">${rows}</ol>` : ""}${!ops.length ? '<div class="ai-off">Claude proposed no ops.</div>' : ""}`;
+      ${rows ? `<ol class="ai-ops">${rows}</ol>` : ""}${!vs.length ? '<div class="ai-off">Claude proposed no ops.</div>' : ""}
+      ${tally}`;
   }
 
   // ---------------------------------------------------------------- learning meter (aggregation pipeline)
