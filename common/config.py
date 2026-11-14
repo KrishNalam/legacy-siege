@@ -54,11 +54,15 @@ VOYAGE_MODEL = os.environ.get("VOYAGE_MODEL", "voyage-4")
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY") or None
 LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-5-5")
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")  # see common.llm.PROVIDERS
 LLM_TIMEOUT_S = _f("LLM_TIMEOUT_S", 8)
 EMBED_TIMEOUT_S = _f("EMBED_TIMEOUT_S", 4)  # per Voyage call; on timeout/error we fall back to local-hash
 EMBED_COOLDOWN_S = _f("EMBED_COOLDOWN_S", 30)  # after a Voyage failure, skip Voyage this long (no repeated stalls)
 # Claude second opinion per incident (swarm/second_opinion.py). Off by default; needs ANTHROPIC_API_KEY too.
 AI_SECOND_OPINION = os.environ.get("AI_SECOND_OPINION", "").strip().lower() in ("1", "true", "yes", "on")
+# Claude reasons at plan time and its plan RUNS when it passes every guardrail (else the rules plan runs). Off by default.
+AI_DRIVES = os.environ.get("AI_DRIVES", "").strip().lower() in ("1", "true", "yes", "on")
+AI_DRIVE_TIMEOUT_S = _f("AI_DRIVE_TIMEOUT_S", 5.0)
 
 
 def pace(seconds: float) -> float:
