@@ -282,3 +282,15 @@ LESSON_SCHEMA = {
         },
     }
 }
+
+
+def problem_signature(incident: dict) -> str:
+    """Stable recurrence identity independent of incident ids and retry counters."""
+    import hashlib
+    import json
+    system = incident.get('root_cause_system') or incident.get('system')
+    fault = incident.get('fault_class')
+    symptoms = sorted(re.sub(r'\b\d+(?:\.\d+)?\b', '#', s.lower())
+                      for s in incident.get('symptoms') or [])
+    identity = [system, fault if fault not in (None, 'unknown') else symptoms]
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:24]

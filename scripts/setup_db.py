@@ -112,6 +112,11 @@ def ensure() -> None:
         IndexModel([("incident", ASCENDING), ("ts", ASCENDING)]),
     ])
     s.messages.create_index([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h")
+    from common import comms
+    if comms.enabled():
+        _ensure(s, "gardener_notes")
+        s.messages.create_index([("priority", DESCENDING), ("incident", ASCENDING), ("ts", ASCENDING)],
+                                name="comms_priority_incident")
     # schema drift: observed feed samples expire; the known-good sample is re-written every few seconds
     s.schema_samples.create_index([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h")
     s.tasks.create_index([("incident", ASCENDING)])
@@ -166,6 +171,7 @@ def reset() -> None:
             s[n].delete_many({})
         except OperationFailure:
             pass
+    s.gardener_notes.delete_many({})
     s.lessons.delete_many({})  # failure memory goes with the playbooks on a full reset (kept on next_round)
 
 
