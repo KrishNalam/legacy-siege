@@ -205,3 +205,19 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     also fails while the mapping doesn't match. A drifted feed makes the portal `degraded`, blames `unix`,
     `error_rate` 0.25; unix stays `up`. Full fix: `map_field` → `refresh_cache`.
   - War room: `schema_drift` in the fault launcher, with its own strike caption.
+- **`swarm.incidents.ai` (optional, advisory — "AI second opinion").** Written only when `ANTHROPIC_API_KEY` is set, by a
+  background thread the Scout starts right after it writes the plan (`swarm/second_opinion.py`; ≤1 call per incident,
+  ≤2 in flight per process, 20 s end-to-end budget, never awaited). Claude (`LLM_MODEL`, structured JSON output) gets
+  the Hive's findings (symptoms, systems examined, status/blames/facts — not the policy's fault_class, root cause or
+  plan) plus the ops catalog, and proposes a root cause and ops. A deterministic judge compares each op with the plan
+  being executed and with read-backs taken before the call. Shape:
+  `{status: "thinking"|"done"|"offline", model, request_id, started_at, done_at, latency_ms, error?, hypothesis,
+  root_system, fault_class, root_agrees, policy: {root_system, fault_class}, agrees_with_policy, evidence_at,
+  proposed_ops: [{system, op, params, why, verdict: "agree"|"overruled", reason, note, gated, plan_n}],
+  overruled_ops: [{op, system, reason}], missed_ops: [{system, op, params, n}]}`.
+  Writes are conditional on `{_id, opened_at}` + `ai.request_id` (a reset can reuse an `INC-` id). **No decision path
+  reads this field**; the policy still picks every op. No key / timeout / error → field absent or `status:"offline"`,
+  and the war room's "AI second opinion" card stays hidden or shows offline. `common.llm.complete_json()` is the
+  structured-output sibling of `complete()` (same rules: no sampling params, thinking off, effort low; no retries).
+  The Scout also posts one activity line (`kind:"thought"`) with the verdict. `scripts.demo_check --check-ai` adds an
+  opt-in row for it (not one of the 26 beats; skipped without a key).

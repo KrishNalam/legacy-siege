@@ -130,7 +130,7 @@ Docker, Fly and the other hosting options. The app reads only `MONGODB_URI`; oth
 
 | var | effect without it |
 |---|---|
-| `ANTHROPIC_API_KEY` (+ `LLM_MODEL`) | Agents narrate with fixed sentences; the LLM only ever polishes one sentence and writes the Gardener's explanation |
+| `ANTHROPIC_API_KEY` (+ `LLM_MODEL`) | No **AI second opinion** card (Claude's independent diagnosis + op plan per incident, judged op-by-op by the deterministic policy and read-backs, `swarm/second_opinion.py`); agents narrate with fixed sentences and the Gardener writes a template explanation |
 | `VOYAGE_API_KEY` (+ `VOYAGE_MODEL`) | Embeddings use a deterministic local hashing model (`local-hash-v1`, 1024-d). The same vector index works either way |
 | `PACE` (default 1.0) | Multiplier on the deliberate "thinking" delays (0 in tests) |
 
@@ -143,6 +143,7 @@ The entire demo runs with **no keys**. The policy that decides which op runs is 
 | 0:00 | **Reset ▸ Full** | All green, the hive idle, the honeycomb empty | `setup_db.reset`, Gardener revert, roster restored |
 | 0:10 | **▶ Night 1** | Red lightning hits the mainframe. The tape reels stop (ABEND), failure pulses run downstream, unix and then portal turn amber, and the portal shows a STALE stamp while still serving HTTP 200 | `chaos_events` insert → `world.systems` updates stream in |
 | 0:25 | (watch) | A single incident card (coalesced). A blue diagnosis pulse walks portal → unix → mainframe with hop badges and a root-cause reticle | Partial unique index; `tasks` leases; `diagnosis_path` |
+| 0:35 | (watch) | **AI SECOND OPINION** card: Claude's hypothesis and proposed ops, each marked ✓ (matches the plan), ✗ + reason (overruled by the guardrail / read-back) or + (policy adds). Nothing Claude says is executed | `incidents.ai` written by a background thread; same change stream |
 | 0:45 | (watch) | **ACK ≠ APPLIED** is stamped on `quarantine_record`; the guard opens attempt a2, and it turns green with evidence | `op_receipts.lied`; `ledger` a1 failed, a2 verified; `$jsonSchema` evidence rule |
 | 0:55 | **Approve** in the Beekeeper modal | restart_batch waits for you, *before* anything is sent | `approvals` pending → approved |
 | 1:00 | **✕ Kill a worker** (glows while a worker is in `step_sent`) | The worker bee falls and drops its ticket; a nurse flies over, picks it up, and a pink beam from the checkpoints cell reads "resumed from checkpoint …" | Real SIGKILL; Undertaker; lease `generation+1`; LangGraph checkpoint loaded from MongoDB; `handoffs[]` |
