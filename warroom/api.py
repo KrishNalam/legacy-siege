@@ -324,6 +324,19 @@ def spine() -> dict:
     return to_json(spine_analytics.analytics())
 
 
+@router.get("/roster")
+def roster() -> dict:
+    """Comms live roster (SWARM_COMMS=1, swarm/roster.py): one doc per agent with what it is doing and where,
+    its parent Scout, deaths and takeovers. Empty with the switch off. Also on the snapshot (`roster`) and the
+    change stream (`coll:"roster"`)."""
+    from common import comms  # noqa: PLC0415
+    docs = list(swarm().roster.find({}).sort("_id", 1))
+    by_state: dict[str, int] = {}
+    for d in docs:
+        by_state[d.get("state") or "?"] = by_state.get(d.get("state") or "?", 0) + 1
+    return to_json({"enabled": comms.enabled(), "counts": by_state, "agents": docs})
+
+
 @router.get("/memory")
 def memory() -> dict:
     """The Hive's memory, read-only: playbooks (what worked), lessons (what failed verification; FAILURE_MEMORY=1)

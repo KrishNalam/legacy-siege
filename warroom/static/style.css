@@ -375,3 +375,13 @@ button, select { font: inherit; color: inherit; }
 .ai-hyps li.top { color: var(--ink); font-size: 12.5px; } .ai-hyps li.top span { color: var(--ink2); }
 .ai-hyps li i { font-style: normal; color: #8f7fc0; font-size: 10px; }
 .ai-tag { margin-left: 6px; font: 700 9px var(--mono); letter-spacing: .06em; color: #e7dcff; background: #2b1d52; border: 1px solid #5a43a0; border-radius: 4px; padding: 0 4px; vertical-align: 1px; }
+
+/* ---------------------------------------------------------------- comms roster (SWARM_COMMS=1; js/roster.js) */
+.roster-card ol { list-style: none; margin: 0; padding: 0; max-height: 168px; overflow-y: auto; font: 11px/1.35 var(--mono); }
+.roster-card li { display: grid; grid-template-columns: 10px 128px 1fr; gap: 6px; align-items: baseline; padding: 1px 0; }
+.roster-card li i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.roster-card li.working i { background: var(--green); } .roster-card li.standby i { background: var(--blue); }
+.roster-card li.dead i { background: var(--red); } .roster-card li.dead { color: var(--red2); }
+.roster-card li.retired { opacity: .45; } .roster-card li.took b { color: var(--gold); }
+.roster-card li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
+.roster-card li small { color: var(--muted); }

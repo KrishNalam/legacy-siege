@@ -4,12 +4,13 @@
 const MAP_COLLS = {
   systems: "systems", agents: "agents", incidents: "incidents", tasks: "tasks", chaos_events: "chaos",
   approvals: "approvals", upgrade_requests: "upgrades", ledger: "ledger", playbooks: "playbooks", runs: "runs",
+  roster: "roster",  // Comms live roster (SWARM_COMMS=1)
 };
 const LEDGER_KEY = (d) => d.action_id || d._id;
 
 export const state = {
   systems: new Map(), agents: new Map(), incidents: new Map(), tasks: new Map(), chaos: new Map(),
-  approvals: new Map(), upgrades: new Map(), ledger: new Map(), playbooks: new Map(), runs: new Map(),
+  approvals: new Map(), upgrades: new Map(), ledger: new Map(), playbooks: new Map(), runs: new Map(), roster: new Map(),
   thoughts: [], logs: {}, current: null, counts: {}, opsHistory: [], opsPerSec: 0,
   connected: false, serverOffsetMs: 0, meta: {}, lastCheckpoint: null,
 };
@@ -40,7 +41,7 @@ function applySnapshot(s) {
   const fill = (key, docs, keyFn = (d) => d._id) => { for (const d of docs || []) state[key].set(keyFn(d), d); };
   fill("systems", s.systems); fill("agents", s.agents); fill("incidents", s.incidents); fill("tasks", s.tasks);
   fill("chaos", s.chaos_events); fill("approvals", s.approvals); fill("upgrades", s.upgrades);
-  fill("ledger", s.ledger, LEDGER_KEY); fill("playbooks", s.playbooks); fill("runs", s.runs);
+  fill("ledger", s.ledger, LEDGER_KEY); fill("playbooks", s.playbooks); fill("runs", s.runs); fill("roster", s.roster);
   state.thoughts = s.thoughts || [];
   state.logs = s.logs || {};
   state.current = s.current || null;
