@@ -1,0 +1,20 @@
+# Keep the build context small; see deploy/Dockerfile.
+.git
+.gitignore
+.venv
+venv
+.env
+.env.*
+!.env.example
+logs
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.mypy_cache
+.ruff_cache
+docs/*.pdf
+deploy/docker-compose*.yml
+deploy/fly.toml
+deploy/README.md
+*.log
+.DS_Store
