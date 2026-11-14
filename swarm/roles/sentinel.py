@@ -258,6 +258,20 @@ def run(agent: Agent) -> None:
                           {"configurable": {"thread_id": f"sentinel:security:{s}:{int(time.time() * 1000)}"}},
                           durability="exit")
 
+    noticed: dict = {"change": None}
+
+    def notice_feed_change(st: dict) -> None:
+        """Say it the moment a feed sample stops matching the expected schema (before the portal goes stale)."""
+        ch = schema.feed_change(st)
+        if ch is None or ch == noticed["change"]:
+            noticed["change"] = ch
+            return
+        noticed["change"] = ch
+        missing, added = ch
+        what = ", ".join([f"{f} missing" for f in missing] + [f"{f} new" for f in added])
+        agent.think(f"{schema.SYSTEM} feed schema changed: {what} ({schema.FEED} no longer matches the expected "
+                    f"schema; {schema.CONSUMER} reads it next).", kind="thought", system=schema.SYSTEM, pause=False)
+
     def sweep() -> None:
         nonlocal last_slow, last_sample
         health, lines = {}, {}
@@ -315,7 +329,9 @@ def run(agent: Agent) -> None:
                 (health.get(s) or {}).get("status") == "up" for s in (schema.SYSTEM, schema.CONSUMER)):
             last_sample = time.monotonic()
             try:  # known-good feed sample for schema-drift diffs (only kept if it matches the expected schema)
-                schema.capture_good(sysc.state(schema.SYSTEM))
+                st = sysc.state(schema.SYSTEM)
+                if not schema.capture_good(st):
+                    notice_feed_change(st)
             except Exception as e:
                 log(agent.id, f"schema sample error: {type(e).__name__}: {e}")
 
