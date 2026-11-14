@@ -24,7 +24,8 @@ export function installBeats(stage, panels, caption) {
     if (panels.quiet) panels.renderIncident();
     if (m.op === "insert") {
       stage.strike(doc);
-      if (doc.fault === "agent_kill") caption("Chaos: agent kill armed", "SIGKILL the next worker that sends a step", C.red);
+      if (doc.fault === "agent_kill" && doc.params?.selector?.agent) caption(`Chaos: SIGKILL ${doc.params.selector.agent}`, "a real process kill · no warning to the swarm", C.red);
+      else if (doc.fault === "agent_kill") caption("Chaos: agent kill armed", "SIGKILL the next worker that sends a step", C.red);
       else if (doc.fault === "lying_success") caption(`Chaos: ${doc.target} will lie`, `next ${doc.params?.count ?? 1} op returns success without applying`, "#ff4fd8");
       else caption(`Chaos strikes: ${doc.fault}`, `→ ${doc.target}${doc.manual ? " (manual)" : doc.scenario ? ` · ${doc.scenario}` : ""}`, C.red);
     } else if (doc.fault === "agent_kill" && doc.result?.agent && !prev?.result?.agent) {
