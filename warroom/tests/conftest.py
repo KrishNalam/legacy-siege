@@ -34,6 +34,6 @@ def isolated_dbs():
 def clean():
     """Empty both test DBs before a test."""
     for d in DBS:
-        for c in client()[d].list_collection_names():
+        for c in client()[d].list_collection_names(filter={"name": {"$not": {"$regex": "^system\\."}}}):
             client()[d][c].delete_many({})
     yield
