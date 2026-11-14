@@ -1,7 +1,7 @@
 """Optional LLM. Everything must work when this returns None (no key / timeout / error)."""
 from __future__ import annotations
 
-from . import config
+from . import config, tracing
 
 
 def llm_available() -> bool:
@@ -16,7 +16,8 @@ def complete(system: str, prompt: str, max_tokens: int = 200) -> str | None:
     try:
         import anthropic
 
-        c = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=config.LLM_TIMEOUT_S, max_retries=1)
+        c = tracing.wrap_anthropic(
+            anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=config.LLM_TIMEOUT_S, max_retries=1))
         msg = c.messages.create(
             model=config.LLM_MODEL,
             max_tokens=max_tokens,
