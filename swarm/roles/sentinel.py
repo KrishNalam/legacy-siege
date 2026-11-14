@@ -8,8 +8,8 @@ chaos_events) and:
   * undertaker: agents whose last_seen is stale -> status dead; their task/incident leases are released
                 (lease_until -> past, owner kept so nurses know whose work it was); waggle note to nurses.
   * staleness:  a system's version went up -> its playbooks are marked stale:true.
-  * recurrence: aggregation over resolved incidents; same fault_class on the same root system resolved
-                >= UPGRADE_AFTER times and no upgrade request yet -> files swarm.upgrade_requests.
+  * recurrence: aggregation over resolved incidents; same fault_class on the same root system resolved in
+                >= UPGRADE_AFTER distinct nights and no upgrade request yet -> files swarm.upgrade_requests.
 
 The rare events (detect / reap / upgrade) each run as a small LangGraph graph on an event-scoped thread.
 """
@@ -217,9 +217,11 @@ FEED_CHECK_S = 2.0      # feed field check (1 state read + 1 find): notices a dr
 RECURRING = [
     {"$match": {"status": "resolved", "fault_class": {"$nin": [None, "unknown", "schema_drift"]}}},
     {"$sort": {"closed_at": 1}},
+    # recurrence = across nights: a fault re-struck within one night (e.g. by the Red fleet) is one attack
+    # wave, not a recurring weakness yet (incidents without a run count one by one, as before)
     {"$group": {"_id": {"fault_class": "$fault_class", "system": "$root_cause_system"},
-                "n": {"$sum": 1}, "evidence": {"$push": "$_id"}}},
-    {"$match": {"n": {"$gte": settings.UPGRADE_AFTER}}},
+                "nights": {"$addToSet": {"$ifNull": ["$run_id", "$_id"]}}, "evidence": {"$push": "$_id"}}},
+    {"$match": {"$expr": {"$gte": [{"$size": "$nights"}, settings.UPGRADE_AFTER]}}},
     {"$lookup": {"from": "upgrade_requests", "let": {"fc": "$_id.fault_class", "sys": "$_id.system"},
                  "pipeline": [{"$match": {"$expr": {"$and": [{"$eq": ["$fault_class", "$$fc"]},
                                                              {"$eq": ["$system", "$$sys"]}]}}}],
