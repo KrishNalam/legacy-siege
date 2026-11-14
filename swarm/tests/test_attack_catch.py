@@ -96,3 +96,15 @@ def test_session_leak_caught_and_flushed(c):
     plan = fix_and_verify(c, "session_leak")
     assert [s["op"] for s in plan] == ["flush_sessions"] and not plan[0]["destructive"]
     assert c.get("/portal/health").json()["status"] == "up"
+
+
+# ------------------------------------------------------------------ G5 cron_stop (Saboteur): absence of activity
+def test_cron_stop_caught_from_silence_and_restarted(c):
+    chaos(c, "unix", "cron_stop")
+    tick(c, 5)
+    assert not any(ln.get("level") == "ERROR" for ln in logs(c, "unix"))   # silent: nothing ever logged
+    assert c.get("/unix/health").json()["status"] != "up"
+    only(c, "unix", "cron_stop")
+    plan = fix_and_verify(c, "cron_stop")
+    assert [s["op"] for s in plan] == ["restart_cron", "rerun_transfer", "refresh_cache"]
+    assert all(c.get(f"/{s}/health").json()["status"] == "up" for s in ALL)
