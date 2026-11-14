@@ -23,6 +23,7 @@ from .. import diagnosis, leases, settings, steps, verify
 from ..policy import fmt_op
 from ..harness import Agent, checkpointer, main_loop, retrying
 from ..http import SystemsUnavailable
+from .. import lessons
 
 
 LOG_WINDOW_S = 300  # only logs from shortly before the incident opened count as clues
@@ -123,9 +124,12 @@ def build_graph(agent: Agent):
             return {}
         n = len(step.get("attempts") or []) + 1
         aid = steps.attempt_id(step["step_id"], n)
+        # failure memory: this system lied about this op before -> the retry goes straight out
+        fast = n > 1 and bool(step.get("distrust_ack")) and lessons.enabled()
         if n > 1:
-            agent.think(f"Guard rejected {step['action_id']}; opening new attempt {aid}.", kind="action",
-                        incident=task["incident"], system=step["system"])
+            agent.think(f"Guard rejected {step['action_id']}; opening new attempt {aid}"
+                        + (" at once (a known lie, see the lesson)." if fast else "."), kind="action",
+                        incident=task["incident"], system=step["system"], pause=not fast)
         approver = None
         if step.get("approval_id"):
             apr = col("approvals").find_one({"_id": step["approval_id"]}) or {}
@@ -135,7 +139,7 @@ def build_graph(agent: Agent):
                   task=task["_id"])
         agent.think(f"Sending {fmt_op(step)} to {step['system']} as {aid}.",
                     kind="action", incident=task["incident"], system=step["system"], pause=False)
-        agent.nap(settings.step_hold_s())
+        agent.nap(0 if fast else settings.step_hold_s())
         agent.check("tasks", task["_id"])
         try:
             resp = sysc.post_op(step["system"], step["op"], aid, step.get("params") or {})

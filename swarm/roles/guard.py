@@ -21,6 +21,7 @@ from common.db import col, now
 
 from .. import settings, steps, verify
 from ..harness import Agent, checkpointer, log
+from .. import lessons
 
 SENT_STEPS = [
     {"$match": {"active": True, "steps.status": "sent"}},
@@ -103,10 +104,14 @@ def build_graph(agent: Agent):
         elif resp.get("accepted") is False:
             reason = f"{sys} refused {op}: {resp.get('message', '')}"[:200]
         elif resp.get("applied"):
-            if _age(st.get("responded_at")) >= settings.GUARD_GRACE_S:
+            if _age(st.get("responded_at")) >= grace(st):
                 agent.think(f"ACK ≠ APPLIED: {op} returned applied:true but {facts}.", kind="reject",
                             incident=inc, system=sys, pause=False)
+                if st.get("distrust_ack") and lessons.enabled():
+                    agent.think(f"{sys} lied about {op} before ({(st.get('lessons') or [{}])[0].get('id')}); rejected on sight, "
+                                f"no grace period.", kind="reject", incident=inc, system=sys, pause=False)
                 if steps.reject(inc, st, aid, f"ACK ≠ APPLIED: {facts}", agent.id):
+                    remember(inc, st, aid, f"ACK ≠ APPLIED: {facts}")
                     return {"verdict": "rejected"}
                 return {"verdict": "moot"}
         else:  # accepted, not applied yet: accepted is not done
@@ -119,8 +124,28 @@ def build_graph(agent: Agent):
         if reason:
             agent.think(f"Rejecting {aid}: {reason}.", kind="reject", incident=inc, system=sys, pause=False)
             if steps.reject(inc, st, aid, reason, agent.id):
+                remember(inc, st, aid, reason)
                 return {"verdict": "rejected"}
         return {"verdict": "pending"}
+
+    def grace(st: dict) -> float:
+        """A step whose system lied about this op before (failure memory) gets no benefit of the doubt."""
+        if st.get("distrust_ack") and lessons.enabled():
+            return min(settings.GUARD_GRACE_S, 0.5)
+        return settings.GUARD_GRACE_S
+
+    def remember(inc: str, st: dict, aid: str, evidence: str) -> None:
+        """Failure memory: a rejected attempt becomes a durable lesson tagged with the system version."""
+        if not lessons.enabled():
+            return
+        try:
+            doc = col("incidents").find_one({"_id": inc}, {"fault_class": 1}) or {}
+            ls = lessons.record_failure(inc, st, aid, evidence, agent.id, sysc.version(st["system"]),
+                                        doc.get("fault_class"))
+            agent.think(f"Remembered {ls['_id']} (seen {ls.get('count', 1)}×): {ls['why'][:120]}.", kind="learn",
+                        incident=inc, system=st["system"], pause=False)
+        except Exception as e:
+            log(agent.id, f"lesson not stored: {type(e).__name__}: {e}")
 
     g = StateGraph(GuardState)
     g.add_node("read_back", read_back)
