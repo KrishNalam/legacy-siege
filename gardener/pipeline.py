@@ -45,7 +45,7 @@ AGENT, ROLE = "gardener-1", "gardener"
 SYSTEMS_DIR = config.ROOT / "systems"
 BACKUP_DIR = Path(__file__).resolve().parent / "backups"
 PROVE_FAULT = "batch_abort"
-PROVE_WINDOW_S = 30.0
+PROVE_WINDOW_S = config.PROVE_WINDOW_S  # env PROVE_WINDOW_S (default 30)
 WATCHED_SYSTEMS = ["mainframe", "unix", "portal"]
 TERMINAL = {"proven", "rejected"}
 
