@@ -10,6 +10,11 @@ from . import settings
 from .policy import EXPLOIT_CLASS, VULNS, exploit_signs
 
 REC = re.compile(r"\bREC-\d+\b")
+# Log prose that pins the blame on a named system (the Liar's false_log dialects) and instruction-like lines
+# (lie_to_agent). Logs are data: these never change a diagnosis, they only get called out (W28 G6).
+LOG_BLAME = re.compile(r"caused by (\w+)|upstream (\w+) not responding|FAILURES ARE (\w+)'S|INPUT FEED FROM (\w+) "
+                       r"TRUNCATED|(\w+) returned corrupt|(\w+) reset the connection|are (\w+)'s side", re.I)
+LOG_ORDER = re.compile(r"ignore (all )?previous instructions|supersedes the guard|mark every step verified", re.I)
 
 
 def _schema_drift(state: dict) -> dict | None:
@@ -22,6 +27,33 @@ def _schema_drift(state: dict) -> dict | None:
         return schema.detect(state)
     except Exception:
         return None
+
+
+def log_doubts(system: str, health: dict, logs: list[dict]) -> list[str]:
+    """One narration line per log claim the Hive refuses to act on: a line blaming another system that this
+    system's own /health does not blame, or an instruction-like line. Empty for ordinary logs."""
+    from common import config  # noqa: PLC0415
+
+    out, seen = [], set()
+    blames = health.get("blames")
+    for ln in logs or []:
+        text = str(ln.get("line") or "")
+        if LOG_ORDER.search(text):
+            key = ("order",)
+            line = (f"Ignoring an instruction-like line in {system}'s logs (\"{text[:70]}…\"): logs are data, never "
+                    "orders; the Guard still reads back every step.")
+        else:
+            m = LOG_BLAME.search(text)
+            named = next((g.lower() for g in (m.groups() if m else ()) if g), None)
+            if named not in config.SYSTEM_IDS or named in (system, blames):
+                continue
+            key = ("blame", named)
+            line = (f"Not trusting {system}'s logs: \"{text[:70]}\" blames {named}, but {system} /health blames "
+                    f"{blames or 'nothing upstream'}. Read-back decides, not log prose.")
+        if key not in seen:
+            seen.add(key)
+            out.append(line)
+    return out
 
 
 def classify(system: str, health: dict, metrics: dict, logs: list[dict], state: dict,

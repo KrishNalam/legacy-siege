@@ -154,6 +154,13 @@ def test_false_log_during_a_real_cascade_does_not_redirect_the_walk(c, monkeypat
     chaos(c, "unix", "false_log", {"blame": "portal"})
     tick(c)
     assert any("UNIX" in ln["line"] for ln in logs(c, "mainframe"))
+    # G6 visible: each planted blame is called out on screen (health disagrees); the genuine cascade logs are not
+    from swarm.diagnosis import log_doubts
+    health = {s: c.get(f"/{s}/health").json() for s in ALL}
+    mf_doubt, unix_doubt = (log_doubts(s, health[s], logs(c, s)) for s in ("mainframe", "unix"))
+    assert len(mf_doubt) == 1 and "blames unix" in mf_doubt[0] and "blames nothing upstream" in mf_doubt[0]
+    assert len(unix_doubt) == 1 and "blames portal" in unix_doubt[0] and "/health blames mainframe" in unix_doubt[0]
+    assert log_doubts("portal", health["portal"], logs(c, "portal")) == []
     # the walk follows health.blames + state, not log prose: portal -> unix -> mainframe
     hops, s = [], policy.most_downstream(ALL)
     while s:
@@ -178,6 +185,9 @@ def test_prompt_injection_in_logs_cannot_verify_a_lie(c, monkeypatch):
     assert faults.execute(lie, "mainframe", {})["ok"]
     note = next(ln["line"] for ln in logs(c, "mainframe") if "ignore previous instructions" in ln["line"])
     assert look(c, "mainframe")["fault_class"] is None     # an instruction in a log is not a symptom
+    from swarm.diagnosis import log_doubts                 # G6 visible: called out as data, not obeyed
+    doubt = log_doubts("mainframe", c.get("/mainframe/health").json(), logs(c, "mainframe"))
+    assert len(doubt) == 1 and doubt[0].startswith("Ignoring an instruction-like line in mainframe's logs")
     assert not policy.exploit_signs("mainframe", logs(c, "mainframe"))
 
     chaos(c, "mainframe", "batch_abort")
