@@ -301,6 +301,10 @@ class Supervisor:
                 pass
         base = roster()
         base_ids = {i for _, i in base}
+        # A bee that died this night is still owed its replacement nurse on the bench: start it now instead of
+        # dropping it (at stage pace the next night's reset lands before NURSE_RESPAWN_S, and the dead bee's
+        # roster slot is refilled in its own role below). It is an extra, so the NEXT reset retires it.
+        owed = [(role, aid, sb) for _, role, aid, sb in self.pending if sb]
         self.pending = []
         for agent_id, (_role, p) in list(self.children.items()):
             if agent_id not in base_ids and p.poll() is None:
@@ -310,6 +314,9 @@ class Supervisor:
         for role, agent_id in base:
             if agent_id not in self.children:
                 self.spawn(role, agent_id)
+        for role, agent_id, standby_for in owed:
+            if agent_id not in self.children:
+                self.spawn(role, agent_id, standby_for)
         try:
             col("stats").delete_one({"_id": "roster_reset", "at": self.restore_seen})
         except Exception:
