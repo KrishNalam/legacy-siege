@@ -280,3 +280,20 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     incident that already has `ai.kind == "schema_mapping"`.
   - War room watches `swarm.schema_mappings` (caption + "MAPPING LEARNED" / "MAPPING REUSED" stamp on unix).
     Rehearsal: `python -m scripts.drift_check` (14 checks incl. the repeat-from-memory round; separate from demo_check).
+- **Dynamic swarm scaling (additive, W15; switch `SWARM_DYNAMIC=1`, default off = the fixed roster above, unchanged).**
+  - Standing roster shrinks to `queen-1/2, guard-1, waggle-1, sentinel-1, nurse-1/2`; no standing scouts or workers.
+  - `swarm.spawn_requests {_id:"SPW-0001", role:"scout"|"worker", specialty, incident, task, reason, requested_by,
+    status:"pending"|"spawned"|"cancelled", agent_id, pid, warm, note, ts, spawned_at, spawn_ms}` (TTL 24 h). The Queen
+    writes one per new incident when no idle scout is free; a Scout writes one per task when no idle worker of the task's
+    `specialty` is free (any specialty string works: new incident types get `worker-<specialty>-<n>`). The supervisor
+    polls pending requests, starts the agent from a pre-imported warm spare (`python -m swarm.agent --warm`, `SWARM_WARM`
+    kept ready), assigns a spawned scout its incident (`assigned_to`), and cancels requests whose work was already taken.
+    Hard ceiling `SWARM_MAX_AGENTS` (default 24 live agent processes; over it, requests wait and nurses cover the work).
+  - Spawned agents carry `swarm.agents.spawned: true` and run with `--ephemeral`: once their incident is closed
+    (`SWARM_RETIRE_AFTER_S`, 3 s) or after `SWARM_IDLE_S` (15 s) without work they set `phase:"retiring"`, re-check for
+    waiting work, write a `kind:"retire"` thought and **delete their own agent doc** (the bee leaves the war room) and
+    exit 0; the supervisor does not respawn them. A spawned bee that dies (SIGKILL) is handled like any bee: Undertaker,
+    Nurse takeover from its checkpoint, a replacement nurse on the bench.
+  - Requests are narrated as `kind:"spawn"` thoughts. Nurses leave work alone for `SWARM_SPAWN_GRACE_S` (8 s) while its
+    spawn is under way. `swarm.stats{_id:"swarm_scale"}` = `{dynamic, live, spawned_live, peak, spawned, retired,
+    cold_spawns, warm_ready, max, base, avg_spawn_ms}`, counters reset per night (roster reset).
