@@ -480,9 +480,21 @@ class Demo:
         for inc_id in inc_ids:
             ai = (self.s.incidents.find_one({"_id": inc_id}, {"ai": 1}) or {}).get("ai") or {}
             ops, vs = ai.get("proposed_ops") or [], ai.get("verdicts") or []
-            good = (ai.get("status") == "done" and ai.get("kind") == "second_opinion" and bool(ops)
-                    and len(vs) == len(ops) and ai.get("latency_ms") is not None
-                    and all(v.get("verdict") in ("accepted", "overruled") and v.get("rule") and v.get("reason") for v in vs))
+            judged = (ai.get("status") == "done" and ai.get("kind") == "second_opinion" and bool(ops)
+                      and len(vs) == len(ops) and ai.get("latency_ms") is not None
+                      and all(v.get("verdict") in ("accepted", "overruled") and v.get("rule") and v.get("reason") for v in vs))
+            if config.AI_DRIVES and inc_id == inc_ids[0]:  # night 1 walks the chain, so the AI decides its plan
+                steps = (self.s.incidents.find_one({"_id": inc_id}, {"steps": 1}) or {}).get("steps") or []
+                src = {s.get("source") for s in steps}
+                good = (ai.get("decision") in ("ai_plan", "rules_plan") and bool(ai.get("decision_reason"))
+                        and src == ({"ai"} if ai.get("decision") == "ai_plan" else {"policy"})
+                        and (judged or ai.get("status") == "offline"))
+                parts.append(f"{inc_id} decision={ai.get('decision')} ({str(ai.get('decision_reason'))[:60]})")
+            elif config.AI_DRIVES and not config.AI_SECOND_OPINION and not ai:
+                good = True  # recall night: a fresh playbook short-circuits, Claude isn't asked
+                parts.append(f"{inc_id} recall hit: AI skipped")
+            else:
+                good = judged
             ok = ok and good
             parts.append(f"{inc_id} {ai.get('status', 'absent')} {ai.get('latency_ms')}ms conf={ai.get('confidence')} "
                          f"cites={len(ai.get('cites') or [])} {sum(v.get('verdict') == 'accepted' for v in vs)} accepted/"
@@ -528,10 +540,10 @@ def main() -> int:
                 n2 = d.night2(n1, a.night_timeout)
                 if n2 and d.gardener(a.night_timeout):
                     d.night3(a.night3_watch)
-            if a.check_ai and config.ANTHROPIC_API_KEY and config.AI_SECOND_OPINION:
+            if a.check_ai and config.ANTHROPIC_API_KEY and (config.AI_SECOND_OPINION or config.AI_DRIVES):
                 d.check_ai([n["inc"]["_id"] for n in (n1, n2) if n])
             elif a.check_ai:
-                log("--check-ai skipped: needs AI_SECOND_OPINION=1 and ANTHROPIC_API_KEY")
+                log("--check-ai skipped: needs AI_SECOND_OPINION=1 or AI_DRIVES=1, and ANTHROPIC_API_KEY")
             if not a.keep:
                 d.final_reset()
     except KeyboardInterrupt:
