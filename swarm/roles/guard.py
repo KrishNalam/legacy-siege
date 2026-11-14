@@ -20,7 +20,7 @@ from langgraph.graph import END, START, StateGraph
 from common import config as shared
 from common.db import col, now
 
-from .. import schema, settings, steps, verify
+from .. import recovery, schema, settings, steps, verify
 from ..harness import Agent, checkpointer, log
 from .. import lessons, platform
 
@@ -69,6 +69,10 @@ def build_graph(agent: Agent):
         if not (lessons.enabled() or platform.enabled()):
             return
         try:
+            rejected = recovery.reject_bad_memory(inc, evidence, agent.id)
+            if rejected:
+                agent.think(f"Rejected memory {rejected}: its repair failed read-back and disagrees with the repair policy; "
+                            "retiring it and asking for a fresh plan.", kind="reject", incident=inc, pause=False)
             doc = col("incidents").find_one({"_id": inc}, {"fault_class": 1}) or {}
             ls = lessons.record_failure(inc, st, aid, evidence, agent.id, sysc.version(st["system"]),
                                         doc.get("fault_class"))
@@ -139,8 +143,10 @@ def build_graph(agent: Agent):
                     return {"verdict": "rejected"}
                 return {"verdict": "moot"}
         else:  # accepted, not applied yet: accepted is not done
-            if _age(st.get("sent_at")) > shared.SLOW_APPLY_S + 10:
-                reason = f"{op} accepted but never applied after {int(_age(st.get('sent_at')))}s: {facts}"
+            # timed from the ACK, not from mark_sent: the POST can go out late (step hold, a nurse's resend)
+            since = st.get("responded_at") or st.get("sent_at")
+            if _age(since) > shared.SLOW_APPLY_S + 10:
+                reason = f"{op} accepted but never applied after {int(_age(since))}s: {facts}"
             elif aid not in noted_slow:
                 noted_slow.add(aid)
                 agent.think(f"Accepted is not done: {op} on {sys} hasn't landed yet ({facts}); re-checking.",

@@ -16,6 +16,7 @@ from pymongo.client_session import ClientSession
 from pymongo.collection import Collection
 
 from common import config
+from . import settings
 from common.db import now
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -56,8 +57,10 @@ def takeover(coll: Collection, _id, prev_owner: str | None, prev_gen: int, owner
 
 
 def renew(coll: Collection, _id, owner: str, generation: int, lease_s: float | None = None) -> bool:
-    r = coll.update_one({"_id": _id, "owner": owner, "generation": generation},
-                        {"$set": {"lease_until": until(lease_s)}})
+    filt = {"_id": _id, "owner": owner, "generation": generation}
+    if settings.lease_deadline_enabled():
+        filt["lease_until"] = {"$gt": now()}
+    r = coll.update_one(filt, {"$set": {"lease_until": until(lease_s)}})
     return r.matched_count == 1
 
 
@@ -72,7 +75,9 @@ def release(coll: Collection, _id, owner: str, generation: int, extra_set: dict 
 
 def fence(coll: Collection, _id, owner: str, generation: int, session: ClientSession) -> None:
     """Call first inside a transaction. Raises Fenced if (owner, generation) is no longer current."""
-    r = coll.update_one({"_id": _id, "owner": owner, "generation": generation},
-                        {"$set": {"fenced_at": now()}}, session=session)
+    filt = {"_id": _id, "owner": owner, "generation": generation}
+    if settings.lease_deadline_enabled():
+        filt["lease_until"] = {"$gt": now()}
+    r = coll.update_one(filt, {"$set": {"fenced_at": now()}}, session=session)
     if r.matched_count != 1:
         raise Fenced(f"{coll.name}/{_id}: lease no longer held by {owner} gen {generation}")

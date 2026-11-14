@@ -340,3 +340,12 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   occurrences it upserts `gardener_notes {_id:signature, source, system, problem, count, evidence,
   text, ts, updated_at}` and emits a `gardener_note` message/thought once per signature. These are
   advisory notes, not upgrade requests; Gardener behavior is unchanged. Full reset clears notes.
+- **Red Commander + 2 Scouts (W18; additive, `RED_COMMANDER=1`, default off, only with `RED_FLEET=1`).** Runs as a
+  thread in `python -m chaos.redfleet` (or `--agent red-commander`). New `world.red_agents` entries: `red-commander`
+  `{kind:"commander", status, planner, campaign?, lessons[≤8], last_reflection, llm_calls, fallback_count}` and
+  `red-scout-hive` / `red-scout-systems` `{kind:"scout", findings, summary, run_id}`. Striker entries gain
+  `order {campaign, run_id, combo, step, of, fault, target, victim?, blame?, to?, status:"queued"|"assigned"|"taken"|
+  "done"|"failed", event?}`; with the switch off Strikers ignore it. Orders are executed only from the Striker's own
+  menu + `validate` and `runner.fire`; `chaos_events.red` may carry `campaign {id, step, of, combo, ordered_by}` and
+  `campaign_reflection`. Thoughts: `role:"red"`, agents `red-commander`, `red-scout-hive`, `red-scout-systems`.
+  No new faults, no new collections, no swarm writes beyond thoughts.

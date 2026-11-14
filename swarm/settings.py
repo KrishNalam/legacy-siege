@@ -32,3 +32,8 @@ def step_hold_s() -> float:
     """Pause between marking a step 'sent' and POSTing it (the judge's kill window)."""
     v = os.environ.get("STEP_HOLD_S")
     return float(v) if v not in (None, "") else config.pace(THINK_S)
+
+
+def lease_deadline_enabled() -> bool:
+    """Opt-in: stop acting if a successful renewal is no longer locally fresh."""
+    return os.environ.get('SWARM_LEASE_DEADLINE', '').strip().lower() in ('1', 'true', 'yes', 'on')

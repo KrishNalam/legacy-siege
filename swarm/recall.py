@@ -69,7 +69,7 @@ def evaluate(hits: list[dict], current_version) -> tuple[dict | None, list[dict]
 def build_playbook(inc: dict, symptom_text: str, root_version: int) -> dict:
     """Every resolved incident becomes a playbook (embedded so the next incident can recall it).
     Built (and embedded) outside the resolve transaction; inserted inside it."""
-    steps = inc.get("steps") or []
+    steps = [s for s in inc.get("steps") or [] if not s.get("superseded_by_replan")]
     vector, model = embed.embed_with_model(symptom_text, "document")
     return {
         "_id": next_id("PB"),

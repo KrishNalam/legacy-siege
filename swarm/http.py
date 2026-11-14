@@ -15,6 +15,7 @@ class SystemsUnavailable(RuntimeError):
 
 class Systems:
     def __init__(self, base_url: str | None = None, timeout: float = 5.0):
+        self.before_op = None
         self._c = httpx.Client(base_url=base_url or config.SYSTEMS_URL, timeout=timeout)
 
     def _get(self, path: str, **params) -> Any:
@@ -52,6 +53,8 @@ class Systems:
         receipt instead of applying twice."""
         last: Exception | None = None
         for i in range(retries):
+            if self.before_op is not None:
+                self.before_op()
             try:
                 r = self._c.post(f"/{sys}/ops/{op}", json={"action_id": action_id, "params": params})
                 r.raise_for_status()
