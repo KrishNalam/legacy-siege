@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from common import config
 from common.db import now, swarm, world
+from warroom.tests.conftest import DBS
 from warroom.bson_json import slim, to_json
 from warroom.stream import to_message
 

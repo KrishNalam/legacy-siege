@@ -17,6 +17,7 @@ import pytest
 from common.db import client, col, now
 from gardener import main as gmain
 from gardener import patcher, pipeline
+from gardener.tests.conftest import SWARM_DB, WORLD_DB
 from scripts import setup_db
 
 FIX = Path(__file__).parent / "fixtures"
@@ -26,10 +27,10 @@ REAL_SYSTEMS = pipeline.SYSTEMS_DIR
 @pytest.fixture(scope="module", autouse=True)
 def isolated_db():
     from common import config
-    assert config.SWARM_DB == "swarm_test_gardener" and config.WORLD_DB == "world_test_gardener"
+    assert config.SWARM_DB == SWARM_DB and config.WORLD_DB == WORLD_DB
     setup_db.ensure()  # real validators (ledger, agents) so our writes are checked against them
     yield
-    for name in ("swarm_test_gardener", "world_test_gardener"):
+    for name in (SWARM_DB, WORLD_DB):
         client().drop_database(name)
 
 

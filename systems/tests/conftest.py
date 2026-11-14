@@ -2,13 +2,15 @@
 
 An externally provided WORLD_DB/SWARM_DB is honoured only if it is already a test DB
 (e.g. the Gardener's WORLD_DB=world_test_gardener); anything else is overridden.
+TEST_DB_SUFFIX (e.g. "_w2") is appended to the default names so parallel runs on one MongoDB never collide.
 """
 import os
 
+_SFX = os.environ.get("TEST_DB_SUFFIX", "")
 if not os.environ.get("WORLD_DB", "").startswith("world_test"):
-    os.environ["WORLD_DB"] = "world_test_systems"
+    os.environ["WORLD_DB"] = f"world_test_systems{_SFX}"
 if not os.environ.get("SWARM_DB", "").startswith("swarm_test"):
-    os.environ["SWARM_DB"] = "swarm_test_systems"
+    os.environ["SWARM_DB"] = f"swarm_test_systems{_SFX}"
 os.environ["PACE"] = "0"
 os.environ["SYSTEMS_TICK_S"] = "0"  # tests drive time with POST /_admin/tick
 
