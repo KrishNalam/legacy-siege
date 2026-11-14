@@ -55,6 +55,7 @@ def baseline() -> None:
         "lying": Counter(), "slow": Counter(), "abend_ticks": 0, "unix_bad_ticks": 0,
         "logs": {s: [] for s in SYSTEMS},
         "receipts": {}, "posts": Counter(), "applied": Counter(), "delayed": [],
+        "outage_until": None, "lose_replies": 0,   # /_admin/outage: the estate's API drops out mid-fix
     })
 
 
@@ -234,6 +235,8 @@ def post_op(sys: str, op: str, body: dict = Body(...)):
             raise HTTPException(422, "action_id required")
         params = body.get("params") or {}
         W["posts"][aid] += 1
+        if W["outage_until"] and _now() < W["outage_until"]:  # down: nothing is recorded or applied
+            raise HTTPException(503, "systems unavailable")
         if aid in W["receipts"]:  # idempotent: stored receipt, nothing new happens
             return W["receipts"][aid]["response"]
         rec = {"system": sys, "op": op, "params": params, "accepted": True, "lied": False, "effective": False,
@@ -255,6 +258,9 @@ def post_op(sys: str, op: str, body: dict = Body(...)):
                     "message": f"{op} {'done' if rec['effective'] else 'had no effect'}", "action_id": aid}
         rec["response"] = resp
         W["receipts"][aid] = rec
+        if W["lose_replies"] > 0:  # applied, but the reply never reaches the caller
+            W["lose_replies"] -= 1
+            raise HTTPException(503, "connection reset after apply")
         return resp
 
 
@@ -311,6 +317,16 @@ def chaos_clear():
 def admin_reset():
     with LOCK:
         baseline()
+        return {"ok": True}
+
+
+@app.post("/_admin/outage")
+def admin_outage(body: dict = Body(default={})):
+    """Systems outage drill: every op POST fails 503 for ``seconds``; the next ``lose_replies`` ops apply but
+    their reply is lost (503 after the receipt is stored)."""
+    with LOCK:
+        W["outage_until"] = _now() + timedelta(seconds=float(body.get("seconds", 0)))
+        W["lose_replies"] = int(body.get("lose_replies", 0))
         return {"ok": True}
 
 
