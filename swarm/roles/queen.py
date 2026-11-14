@@ -43,7 +43,8 @@ def build_graph(agent: Agent):
     def assign(state: QueenState, config) -> dict:
         cutoff = now() - timedelta(seconds=settings.DEAD_AFTER_S)
         busy = {i["owner"] for i in col("incidents").find({"active": True, "owner": {"$ne": None}}, {"owner": 1})}
-        idle = [a["_id"] for a in col("agents").find({"role": "scout", "status": "idle", "last_seen": {"$gte": cutoff}},
+        idle = [a["_id"] for a in col("agents").find({"role": "scout", "status": "idle", "last_seen": {"$gte": cutoff},
+                                                      "phase": {"$ne": "retiring"}},
                                                      {"_id": 1}).sort("_id", 1) if a["_id"] not in busy]
         if not idle and scale.enabled():  # dynamic scaling: a scout is spawned for this incident
             rid = scale.ensure_scout(agent.id, state["incident"])
@@ -112,9 +113,29 @@ def run(agent: Agent) -> None:
             agent.think("Holding the queen lease. Goal: every system green, zero open vulns.", pause=False)
         return True
 
+    def repair_assignments():
+        """Dynamic scaling: an incident handed to a scout that never came up (or retired at that very moment)
+        goes back to the queue, so it is re-assigned or a new scout is spawned for it."""
+        grace = now() - timedelta(seconds=scale.SPAWN_GRACE_S)
+        for inc in col("incidents").find({"active": True, "status": "open", "assigned_to": {"$ne": None}},
+                                         {"assigned_to": 1, "assigned_at": 1, "opened_at": 1}):
+            if (inc.get("assigned_at") or inc["opened_at"]) > grace:
+                continue
+            a = col("agents").find_one({"_id": inc["assigned_to"]}, {"status": 1, "phase": 1})
+            if a and a.get("status") != "dead" and a.get("phase") != "retiring":
+                continue
+            r = col("incidents").update_one({"_id": inc["_id"], "status": "open", "assigned_to": inc["assigned_to"]},
+                                            {"$set": {"assigned_to": None, "assigned_at": None}})
+            if r.modified_count:
+                handled.discard(inc["_id"])
+                agent.think(f"{inc['assigned_to']} never picked up {inc['_id']}; putting it back in the queue.",
+                            incident=inc["_id"], pause=False)
+
     def tick():
         if not hold_crown():
             return
+        if scale.enabled():
+            repair_assignments()
         for inc in col("incidents").find({"active": True, "status": "open", "assigned_to": None}):
             if inc["_id"] in handled:
                 continue

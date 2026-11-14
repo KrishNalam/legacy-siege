@@ -18,6 +18,8 @@ swarm.stats{_id:"swarm_scale"} for the war room.
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -86,7 +88,7 @@ class Supervisor:
             if w.poll() is not None:
                 continue
             try:
-                w.stdin.write((" ".join(args) + "\n").encode())
+                w.stdin.write((shlex.join(args) + "\n").encode())
                 w.stdin.close()
                 p, how = w, "warm"
             except (BrokenPipeError, OSError):
@@ -118,7 +120,7 @@ class Supervisor:
         a retired one deleted its doc, so its number is reused)."""
         from common.db import col  # noqa: PLC0415
         taken = set(self.children) | {d["_id"] for d in col("agents").find(
-            {"_id": {"$regex": f"^{prefix}-[0-9]+$"}}, {"_id": 1})}
+            {"_id": {"$regex": f"^{re.escape(prefix)}-[0-9]+$"}}, {"_id": 1})}
         n = 1
         while f"{prefix}-{n}" in taken:
             n += 1
@@ -128,6 +130,12 @@ class Supervisor:
         if time.monotonic() - self.requests_checked < 0.25:
             return
         self.requests_checked = time.monotonic()
+        try:  # a MongoDB blip must never take the supervisor (and every agent with it) down
+            self._serve_requests()
+        except Exception as e:
+            log(f"spawn requests: {type(e).__name__}: {e}")
+
+    def _serve_requests(self) -> None:
         from common.db import col, now  # noqa: PLC0415
         from swarm import scale  # noqa: PLC0415
         try:
@@ -158,6 +166,10 @@ class Supervisor:
                     log(f"{r['_id']} deferred: {scale.MAX_AGENTS} live agents (ceiling)")
                 continue
             role = r["role"]
+            if role not in ("scout", "worker", "nurse") or (role == "worker" and not r.get("specialty")):
+                col("spawn_requests").update_one({"_id": r["_id"]}, {"$set": {"status": "cancelled",
+                                                                             "note": "unsupported request"}})
+                continue
             prefix = f"worker-{r['specialty']}" if role == "worker" else role
             agent_id = self.free_id(prefix)
             t0 = time.monotonic()
@@ -169,7 +181,8 @@ class Supervisor:
                 "spawn_ms": ms}})
             if role == "scout" and r.get("incident"):  # hand the incident straight to the new scout
                 col("incidents").update_one({"_id": r["incident"], "status": "open", "assigned_to": None},
-                                            {"$set": {"assigned_to": agent_id, "assigned_by": r.get("requested_by")}})
+                                            {"$set": {"assigned_to": agent_id, "assigned_by": r.get("requested_by"),
+                                                      "assigned_at": now()}})
             self.scale["spawned"] += 1
             self.scale["cold"] += 0 if warm else 1
             self.scale["spawn_ms"] = (self.scale["spawn_ms"] + [ms])[-50:]
