@@ -100,3 +100,85 @@ def test_line_up_is_a_units_check():
     assert schema.line_up(good, "balance", [{"acct": "1", "usd": 10_000}, {"acct": "2", "usd": 5_000}],
                           "usd") == (0, 2)                                        # dollars, not cents
     assert schema.line_up(good, "balance", [{"acct": "9", "acct_bal": 1}], "acct_bal") == (0, 0)
+
+
+@pytest.fixture()
+def drifted(estate, db, monkeypatch):
+    """Good sample stored, then the manifest drifts; Claude is faked (no key needed)."""
+    from swarm import schema
+    db.playbooks.delete_many({"fault_class": "schema_drift"})
+    read = lambda s: estate.get(f"/{s}/state").json()  # noqa: E731
+    assert schema.capture_good(read("unix"))
+    _drift_and_break(estate)
+    monkeypatch.setenv("AI_SECOND_OPINION", "1")
+    monkeypatch.setattr(schema.llm, "llm_available", lambda: True)
+    return read
+
+
+def _answer(monkeypatch, text, delay=0.0):
+    import time as _t
+    from swarm import schema
+    calls = []
+
+    def fake(system, prompt, max_tokens=200):
+        calls.append(prompt)
+        _t.sleep(delay)
+        return text
+    monkeypatch.setattr(schema.llm, "complete", fake)
+    return calls
+
+
+def test_claude_proposes_and_rules_precheck(drifted, monkeypatch):
+    from swarm import schema
+    calls = _answer(monkeypatch, 'Sure: {"source": "acct_bal", "hypothesis": "acct_bal is the renamed balance", '
+                                 '"confidence": 0.93, "cites": ["old.balance", "new.acct_bal"]}')
+    f = schema.detect(drifted("unix"))
+    assert len(calls) == 1 and "acct_bal" in calls[0]
+    p = f["params"]
+    assert p["to"] == "acct_bal" and p["proposed_by"] == "claude"
+    ai = p["ai"]
+    assert ai["kind"] == "schema_mapping" and ai["confidence"] == 0.93 and ai["proposed_ops"][0]["op"] == "map_field"
+    assert ai["verdicts"][0]["verdict"] == "accepted" and ai["guard"] == {"verdict": "pending"}
+    assert any(x.startswith("Claude proposed balance → acct_bal") for x in f["facts"])
+
+
+def test_claude_overruled_and_timeout_fall_back_to_rules(drifted, monkeypatch):
+    from swarm import schema
+    _answer(monkeypatch, '{"source": "as_of", "hypothesis": "maybe", "confidence": 0.4}')
+    f = schema.detect(drifted("unix"))
+    assert f["params"]["to"] == "acct_bal" and f["params"]["proposed_by"] == "rules"
+    assert f["params"]["ai"]["verdicts"][0]["verdict"] == "overruled"
+
+    monkeypatch.setattr(schema, "AI_TIMEOUT_S", 0.2)
+    _answer(monkeypatch, '{"source": "acct_bal"}', delay=1.0)
+    f = schema.detect(drifted("unix"))
+    assert f["params"]["to"] == "acct_bal" and f["params"]["ai"]["status"] == "offline"
+    assert "timeout" in f["params"]["ai"]["error"]
+
+
+def test_memory_skips_claude_and_guard_stamps_incident(drifted, db, monkeypatch):
+    from common.db import now
+    from swarm import schema
+    db.playbooks.insert_one({"_id": "PB-T1", "fault_class": "schema_drift", "stale": False, "created_at": now(),
+                             "fix": [{"system": "portal", "op": "map_field",
+                                      "params": {"field": "balance", "source": "acct_bal"}}]})
+    calls = _answer(monkeypatch, '{"source": "acct_bal"}')
+    f = schema.detect(drifted("unix"))
+    assert calls == [] and f["params"]["proposed_by"] == "memory" and f["params"]["ai"]["cites"] == ["PB-T1"]
+    db.incidents.delete_many({"_id": "INC-AI"})
+    db.incidents.insert_one({"_id": "INC-AI", "active": False, "status": "resolved", "system": "portal", "opened_at": now()})
+    schema.record_ai("INC-AI", f["params"]["ai"])
+    doc = schema.guard_verdict("INC-AI", "acct_bal", "values line up with good sample: 3/3 accounts", 2)
+    assert doc["ai"]["guard"]["verdict"] == "verified" and doc["ai"]["guard"]["reason"].startswith("3/3 values match")
+    db.playbooks.delete_many({"_id": "PB-T1"})
+
+
+def test_no_flag_no_ai_field(estate, db, monkeypatch):
+    from swarm import schema
+    read = lambda s: estate.get(f"/{s}/state").json()  # noqa: E731
+    db.playbooks.delete_many({"fault_class": "schema_drift"})
+    schema.capture_good(read("unix"))
+    _drift_and_break(estate)
+    monkeypatch.delenv("AI_SECOND_OPINION", raising=False)
+    f = schema.detect(read("unix"))
+    assert f["params"]["proposed_by"] == "rules" and "ai" not in f["params"]

@@ -19,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from common.db import col, now, txn
 
-from .. import diagnosis, leases, settings, steps, verify
+from .. import diagnosis, leases, schema, settings, steps, verify
 from ..policy import fmt_op
 from ..harness import Agent, checkpointer, main_loop, retrying
 from ..http import SystemsUnavailable
@@ -79,6 +79,12 @@ def build_graph(agent: Agent):
                         + ". Scanning its logs and state for clues.", incident=inc_id, system=sys)
         logs, st = sysc.logs(sys, limit=50, since=since.isoformat()), sysc.state(sys)
         f = diagnosis.classify(sys, h, m, logs, st, probe=sysc.probe)
+        ai = (f.get("params") or {}).pop("ai", None)
+        if ai:  # schema drift: who proposed the mapping (advisory, shared incident.ai shape)
+            try:
+                schema.record_ai(inc_id, ai)
+            except Exception:
+                pass
         agent.think(narrate_findings(f), incident=inc_id, system=sys, pause=task.get("mode") != "confirm")
         return {"findings": f}
 
