@@ -116,7 +116,9 @@ def apply_op(sys: str, op: str, params: dict) -> bool:
         else:
             log("mainframe", "IEF450I", "NIGHTBAT ABEND=S0C7 restart failed: poison record still queued", "ERROR")
     elif op == "rerun_transfer":
-        if mf["batch"]["status"] == "OK":
+        if ux["spool"]["disk_pct"] >= 90:  # like systems/unix.py: no space left on device
+            log("unix", "XFER-E-NOSPC", "xfer_pull: write /var/spool/xfer/in failed: No space left on device", "ERROR")
+        elif mf["batch"]["status"] == "OK":
             ux["transfer"].update(status="ok", last_file_batch_ts=_now())
             ok = True
     elif op == "refresh_cache":

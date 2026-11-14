@@ -407,16 +407,33 @@ def build_graph(agent: Agent):
         sys = first["system"]
         used = sum(len(s.get("attempts") or []) for s in todo)
         agent.set(target=sys, phase="recovering")
+        wait_s = recovery.backoff_s(rnd)
         say(inc_id, f"Recovery {rnd}/{recovery.ROUNDS}: {first['step_id']} {policy.fmt_op(first)} did not take effect "
                     f"after {used} attempt(s): {recovery.why_failed(todo)}. Not giving up: backing off "
-                    f"{recovery.BACKOFF_S * rnd:.0f}s, re-reading {sys}, then a fresh attempt budget.",
+                    f"{wait_s:.0f}s, re-diagnosing {sys}, then a fresh attempt budget.",
             kind="action", system=sys, pause=False)
-        agent.nap(recovery.BACKOFF_S * rnd)
+        agent.nap(wait_s)
         agent.check("incidents", inc_id)
+        since = (inc.get("opened_at") or now()).isoformat()
+        f = recovery.rediagnose(sysc, sys, since=since)
+        replanned = recovery.replan_steps(inc.get("steps") or [], inc_id, f, now()) if f else None
+        if replanned:  # a second fault landed mid-repair: fix it first, then redo the unverified steps
+            new_steps, added = replanned
+            fenced(config, inc_id, {"$set": {"steps": new_steps, "recovery_rounds": rnd, "status": "fixing"},
+                                    "$push": {"recoveries": {
+                                        "round": rnd, "step_ids": [s["step_id"] for s in todo], "attempts_used": used,
+                                        "replan": {"system": f["system"], "fault_class": f["fault_class"],
+                                                   "facts": f.get("facts") or [],
+                                                   "added": [s["step_id"] for s in added]},
+                                        "reason": recovery.why_failed(todo), "ts": now()}}})
+            say(inc_id, f"Re-diagnosis found a new fault on {f['system']}: {f.get('root_cause') or f['fault_class']}. "
+                        f"Re-planning: {', '.join(policy.fmt_op(s) for s in added)} first, then the "
+                        f"{len(todo)} unverified step(s) again.", kind="action", system=f["system"], pause=False)
+            return {"outcome": "await"}
         try:
             h = sysc.health(sys)
             say(inc_id, f"Re-read {sys}: /health {h.get('status')}"
-                        + (f", blames {h['blames']}" if h.get("blames") else "") + ". Re-dispatching "
+                        + (f", blames {h['blames']}" if h.get("blames") else "") + ", no new fault. Re-dispatching "
                         f"{', '.join(s['op'] for s in todo)} with {settings.MAX_ATTEMPTS} more attempts each.",
                 kind="action", system=sys, pause=False)
         except Exception:
