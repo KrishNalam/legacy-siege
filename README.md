@@ -13,12 +13,15 @@ Design doc: https://claude.ai/artifact/TYfnA6aTSG99oMb9t1nzpr
   specialist workers, a guard, nurses, the waggle bus and a sentinel. Each one is a LangGraph graph
   checkpointed into MongoDB. They detect incidents, walk the dependency chain, fix, verify, learn and
   remember.
-- **The Gardener** (`gardener/`): turns a fault that keeps coming back into a permanent code upgrade.
-  It writes a diff, runs the tests and a replay, gets human approval, hot-deploys the patch and then
-  proves it by replaying the attack.
+- **The Gardener** (`gardener/`): a separate system *outside* the swarm (its own process, `gardener.main`;
+  not a bee). It turns a fault that keeps coming back into a permanent code upgrade: it writes a diff, runs
+  the tests and a replay, gets human approval, hot-deploys the patch and then proves it by replaying the
+  attack. Its links to the swarm cross that boundary: the swarm asks it for help and Sentinel #2 hands it
+  repeats; it pauses the bees while it upgrades; it pushes tools and known fixes back to the Scouts; and it
+  upgrades the legacy code.
 - **The War Room** (`warroom/`): a live visualisation that only *watches* MongoDB through change
   streams. It holds no state, and every pixel comes from a change event. Views: `/diagram` (Chaos Monkey →
-  Legacy ← Bees, Gardener below; click or 1-4 to zoom, V toggles Live / How it works), `/flow`, the classic
+  Legacy ← Bees (the swarm, dotted line), the Gardener below and outside the swarm; click or 1-4 to zoom, V toggles Live / How it works), `/flow`, the classic
   page, and `/why` (use cases and how each Statement 3 question is answered). `WARROOM_VIEW=diagram|flow|classic`
   picks what `/` serves (default classic).
 
@@ -71,7 +74,7 @@ workers hop by hop along `blames`. It **plans** the steps, asks the Beekeeper to
 ones *before* sending, and dispatches leased fix tasks to **workers**. Each worker **sends** an attempt.
 Only **guard-1** may set `verified`, using read-back evidence. Once all steps are verified and the systems
 are healthy, the scout **resolves** the incident and saves a **playbook** with an embedding. When the same
-fault class has been resolved twice, the sentinel files an **upgrade request** for the Gardener.
+fault class has been resolved twice, the sentinel files an **upgrade request** for the Gardener, across the swarm boundary.
 
 ## MongoDB features, and where they live
 
