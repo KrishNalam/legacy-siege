@@ -10,9 +10,15 @@ retries it *gives up* (``transfer.status = "failed"``) and needs a manual ``reru
 
 Planted fragility: the spool disk fills; the cron job can die silently (no log line at all).
 Planted vuln: ``/etc/xfer.conf`` is world-writable (0666).
+
+Schema drift (``schema_drift`` chaos): a "vendor patch" silently renames a field in the xfer manifest
+records it hands to the portal (``balance`` -> ``acct_bal``). Unix itself stays healthy; only the
+consumer that still reads the old field breaks. ``GET /unix/state`` exposes a few manifest records
+(``feed.sample``) so the Hive can compare them with a known-good sample.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from systems.base import BATCH_EVERY_TICKS, CASCADE_TICKS, Ctx, LegacySystem, Op, Vuln, iso
@@ -21,6 +27,9 @@ SPOOL = "/var/spool/xfer"
 CONF = "/etc/xfer.conf"
 DISK_FULL_PCT = 95.0
 GIVE_UP_TICKS = BATCH_EVERY_TICKS + CASCADE_TICKS  # retries before xfer_pull gives up on the mainframe
+FEED = "xfer_manifest"
+FEED_SAMPLE = 3                      # manifest records exposed in /state (read-back for schema checks)
+NEXT_NAME = {"balance": "acct_bal", "acct_bal": "ledger_bal", "ledger_bal": "bal_amt"}
 CONF_TEXT = "# xfer.conf - NIGHTBAT pull\nSRC_HOST=mvs1.corp.bank\nSRC_DSN=PROD.NIGHTBAT.OUTPUT(0)\n" \
             f"DEST_DIR={SPOOL}/in\nNOTIFY=portal-soap.corp.bank:8080\n"
 
@@ -41,7 +50,7 @@ class Unix(LegacySystem):
     )
     VULNS = (Vuln("unix-world-writable-conf", "world_writable_config",
                   f"{CONF} is mode 0666: any local user can redirect transfers"),)
-    FAULTS = ("disk_fill", "cron_stop", "config_exploit")
+    FAULTS = ("disk_fill", "cron_stop", "config_exploit", "schema_drift")
 
     # ------------------------------------------------------------ state
     def baseline(self, now: datetime) -> dict[str, dict]:
@@ -52,7 +61,17 @@ class Unix(LegacySystem):
                                   "tampered": False}]},
             "transfer": {"last_file_batch_ts": now, "status": "ok", "ticks_since_file": 0,
                          "last_file": None, "file": {"as_of": now, "balances": None}},
+            # the name the manifest uses for the balance amount; a vendor patch may rename it
+            "feed": {"field": "balance", "schema_version": 1, "patch": None},
         }
+
+    @staticmethod
+    def manifest(ctx: Ctx, limit: int | None = None) -> list[dict]:
+        """The xfer manifest records the portal unmarshals, in the field names unix currently emits."""
+        f = ctx["transfer"]["file"]
+        field = ctx["feed"]["field"]
+        rows = sorted((f.get("balances") or {}).items())[:limit]
+        return [{"acct": a, field: amt, "as_of": iso(f["as_of"])} for a, amt in rows]
 
     @staticmethod
     def conf(ctx: Ctx) -> dict:
@@ -125,7 +144,9 @@ class Unix(LegacySystem):
                 "cron": {"xfer_pull": ctx["cron"]["xfer_pull"]},
                 "config": {f["path"]: f["mode"] for f in ctx["config"]["files"]},
                 "transfer": {"last_file_batch_ts": iso(t["last_file_batch_ts"]), "status": t["status"],
-                             "last_file": t["last_file"]}}
+                             "last_file": t["last_file"]},
+                "feed": {"name": FEED, "schema_version": ctx["feed"]["schema_version"],
+                         "sample": self.manifest(ctx, FEED_SAMPLE)}}
 
     def probe(self, ctx: Ctx, vuln_id: str) -> tuple[bool, str]:
         if vuln_id != "unix-world-writable-conf":
@@ -142,6 +163,8 @@ class Unix(LegacySystem):
             return ctx["cron"]["xfer_pull"] == "running"
         if fault == "config_exploit":
             return not self.probe(ctx, "unix-world-writable-conf")[0]
+        if fault == "schema_drift":  # resolved once the consumer reads the field unix now emits
+            return ctx.peek("portal", "feed").get("map", {}).get("balance") == ctx["feed"]["field"]
         return super().fault_resolved(ctx, fault)
 
     def lie_log(self, ctx: Ctx, op: str) -> None:
@@ -218,8 +241,24 @@ class Unix(LegacySystem):
                                  f'uid=65534 comm="sh" op=write')
         return True, f"{CONF} rewritten by uid nobody: NOTIFY redirected to 203.0.113.66"
 
+    def chaos_schema_drift(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
+        feed = ctx["feed"]
+        old = feed["field"]
+        new = str(params.get("to") or NEXT_NAME.get(old, f"{old}_v{feed['schema_version'] + 1}"))
+        if not new.isidentifier() or new in ("acct", "as_of") or new == old:
+            return False, f"schema_drift: bad new field name {new!r}"
+        feed.update({"field": new, "schema_version": feed["schema_version"] + 1,
+                     "patch": params.get("patch", "SUNWxfer 2.1 (118833-36)")})
+        # what the vendor patch logs: a normal install line, nothing about the manifest format
+        ctx.log("INFO", "PKGADD", f"pkgadd[3121]: Installation of <SUNWxfer> was successful "
+                                  f"({feed['patch']}); xfer_pull restarted")
+        return True, f"xfer manifest field renamed {old} -> {new} (schema v{feed['schema_version']}, silent)"
+
     # ------------------------------------------------------------ legacy screens
     def view(self, ctx: Ctx, name: str, query: dict) -> tuple[str, str]:
+        if name == "manifest":
+            return "application/json", json.dumps({"feed": FEED, "schema_version": ctx["feed"]["schema_version"],
+                                                   "records": self.manifest(ctx)}, indent=1)
         if name == "xfer.conf":
             f = self.conf(ctx)
             return "text/plain", f"$ ls -l {CONF}\n{_ls_mode(f['mode'])} 1 {f['owner'].replace(':', ' ')} 212 {CONF}\n" \

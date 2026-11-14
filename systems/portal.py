@@ -9,6 +9,11 @@ If unix stays unhealthy for CASCADE_TICKS ticks the cache *freezes* (``cache.sta
 the portal turns ``degraded`` blaming ``unix``; only ``refresh_cache`` thaws it, and only
 once the unix transfer is fresh again.
 
+Its XferClient unmarshals the unix manifest by field name (``feed.map``: logical field -> manifest
+field, ``{"balance": "balance"}`` out of the box). If unix starts emitting a different name (schema
+drift) every record fails to unmarshal; after CASCADE_TICKS the cache freezes exactly like a stale
+feed. ``map_field`` re-points the mapping; ``refresh_cache`` then thaws the cache.
+
 Planted vuln: the account search concatenates user input into SQL.
 """
 from __future__ import annotations
@@ -34,6 +39,9 @@ class Portal(LegacySystem):
         Op("apply_patch", {"patch": "parameterize_search"}, False,
            "Hot-deploy patch: account search uses a PreparedStatement.",
            "state.search_patch == 'parameterize_search' and probe portal-sqli-search not exploitable"),
+        Op("map_field", {"field": "balance", "source": "acct_bal"}, False,
+           "Re-point the XferClient field mapping (xfer-mapping.properties, hot reload).",
+           "state.feed.map[field] == source and the unix manifest's source values line up with the last good sample"),
         Op("refresh_cache", {}, False, "Reload the balance cache from the xfer gateway (fails while the feed is stale).",
            "state.cache.stale == false (only possible once unix transfer is fresh)"),
     )
@@ -48,7 +56,15 @@ class Portal(LegacySystem):
             "search": {"patch": "none"},
             "cache": {"balances_as_of": now, "stale": False, "unhealthy_ticks": 0, "balances": None,
                       "tampered": False},
+            "feed": {"map": {"balance": "balance"}, "errors": 0},
         }
+
+    @staticmethod
+    def feed_ok(ctx: Ctx) -> tuple[bool, str, str]:
+        """(can unmarshal, field we read, field unix emits)."""
+        want = ctx["feed"]["map"].get("balance", "balance")
+        have = ctx.peek("unix", "feed").get("field", "balance")
+        return want == have, want, have
 
     # ------------------------------------------------------------ tick
     def tick(self, ctx: Ctx) -> None:
@@ -72,7 +88,21 @@ class Portal(LegacySystem):
                 cache["unhealthy_ticks"] = 0
                 f = ctx.peek("unix", "transfer")["file"]
                 if f["as_of"] > cache["balances_as_of"]:
-                    cache.update({"balances_as_of": f["as_of"], "balances": f.get("balances"), "tampered": False})
+                    ok, want, have = self.feed_ok(ctx)
+                    feed = ctx["feed"]
+                    if ok:
+                        feed["errors"] = 0
+                        cache.update({"balances_as_of": f["as_of"], "balances": f.get("balances"), "tampered": False})
+                    else:
+                        feed["errors"] += 1
+                        ctx.log("ERROR", "SOAP-E-PARSE", f"SEVERE [http-8080-exec-3] c.bank.soap.XferClient - unmarshal "
+                                                         f"failed: element <{want}> missing in xfer manifest record "
+                                                         f"(found: acct, {have}, as_of), retry {feed['errors']}/{CASCADE_TICKS}")
+                        if feed["errors"] >= CASCADE_TICKS:
+                            cache["stale"] = True
+                            ctx.log("ERROR", "SOAP-FAULT", "SEVERE [http-8080-exec-3] c.bank.soap.XferClient - SOAP Fault "
+                                                           "faultcode=Client.Unmarshal faultstring=\"xfer manifest "
+                                                           "unreadable\"; balance cache frozen")
             else:
                 cache["unhealthy_ticks"] += 1
                 ctx.log("WARN", "SOAP-W-SLOW", f"WARN  [http-8080-exec-3] c.bank.soap.XferClient - xfer manifest not "
@@ -96,20 +126,25 @@ class Portal(LegacySystem):
         if s["active"] >= SESSION_MAX:
             return "degraded", None, f"session store exhausted ({s['active']}/{SESSION_MAX}); logins failing"
         if cache["stale"]:
+            if ctx["feed"]["errors"]:
+                return "degraded", "unix", (f"balance feed unreadable: field '{ctx['feed']['map'].get('balance')}' missing "
+                                            f"from xfer manifest; stale balances as of {iso(cache['balances_as_of'])} (HTTP 200)")
             return "degraded", "unix", f"customers see stale balances as of {iso(cache['balances_as_of'])} (HTTP 200)"
         return "up", None, None
 
     def metrics(self, ctx: Ctx) -> dict:
         s, cache = ctx["sessions"], ctx["cache"]
         lat = self.jitter(ctx, 180, 60) + max(0, s["active"] - SESSION_BASE) * 2.5
-        return {"latency_ms": round(lat, 1), "error_rate": 0.02 if s["active"] >= SESSION_MAX else 0.0,
+        err = 0.25 if ctx["feed"]["errors"] else (0.02 if s["active"] >= SESSION_MAX else 0.0)
+        return {"latency_ms": round(lat, 1), "error_rate": err,
                 "queue_depth": max(0, s["active"] - SESSION_MAX) // 10, "disk_pct": 55.0,
                 "last_batch_ok": cache["balances_as_of"], "batch_status": None, "sessions": s["active"]}
 
     def state_view(self, ctx: Ctx) -> dict:
         cache = ctx["cache"]
         return {"sessions": ctx["sessions"]["active"], "search_patch": ctx["search"]["patch"],
-                "cache": {"balances_as_of": iso(cache["balances_as_of"]), "stale": cache["stale"]}}
+                "cache": {"balances_as_of": iso(cache["balances_as_of"]), "stale": cache["stale"]},
+                "feed": {"map": dict(ctx["feed"]["map"]), "errors": ctx["feed"]["errors"]}}
 
     def probe(self, ctx: Ctx, vuln_id: str) -> tuple[bool, str]:
         if vuln_id != "portal-sqli-search":
@@ -145,12 +180,30 @@ class Portal(LegacySystem):
                                    "netbank-search-ps.war: SearchDAO now uses PreparedStatement")
         return True, "OK - Deployed application at context path /netbank"
 
+    def op_map_field(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
+        field, source = str(params.get("field", "balance")), str(params.get("source") or "")
+        if field != "balance":
+            return False, f"FAIL - XferClient has no logical field {field!r}"
+        if not source.isidentifier() or source in ("acct", "as_of"):
+            return False, f"FAIL - invalid manifest field name {source!r}"
+        before = ctx["feed"]["map"].get(field)
+        ctx["feed"]["map"][field] = source
+        ctx["feed"]["errors"] = 0
+        ctx.log("INFO", "MANAGER", f"INFO  [http-8080-exec-2] c.bank.soap.XferClient - xfer-mapping.properties "
+                                   f"reloaded: {field} <- {source} (was {before})")
+        return True, f"OK - {field} now read from manifest field {source} (was {before})"
+
     def op_refresh_cache(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
         t = ctx.peek("unix", "transfer")
         if ctx.peek_status("unix") != "up" or t["status"] != "ok":
             ctx.log("ERROR", "SOAP-FAULT", "SEVERE [http-8080-exec-5] c.bank.soap.XferClient - refresh failed: "
                                            "SOAP Fault Server.Unavailable (xfer manifest stale)")
             return False, "SOAP Fault: Server.Unavailable - xfer gateway manifest is stale"
+        ok, want, have = self.feed_ok(ctx)
+        if not ok:
+            ctx.log("ERROR", "SOAP-E-PARSE", f"SEVERE [http-8080-exec-5] c.bank.soap.XferClient - refresh failed: "
+                                             f"element <{want}> missing in xfer manifest record (found: acct, {have}, as_of)")
+            return False, f"unmarshal failed: manifest has no <{want}> field (it now sends {have})"
         cache = ctx["cache"]
         cache.update({"balances_as_of": t["file"]["as_of"], "balances": t["file"].get("balances"), "stale": False,
                       "unhealthy_ticks": 0, "tampered": False})
