@@ -26,6 +26,7 @@ from pymongo.errors import DuplicateKeyError
 from common.db import col, next_id, now
 from common.events import say
 from common import comms
+from gardener import help as gardener_help
 
 from .. import leases, policy, schema, settings
 from ..harness import Agent, checkpointer, log
@@ -363,14 +364,17 @@ def run(agent: Agent) -> None:
 
 
 def note_repeated_problems(agent):
-    """Sentinel #2 mode: durable advisory notes only, independent of FAILURE_MEMORY."""
-    if not comms.enabled():
+    """Sentinel #2 mode: durable advisory notes, independent of FAILURE_MEMORY. With GARDENER_HELP=1 each
+    problem seen 3+ times is also handed to the Gardener as a real request (gardener.help answers it)."""
+    handoff = gardener_help.enabled()
+    if not (comms.enabled() or handoff):
         return
     groups = {}
     for inc in col('incidents').find({}, {'root_cause_system': 1, 'system': 1, 'fault_class': 1, 'symptoms': 1}):
         sig = lessons.problem_signature(inc)
         g = groups.setdefault('incident:' + sig, {'system': inc.get('root_cause_system') or inc.get('system'),
-            'problem': inc.get('fault_class') or '; '.join(inc.get('symptoms') or [])[:160], 'evidence': [], 'count': 0})
+            'problem': inc.get('fault_class') or '; '.join(inc.get('symptoms') or [])[:160], 'evidence': [], 'count': 0,
+            'fault_class': inc.get('fault_class') if inc.get('fault_class') not in (None, 'unknown') else None})
         g['count'] += 1
         g['evidence'].append(inc['_id'])
     for ls in col('lessons').find({'count': {'$gte': 3}, 'stale': False}):
@@ -386,3 +390,7 @@ def note_repeated_problems(agent):
         if result.upserted_id is not None:
             say(agent.id, 'gardener', 'gardener_note', text, system=g['system'])
             agent.think(text, kind='gardener_note', system=g['system'], pause=False)
+        if handoff and gardener_help.hand_off_repeat(agent.id, sig, g) is not None:
+            where = f" on {g['system']}" if g.get('system') and g['system'] not in str(g['problem']) else ''
+            agent.think(f"Sentinel #2 → Gardener: {g['problem']}{where} repeated {g['count']}× "
+                        f"({', '.join(g['evidence'][-4:])}).", kind='upgrade', system=g['system'], pause=False)

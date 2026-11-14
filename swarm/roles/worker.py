@@ -24,6 +24,7 @@ from ..policy import fmt_op
 from ..harness import Agent, checkpointer, main_loop, retrying
 from ..http import SystemsUnavailable
 from .. import lessons
+from gardener import help as gardener_help
 
 
 LOG_WINDOW_S = 300  # only logs from shortly before the incident opened count as clues
@@ -130,11 +131,17 @@ def build_graph(agent: Agent):
             return {}
         n = len(step.get("attempts") or []) + 1
         aid = steps.attempt_id(step["step_id"], n)
+        advice = {}
+        if n > 2 and gardener_help.enabled():  # failed verification twice: ask the Gardener (GARDENER_HELP=1)
+            advice = ask_gardener(agent, task, step)
+            if advice.get("params"):
+                step = steps.get_step(task["incident"], state["step"])
         # failure memory: this system lied about this op before -> the retry goes straight out
-        fast = n > 1 and bool(step.get("distrust_ack")) and lessons.enabled()
+        fast = n > 1 and ((bool(step.get("distrust_ack")) and lessons.enabled()) or bool(advice.get("fast")))
         if n > 1:
             agent.think(f"Guard rejected {step['action_id']}; opening new attempt {aid}"
-                        + (" at once (a known lie, see the lesson)." if fast else "."), kind="action",
+                        + ((" at once (the Gardener's advice)." if advice.get("fast") else " at once (a known lie, see the lesson).")
+                       if fast else "."), kind="action",
                         incident=task["incident"], system=step["system"], pause=not fast)
         approver = None
         if step.get("approval_id"):
@@ -194,6 +201,49 @@ def build_graph(agent: Agent):
                             ["select", "finish"])
     g.add_edge("finish", END)
     return g.compile(checkpointer=checkpointer())
+
+
+def ask_gardener(agent: Agent, task: dict, step: dict) -> dict:
+    """A step failed verification twice: post a help request with the evidence, wait briefly for the
+    Gardener's answer and return its advice ({} if none). Advice params are written onto the step so the
+    next attempt (and the Guard's read-back of it) uses them. Idempotent: a resumed act reuses the answer."""
+    inc, sid = task["incident"], step["step_id"]
+    attempts = list(step.get("attempts") or [])
+    ledger = list(col("ledger").find({"action_id": {"$in": attempts}}, {"action_id": 1, "evidence": 1, "status": 1})
+                  .sort("ts", 1))
+    evidence = [f"{d['action_id']} {d.get('status')}: {d.get('evidence') or ''}"[:200] for d in ledger]
+    fc = (col("incidents").find_one({"_id": inc}, {"fault_class": 1}) or {}).get("fault_class")
+    req, new = gardener_help.ask(agent.id, inc, step, evidence, fc)
+    if new:
+        last = (ledger[-1].get("evidence") if ledger else None) or step.get("evidence") or "rejected"
+        agent.think(f"{sid} failed verification {len(attempts)}× ({str(last)[:90]}); asking the Gardener for help "
+                    f"({req['_id']}).", kind="handoff", incident=inc, system=step["system"], pause=False)
+    ans = req.get("answer") if req.get("status") == "answered" else gardener_help.await_answer(
+        req["_id"], gardener_help.wait_s(), nap=agent.nap, check=lambda: agent.check("tasks", task["_id"]))
+    if not ans:
+        if new:
+            agent.think(f"No answer from the Gardener in {gardener_help.wait_s():.0f}s; retrying {sid} as planned.",
+                        incident=inc, system=step["system"], pause=False)
+        return {}
+    advice = dict(ans.get("advice") or {})
+    use = []
+    if advice.get("params"):
+        col("incidents").update_one(
+            {"_id": inc}, {"$set": {"steps.$[s].params": advice["params"],
+                                    "steps.$[s].params_before_help": step.get("params") or {}}},
+            array_filters=[{"s.step_id": sid, "s.status": "failed"}])
+        use.append(f"next attempt uses params {advice['params']}")
+    if advice.get("fast"):
+        use.append("next attempt goes out at once")
+    col("incidents").update_one({"_id": inc}, {"$set": {"steps.$[s].gardener_help": {
+        "request": req["_id"], "kind": ans.get("kind"), "ref": ans.get("ref"), "advice": advice}}},
+        array_filters=[{"s.step_id": sid}])
+    if new:
+        agent.think(f"Gardener's answer ({ans.get('kind')}) for {sid}: "
+                    + ("; ".join(use) if use else "nothing to change, retrying as planned")
+                    + "; the Guard still verifies it by read-back.", kind="action", incident=inc,
+                    system=step["system"], pause=False)
+    return advice
 
 
 def reconcile_sent(agent: Agent, task: dict, generation: int, st: dict, adopt: bool = False) -> dict:
