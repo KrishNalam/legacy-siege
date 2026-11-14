@@ -7,6 +7,8 @@ stamped on every chaos event fired by its runs.
 """
 from __future__ import annotations
 
+import os
+
 from common.db import world
 
 from . import faults
@@ -38,6 +40,15 @@ SCENARIOS: list[dict] = [
     {"_id": "free-play", "seed": 0, "title": "Free play — manual chaos buttons only", "steps": []},
 ]
 
+# SCHEMA_DRIFT_DEMO=1 (default off) ends night 3 with the schema-drift beat, after the Gardener's 30 s prove
+# window. Off for scripts.demo_check: its night-3 check expects no incident at all.
+DRIFT_STEP = {"t": 45, "fault": "schema_drift", "target": "unix", "params": {}}
+if os.environ.get("SCHEMA_DRIFT_DEMO", "").lower() in ("1", "true", "on", "yes"):
+    for _s in SCENARIOS:
+        if _s["_id"] == "bank-night-3":
+            _s["steps"] = [*_s["steps"], DRIFT_STEP]
+            _s["title"] += " + schema drift"
+
 
 def _validate(scn: dict) -> None:
     for step in scn["steps"]:
@@ -56,8 +67,10 @@ def seed() -> list[str]:
 def get(name: str) -> dict:
     """Load a scenario from MongoDB, seeding the built-ins on first use."""
     doc = world()["chaos_scenarios"].find_one({"_id": name})
-    if doc is None and any(s["_id"] == name for s in SCENARIOS):
-        seed()
+    builtin = next((s for s in SCENARIOS if s["_id"] == name), None)
+    if builtin is not None and (doc is None or doc.get("steps") != builtin["steps"]):
+        _validate(builtin)  # code is the source of truth (e.g. SCHEMA_DRIFT_DEMO flipped since the last seed)
+        world()["chaos_scenarios"].replace_one({"_id": name}, builtin, upsert=True)
         doc = world()["chaos_scenarios"].find_one({"_id": name})
     if doc is None:
         raise KeyError(f"unknown scenario {name!r}")
