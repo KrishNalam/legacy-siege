@@ -27,7 +27,8 @@ def enabled() -> bool:
     return _on("SWARM_RECOVERY", "1" if _on("RED_FLEET") else "")
 
 
-ROUNDS = int(_f("RECOVERY_ROUNDS", 2))          # fresh attempt budgets before escalating to the Beekeeper
+ROUNDS = int(_f("RECOVERY_ROUNDS", 3))          # recovery rounds (re-diagnose + fresh budget or replan), then escalate
+FIRST_BUDGET = int(_f("RECOVERY_FIRST_BUDGET", 2))  # attempts before the first re-diagnosis (each can cost ~30 s)
 BACKOFF_S = _f("RECOVERY_BACKOFF_S", 3.0)       # base backoff, doubled each round: let late ops land / lies drain
 BACKOFF_MAX_S = _f("RECOVERY_BACKOFF_MAX_S", 20.0)
 HEALTH_GRACE_S = _f("RECOVERY_HEALTH_GRACE_S", 8.0)  # steps verified but a system still down this long: re-diagnose
@@ -99,7 +100,7 @@ def replan_steps(steps: list[dict], inc_id: str, findings: dict, ts) -> tuple[li
 
 def budget(step: dict) -> int:
     """How many attempts this step may use (a recovery round raises it)."""
-    return int(step.get("max_attempts") or settings.MAX_ATTEMPTS)
+    return int(step.get("max_attempts") or (max(FIRST_BUDGET, 1) if enabled() else settings.MAX_ATTEMPTS))
 
 
 def why_failed(steps: list[dict]) -> str:

@@ -46,9 +46,8 @@ def test_disk_fill_mid_repair_replans_instead_of_looping(db, fake):
     fired = []
 
     def strike():
-        inc = col('incidents').find_one({'active': True}) or {}
-        done = {s['op'] for s in inc.get('steps') or [] if s['status'] == 'verified'}
-        if not fired and 'restart_batch' in done:
+        # the restart_batch approval is up: the mainframe half of the plan is done, unix is next
+        if not fired and col('approvals').find_one({'desc': {'$regex': '^restart_batch'}}):
             fake.post('/unix/_chaos/disk_fill', json={'params': {}})
             fired.append(True)
     try:
