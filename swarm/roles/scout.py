@@ -61,6 +61,8 @@ def scout_config(inc_id: str, agent_id: str, generation: int) -> dict:
 
 def build_graph(agent: Agent):
     sysc = agent.systems
+    from .. import tool_delivery
+    tool_delivery.start(agent)
 
     # ------------------------------------------------------------------ helpers
     def inc_doc(inc_id: str) -> dict:
@@ -328,12 +330,19 @@ def build_graph(agent: Agent):
                 drove = second_opinion.decide(agent.id, inc, state, raw, state["root"], state["fault_class"],
                                               say=lambda t: say(inc_id, t, system=state["root"], pause=False))
                 raw = drove["plan"]
+            from .. import platform
+            tool_hit = platform.lookup(state['fault_class'], state.get('params') or {}, sysc.version,
+                                       received=tool_delivery.refresh(agent))
+            if tool_hit and (drove is None or raw == policy.fix_plan(state['fault_class'], state.get('params') or {})):
+                tool, raw = tool_hit
+                raw = [{**s, 'tool_id': tool['_id']} for s in raw]
+                say(inc_id, f"Scout selected platform tool {tool['name']} ({tool['source']}).", kind="recall", pause=False)
             plan_steps = [{
                 "step_id": f"{inc_id}-s{i}", "n": i, "desc": s["desc"], "system": s["system"], "op": s["op"],
                 "params": s["params"], "destructive": bool(s["destructive"] or (s["system"], s["op"]) in policy.DESTRUCTIVE),
                 "task_id": None, "status": "planned", "action_id": None, "attempts": [], "agent": None,
                 "evidence": None, "approval_id": None, "ts": now(),
-                **{k: s[k] for k in ("source", "ai_why") if s.get(k)}} for i, s in enumerate(raw, 1)]
+                **{k: s[k] for k in ("source", "ai_why", "tool_id") if s.get(k)}} for i, s in enumerate(raw, 1)]
             fenced(config, inc_id, {"$set": {
                 "steps": plan_steps, "status": "fixing", "root_cause_system": state["root"],
                 "fault_class": state["fault_class"], "root_cause": state.get("root_cause"),
@@ -412,7 +421,9 @@ def build_graph(agent: Agent):
             return {"outcome": "approve"}
         task_id = f"{inc_id}-f{first['n']}"
         ids = [s["step_id"] for s in group]
-        new_task(inc, task_id, "fix", policy.SPECIALTY[first["system"]], step_ids=ids, system=first["system"])
+        new_task(inc, task_id, "fix", policy.SPECIALTY[first["system"]], step_ids=ids, system=first["system"],
+                 **({"tool_ids": sorted({s["tool_id"] for s in group if s.get("tool_id")})}
+                    if any(s.get("tool_id") for s in group) else {}))
         fenced(config, inc_id, {"$set": {"steps.$[g].task_id": task_id, "status": "fixing"}},
                array_filters=[{"g.step_id": {"$in": ids}}])
         agent.set(target=first["system"], phase="fixing")

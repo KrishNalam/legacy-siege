@@ -22,7 +22,7 @@ from common.db import col, now
 
 from .. import recovery, schema, settings, steps, verify
 from ..harness import Agent, checkpointer, log
-from .. import lessons
+from .. import lessons, platform
 
 SENT_STEPS = [
     {"$match": {"active": True, "steps.status": "sent"}},
@@ -65,7 +65,8 @@ def build_graph(agent: Agent):
 
     def remember(inc: str, st: dict, aid: str, evidence: str) -> None:
         """Failure memory: a rejected attempt becomes a durable lesson tagged with the system version."""
-        if not lessons.enabled():
+        platform.judged(agent, inc, st, False)
+        if not (lessons.enabled() or platform.enabled()):
             return
         try:
             rejected = recovery.reject_bad_memory(inc, evidence, agent.id)
@@ -113,6 +114,7 @@ def build_graph(agent: Agent):
         if state["applied"]:
             if steps.verify(inc, st, aid, f"{facts}; health.{sys}={state['health']}", agent.id):
                 agent.think(f"Verified {aid}: {facts}.", kind="verify", incident=inc, system=sys, pause=False)
+                platform.judged(agent, inc, st, True)
                 if op == "map_field":
                     learn_mapping(inc, st, facts)
                 return {"verdict": "verified"}
@@ -230,6 +232,7 @@ def run(agent: Agent) -> None:
                                         max_await_time_ms=int(settings.POLL_S * 1000)) as stream:
                 while not agent.stop.is_set():
                     stream.try_next()
+                    agent.pause_point()
                     pending = list(col("incidents").aggregate(SENT_STEPS))
                     for p in pending:
                         st = p["step"]

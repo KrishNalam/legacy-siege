@@ -117,7 +117,8 @@ def test_log_flood_bounded_batches_and_merged_counts(db, monkeypatch):
         batches.append(len(lines))
         return real_post(agent, lines, **kw)
     monkeypatch.setattr(waggle, 'post_batch', recording)
-    agent = SimpleNamespace(id='waggle-1', stop=threading.Event(), nap=lambda s: agent.stop.wait(s))
+    agent = SimpleNamespace(id='waggle-1', stop=threading.Event(), nap=lambda s: agent.stop.wait(s),
+                            pause_point=lambda: None)
     t = threading.Thread(target=waggle.run_prioritiser, args=(agent,), daemon=True)
     t.start()
     try:

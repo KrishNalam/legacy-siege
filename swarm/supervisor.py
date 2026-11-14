@@ -54,7 +54,9 @@ def roster() -> list[tuple[str, str]]:
     raw = os.environ.get("SWARM_ROSTER", "").strip()
     if not raw:
         from gardener.help import enabled as gardener_help  # structure v3: Sentinel #2 is its own agent
-        return list(DYNAMIC_ROSTER if dynamic() else ROSTER) + ([("sentinel", "sentinel-2")] if gardener_help() else [])
+        from swarm.platform import enabled as platform_on  # platform engineers: Sentinel-type, subtype platform
+        return (list(DYNAMIC_ROSTER if dynamic() else ROSTER) + ([("sentinel", "sentinel-2")] if gardener_help() else [])
+                + ([("sentinel", "platform-1")] if platform_on() else []))
     return [tuple(x.split(":", 1)) for x in raw.split(",") if ":" in x]  # type: ignore[misc]
 
 

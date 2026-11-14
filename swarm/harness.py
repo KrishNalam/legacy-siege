@@ -15,7 +15,7 @@ import threading
 import time
 from datetime import datetime
 
-from common import config, events, llm
+from common import config, events, llm, pause
 from common.db import client, col, now
 
 from . import leases, scale, settings
@@ -215,6 +215,24 @@ class Agent:
             self.register()
             col("agents").update_one({"_id": self.id}, {"$set": {**fields, "last_seen": now()}})
 
+    def pause_point(self) -> None:
+        """GARDENER_PAUSE=1: hold here while the Gardener upgrades a system. Heartbeats and work-lease
+        renewals keep running on their own thread, so nobody is declared dead and nothing is taken over.
+        The pause is a lease (common/pause.py): if the Gardener dies, it lapses and we carry on."""
+        if not pause.enabled():
+            return
+        before: dict = {}
+
+        def on_pause(doc):
+            before.update(col("agents").find_one({"_id": self.id}, {"phase": 1}) or {})
+            log(self.id, f"paused: Gardener upgrading {doc.get('system')}")
+            self.set(phase="paused")
+
+        def on_resume():
+            self.set(phase=before.get("phase"))
+
+        pause.wait_while_paused(self.stop.is_set, on_pause, on_resume)
+
     def rest(self) -> None:
         status, target = self.idle_spot()
         self.set(status=status, target=target, phase=None, incident=None, task=None)
@@ -256,6 +274,7 @@ def retrying(agent: Agent, fn, what: str, attempts: int = 5):
 def main_loop(agent: Agent, tick, interval: float) -> None:
     """Run `tick()` forever (until SIGTERM), surviving transient errors."""
     while not agent.stop.is_set():
+        agent.pause_point()
         t0 = time.monotonic()
         try:
             tick()

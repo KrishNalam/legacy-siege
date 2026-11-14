@@ -119,6 +119,7 @@ def run(agent: Agent) -> None:
             with swarm().watch(PIPELINE, full_document="updateLookup", resume_after=token,
                                max_await_time_ms=500) as stream:
                 while not agent.stop.is_set():
+                    agent.pause_point()
                     ev = stream.try_next()
                     if ev is None:
                         continue
@@ -211,6 +212,7 @@ def run_prioritiser(agent):
                     col('system_logs').watch(comms.LOG_PIPELINE, resume_after=log_token,
                                              max_await_time_ms=100) as logs:
                 while not agent.stop.is_set():
+                    agent.pause_point()
                     lines, log_docs = [], []
                     for name, ev in drain([('swarm', stream), ('logs', logs)]):
                         doc = ev.get('fullDocument') or {}

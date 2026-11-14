@@ -211,7 +211,15 @@ export function installBeats(stage, panels, caption) {
       }
     } else if (doc && !prev) caption("Sentinel: recurring fault", `${doc.fault_class || doc.weakness} on ${doc.system} → Gardener`, C.green);
   });
-  on("change:stats", (doc, prev, m) => { panels.renderTopbar(); if (m.key === "current") panels.renderIncident(); });
+  on("change:stats", (doc, prev, m) => {
+    panels.renderTopbar(); if (m.key === "current") panels.renderIncident();
+    if (m.key === "gardener_pause") {  // GARDENER_PAUSE=1: the Gardener holds every agent while it upgrades
+      if (doc?.active && !prev?.active) {
+        caption(`Gardener upgrading ${doc.system} — all agents paused`, `swarm + Red fleet hold still · ${doc.upgrade || ""} · auto-resume if the Gardener dies`, C.gold);
+        stage.banner("ALL AGENTS PAUSED", `Gardener upgrading ${doc.system}`, C.gold, 4);
+      } else if (prev?.active && doc && !doc.active) caption("Agents resumed", `${doc.system} upgrade written and reloaded`, C.green);
+    }
+  });
   on("change:runs", () => panels.renderTopbar());
 }
 
