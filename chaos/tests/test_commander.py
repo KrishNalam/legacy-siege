@@ -53,6 +53,7 @@ def test_off_by_default_strikers_ignore_orders(systems, monkeypatch, fast):
 
 
 def test_combos_are_vetted_and_feasible(monkeypatch):
+    monkeypatch.setenv("RED_FLEET", "1")   # false_log is a fleet-only fault; the Commander only runs inside the fleet
     monkeypatch.setenv("CHAOS_AGENT_FREEZE", "1")
     monkeypatch.delenv("RED_FLEET_AGENTS", raising=False)
     s = snap(agents=HIVE, mid_send=[a for a in HIVE if a["phase"] == "step_sent"], incidents=[INC])
@@ -66,6 +67,7 @@ def test_combos_are_vetted_and_feasible(monkeypatch):
 
 
 def test_claude_pick_must_be_on_the_menu(systems, monkeypatch, fast):
+    monkeypatch.setenv("RED_FLEET", "1")   # false_log is a fleet-only fault; the Commander only runs inside the fleet
     _night_with_pending_mainframe_step()
     monkeypatch.setattr(commander.llm, "llm_available", lambda: True)
     monkeypatch.setattr(commander.llm, "complete", lambda *a, **k: '{"combo": "nuke-it", "reason": "x"}')
