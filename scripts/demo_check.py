@@ -68,6 +68,12 @@ def md5(p: Path) -> str:
     return hashlib.md5(p.read_bytes()).hexdigest()
 
 
+def worker_kill(ev: dict) -> bool:
+    """A kill chaos event aimed at a worker (by role selector, or by a worker's agent id)."""
+    sel = (ev.get("params") or {}).get("selector") or {}
+    return sel.get("role") == "worker" or str(sel.get("agent") or "").startswith("worker")
+
+
 # ---------------------------------------------------------------------------------------------- driver
 class Demo:
     def __init__(self, base: str, approve_delay: float, report: Report, autoplay: bool = False,
@@ -163,6 +169,18 @@ class Demo:
         log(f"autoplay started {scenario} as {cur['run_id']} (waited {secs:.1f}s)")
         return cur
 
+    def red_worker_kill(self, run_id: str, obs: dict) -> dict | None:
+        """The Red Assassin's first kill of a worker this night. Beat d is the worker kill + nurse takeover; the
+        Assassin may also take out a queen first (the standby takes the crown), which is logged, not scored."""
+        for ev in self.w.chaos_events.find({"run_id": run_id, "fault": "agent_kill", "by": "red-assassin",
+                                            "_id": {"$nin": obs.setdefault("other_kills", [])}}).sort("ts", 1):
+            if worker_kill(ev):
+                return ev
+            obs["other_kills"].append(ev["_id"])
+            log(f"Red Assassin fired {ev['_id']} {ev.get('params', {}).get('selector')} (not a worker: a takeover, "
+                "not the scored kill)")
+        return None
+
     def play_night(self, scenario: str, kill: bool, timeout: float) -> dict:
         """Start a scenario and service it until its incident closes. Returns observations."""
         out = self.start(scenario)
@@ -189,17 +207,23 @@ class Demo:
                     approved.add(apr["_id"])
                     self.approve(apr["_id"])
                     step = apr.get("step_id", "")
-                    if kill and not self.red_kill and obs["kill_fired_at"] is None and "restart_batch" in apr.get("desc", ""):
+                    if kill and obs["kill_fired_at"] is None and "restart_batch" in apr.get("desc", "") \
+                            and not (self.red_kill and self.red_worker_kill(run_id, obs)):
+                        if self.red_kill:  # the Assassin spent its strike elsewhere (e.g. a queen): press Kill
+                            log(f"no Red worker kill yet (other kills: {obs.get('other_kills') or []}); "
+                                "the presenter presses Kill")
+                            obs["kill_source"] = "manual"
                         log(f"POST /api/kill {{role: worker, phase: step_sent}} (restart_batch {step} is next)")
                         self.post("/api/kill", {"selector": {"role": "worker", "phase": "step_sent"}})
                         obs["kill_fired_at"] = time.monotonic() - t0
                         obs["kill_wall"] = datetime.now(tz=timezone.utc)
             if kill and self.red_kill and obs["kill_fired_at"] is None:  # the Red Assassin presses Kill itself
-                ev = self.w.chaos_events.find_one({"run_id": run_id, "fault": "agent_kill", "by": "red-assassin"})
+                ev = self.red_worker_kill(run_id, obs)
                 if ev:
                     log(f"Red Assassin fired {ev['_id']} {ev.get('params', {}).get('selector')}")
                     obs["kill_fired_at"] = time.monotonic() - t0
                     obs["kill_wall"] = ev["ts"]
+                    obs["kill_event"] = ev["_id"]
             inc = self.s.incidents.find_one({"run_id": run_id}, sort=[("opened_at", 1)])
             if inc:
                 obs["incident"] = inc["_id"]
@@ -295,8 +319,11 @@ class Demo:
         if obs["kill_fired_at"] is None:
             self.r.add("d. agent kill → nurse takeover", False, "kill never fired (no restart_batch approval)")
             return
+        q = {"_id": obs["kill_event"]} if obs.get("kill_event") else \
+            {"run_id": obs["run_id"], "fault": "agent_kill", "source": "manual"} if obs.get("kill_source") else \
+            {"run_id": obs["run_id"], "fault": "agent_kill"}
         ev, _ = self.wait("kill event", lambda: self.w.chaos_events.find_one(
-            {"run_id": obs["run_id"], "fault": "agent_kill", "status": {"$in": ["ok", "failed"]}}), 40)
+            {**q, "status": {"$in": ["ok", "failed"]}}), 40)
         res = (ev or {}).get("result") or {}
         if not res.get("ok"):
             self.r.add("d. worker SIGKILLed in step_sent", False, f"kill event: {res}")
