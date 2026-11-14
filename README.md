@@ -152,6 +152,48 @@ The entire demo runs with **no keys**. The policy that decides which op runs is 
 | 2:30 | (watch) / **↻ Night 3 replay** | The same attack hits the mainframe and nothing happens: the record is rejected, no incident opens, the upgrade is "proven" | `prove.incident_opened:false` |
 | 2:50 | **Atlas** | Every collection with its indexes (unique / partial / TTL / vector), validators and a real document; click anything to see its document | `GET /api/atlas`, `GET /api/doc/...` |
 
+### Demo pace (stage run, opt-in)
+
+Every knob below defaults to the old behaviour; put these lines in `.env` for the judged run, then
+`box serve restart legacy-siege`:
+
+```
+PACE=0.1                 # deliberate "thinking" pauses (latency already paces the screen)
+STEP_HOLD_S=0.6          # keep the agent-kill window open even with a tiny PACE
+PROVE_WINDOW_S=12        # Gardener prove window (default 30; unpatched code opens an incident in ~6-15 s)
+NIGHT3_WATCH_S=12        # demo_check's night-3 watch (default 25)
+DEAD_AFTER_S=7           # Undertaker: >2 missed heartbeats (HEARTBEAT_S=3); task leases stay LEASE_S=10
+SYSTEMS_TICK_FIXED=1     # 1 s tick on a fixed cadence (default sleeps 1 s AFTER a ~2 s remote tick)
+CASCADE_TICKS=2          # staleness spreads one hop per 2 ticks instead of 3
+DEMO_AUTOPLAY=1          # 3 clicks: Night 1, the first Approve, Kill (see below)
+```
+
+**Autoplay** (`DEMO_AUTOPLAY=1`, war room): Night 2 starts by itself `AUTOPLAY_GAP_S` (4 s) after Night 1
+is green (with the next-round reset), and Night 3 after Night 2 is green *and* the upgrade is proven.
+The first approval (Night 1's `restart_batch`) stays a manual click; every later approval auto-approves
+after `AUTOPLAY_APPROVE_S` (3 s) with a visible "auto-approved (same as last time)" line
+(`decided_by: autoplay`). The kill stays a manual press. `demo_check` follows along on its own when
+`DEMO_AUTOPLAY=1` is set (or pass `--autoplay`).
+
+Measured with `scripts.demo_check` (26/26 every run), time from the Night 1 click to the end of
+Night 3. "RTT" is the MongoDB round trip, emulated with a TCP delay proxy in front of local MongoDB
+(the Atlas Sandbox from this box is ~90 ms):
+
+| settings | RTT | Night 1 | Night 2 | Gardener | Night 3 | Night 1 → end of Night 3 |
+|---|---|---|---|---|---|---|
+| defaults, PACE 0.6 | 0 ms | 49.6 s | 27.1 s | 40 s | 25 s | ~143 s |
+| demo pace (PACE 0.3, prove 12, watch 12) | 0 ms | 35.7 s | 20.2 s | 22 s | 12 s | ~95 s |
+| demo pace + autoplay | 0 ms | 35.9 s | 22.2 s | 22 s | 12 s | ~100 s |
+| demo pace (PACE 0.3) | 94 ms | 106.5 s | 73.4 s | 28 s | 13 s | ~233 s |
+| full stage block above | 94 ms | 103.7 s | 70.7 s | 40 s | 14 s | ~243 s |
+| full stage block above | 20 ms | 38.7 s | 24.5 s | 22 s | 12 s | **~108 s** |
+| Atlas Sandbox, defaults, PACE 0.6 (W4) | ~90 ms | 119 s | 69 s | | | 305 s whole check |
+
+At ~90 ms RTT the run is bound by MongoDB round trips (each swarm step is ~20-30 of them: LangGraph
+checkpoints, transactions, leases), not by pauses, so these settings alone cannot fit 3 minutes. Cut
+the RTT: run the stack in the same region as the cluster, or put the cluster in a region close to the
+box.
+
 The fault launcher (top right) fires any single fault by hand, e.g. `lying_success`, `slow_apply`,
 `disk_fill`, `cron_stop`, `session_leak`, or the exploits `sqli_exploit` / `config_exploit`, which open
 a security incident.
