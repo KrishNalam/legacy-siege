@@ -89,11 +89,14 @@ export function installBeats(stage, panels, caption) {
       const who = doc.owner || "scout-1";
       const p = stage.posOfAgent(who); if (p) stage.float(p.x, p.y - 44, ai.kind === "schema_mapping" ? "Claude: field mapping" : "Claude: second opinion", C.violet, 13, 3);
       const what = ai.kind === "schema_mapping" ? "AI field mapping" : "AI second opinion";
-      const title = bad.length ? `${what}: ${bad.length} op${bad.length === 1 ? "" : "s"} overruled`
+      const title = ai.decision === "ai_plan" ? "Claude's plan passed the guardrail: it runs"
+        : ai.decision === "rules_plan" ? "Guardrail overruled Claude: rules plan runs"
+        : bad.length ? `${what}: ${bad.length} op${bad.length === 1 ? "" : "s"} overruled`
         : ai.kind === "schema_mapping" ? `${what}: verified by read-back`
         : ai.agrees_with_policy ? `${what}: agrees`
         : !ai.root_agrees ? `${what}: different root cause` : `${what}: missed ${missed.length} step${missed.length === 1 ? "" : "s"}`;
-      const sub = bad.length ? `${bad[0].op} → ${bad[0].rule || "refused"}: ${bad[0].reason || ""}`
+      const sub = ai.decision_reason && ai.decision ? ai.decision_reason
+        : bad.length ? `${bad[0].op} → ${bad[0].rule || "refused"}: ${bad[0].reason || ""}`
         : ai.kind === "schema_mapping" ? (ai.hypothesis || "rules had no fix → Claude proposed a mapping → Guard verified")
         : ai.agrees_with_policy ? "Claude reached the same plan independently · the guardrail still checks every op"
         : !ai.root_agrees ? `Claude: ${ai.root_system}/${ai.fault_class} · policy: ${ai.policy?.root_system}/${ai.policy?.fault_class} · policy decides`
