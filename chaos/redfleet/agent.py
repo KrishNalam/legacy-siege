@@ -162,7 +162,8 @@ class Attacker:
                "incident_ids": [i["id"] for i in snap.get("incidents", [])]}
         if order:
             red["campaign"] = {"id": order["campaign"], "step": order["step"] + 1, "of": order["of"],
-                               "combo": order["combo"], "ordered_by": commander.COMMANDER_ID}
+                               "combo": order["combo"], "ordered_by": commander.COMMANDER_ID,
+                               **{k: order[k] for k in ("planning_id", "priority", "focus") if order.get(k)}}
         try:
             ev = runner.fire(s["fault"], s["target"], s["params"], manual=False, run_id=snap["run_id"],
                              extra={"by": self.p.id, "red": red})
