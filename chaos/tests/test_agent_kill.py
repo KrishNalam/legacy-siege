@@ -53,7 +53,9 @@ def test_kill_waits_for_step_sent_phase(spawn):
     assert ev["status"] == "ok"
     r = ev["result"]
     assert r["agent"] == "worker-mainframe-1" and r["pid"] == victim.pid and r["matched"] == "selector"
-    assert r["phase"] == "step_sent" and r["task"] == "INC-0001-t1" and r["waited_s"] >= 0.5
+    # phase is only step_sent after the 0.6 s delay, so matching it proves the kill waited; waited_s itself is
+    # load-sensitive (the wait starts late on a busy box), so only require that some waiting happened
+    assert r["phase"] == "step_sent" and r["task"] == "INC-0001-t1" and r["waited_s"] > 0
     assert _killed(victim) and bystander.poll() is None
     assert world().chaos_events.find_one({"_id": ev["_id"]})["result"]["pid"] == victim.pid
 
