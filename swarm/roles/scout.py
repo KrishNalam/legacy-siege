@@ -27,7 +27,7 @@ from common.events import say as bus
 
 from .. import leases, policy, recall, recovery, scale, second_opinion, settings, steps
 
-from ..harness import Agent, checkpointer, main_loop, retrying
+from ..harness import Agent, checkpointer, log, main_loop, retrying
 from .. import lessons
 
 
@@ -177,11 +177,19 @@ def build_graph(agent: Agent):
                 usable, skipped = lessons.skip_misfits(hits, summary, usable, q, inc_id)
             except Exception:
                 skipped = []
+        vetoed = []
+        try:  # provenance: a remembered fix that the Guard never verified is tampered memory (poison)
+            usable, vetoed = recovery.vet_recall(inc_id, hits, summary, usable, q, agent.id)
+        except Exception as e:
+            log(agent.id, f"memory provenance check skipped: {type(e).__name__}: {e}")
         fenced(config, inc_id, {"$set": {"recall": {
             "query": q, "filter": flt, "hits": summary, "used": usable is not None, "model": flt.get("embedding_model"),
             "threshold": shared.RECALL_THRESHOLD, "num_candidates": recall.NUM_CANDIDATES, "limit": recall.LIMIT,
-            "ts": now()}}})
+            "ts": now(), **({"memory_rejected": [r["playbook_id"] for r in summary if r.get("rejected")]}
+                            if vetoed else {})}}})
         inc = inc_doc(inc_id)
+        for line in vetoed:
+            say(inc_id, line, kind="reject", system=inc["system"], pause=False)
         for line in skipped:
             say(inc_id, line, kind="recall", system=inc["system"], pause=False)
         if usable:
