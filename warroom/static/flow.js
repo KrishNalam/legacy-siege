@@ -247,7 +247,11 @@ function renderApproval() {
 async function decide(decision) {
   const id = shownApproval; if (!id) return;
   $("#approval").hidden = true;
-  try { await api("POST", `/api/approvals/${encodeURIComponent(id)}`, { decision }); } catch (e) { toast(e.message); }
+  try { await api("POST", `/api/approvals/${encodeURIComponent(id)}`, { decision }); } catch (e) {
+    // The request failed: bring the card back (if it is still pending) so the click can be retried.
+    if (shownApproval === id) { shownApproval = null; renderApproval(); }
+    toast(`Couldn’t send your answer (${e.message}). Please try again.`);
+  }
 }
 
 // ------------------------------------------------------------------ details (the jargon lives here)
