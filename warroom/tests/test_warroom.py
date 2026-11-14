@@ -211,3 +211,35 @@ def test_static_page_served(app_client):
     assert r.status_code == 200 and "LEGACY SIEGE" in r.text
     assert app_client.get("/app.js").status_code == 200
     assert app_client.get("/js/stage.js").status_code == 200
+
+
+def test_token_write_retries_and_preserves_newer_token():
+    """A failed save/reconnect must not discard the newest delivered stream position."""
+    import asyncio
+    from types import SimpleNamespace
+    from pymongo.errors import AutoReconnect
+    from warroom.stream import Hub
+
+    async def exercise():
+        hub = Hub()
+        hub.client = object()
+        hub._token, hub._token_dirty = {"_data": "one"}, True
+        saved = []
+
+        async def update(*args, **kwargs):
+            saved.append(args[1]["$set"]["token"])
+            if len(saved) == 1:
+                raise AutoReconnect("temporary outage")
+            if len(saved) == 2:
+                hub._token = {"_data": "two"}
+
+        hub.swarm = lambda: SimpleNamespace(stats=SimpleNamespace(update_one=update))
+        await hub._save_token()
+        assert hub._token_dirty
+        await hub._save_token()
+        assert hub._token_dirty  # event two arrived while saving event one
+        await hub._save_token()
+        assert not hub._token_dirty
+        assert saved == [{"_data": "one"}, {"_data": "one"}, {"_data": "two"}]
+
+    asyncio.run(exercise())

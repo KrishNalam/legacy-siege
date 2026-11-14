@@ -122,7 +122,7 @@ class Hub:
     # ---------------------------------------------------------------- lifecycle
     def start(self) -> None:
         self.client = AsyncMongoClient(config.MONGODB_URI, tz_aware=True, appname="legacy-siege-warroom",
-                                       serverSelectionTimeoutMS=5000)
+                                       serverSelectionTimeoutMS=5000, connectTimeoutMS=5000, socketTimeoutMS=15000)
         loop = asyncio.get_running_loop()
         self._tasks = [loop.create_task(self._watch_forever(), name="warroom-watch"),
                        loop.create_task(self._tick_forever(), name="warroom-tick"),
@@ -171,12 +171,16 @@ class Hub:
     async def _save_token(self) -> None:
         if not self._token_dirty or self._token is None or self.client is None:
             return
-        self._token_dirty = False
-        with contextlib.suppress(PyMongoError):
+        token = self._token
+        try:
             await self.swarm().stats.update_one(
                 {"_id": TOKEN_DOC},
-                {"$set": {"token": self._token, "saved_at": datetime.now(timezone.utc), "restarts": self.restarts}},
+                {"$set": {"token": token, "saved_at": datetime.now(timezone.utc), "restarts": self.restarts}},
                 upsert=True)
+        except PyMongoError:
+            return  # retain the dirty token for the next tick
+        if self._token == token:  # a newer event may have arrived during the write
+            self._token_dirty = False
 
     async def _save_tokens_forever(self) -> None:
         while True:
@@ -188,7 +192,7 @@ class Hub:
         first = True
         while True:
             try:
-                token = await self._load_token()
+                token = self._token if self._token is not None else await self._load_token()
                 try:
                     stream = await self.client.watch(change_pipeline(), full_document="updateLookup",
                                                      resume_after=token, max_await_time_ms=500)
