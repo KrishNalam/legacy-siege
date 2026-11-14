@@ -85,3 +85,53 @@ def reject_bad_memory(incident: str, evidence: str, agent: str) -> str | None:
                           rec.get('query', ''), {'facts': [evidence], 'fault_class': 'an unverified repair'}, agent, pb['system_version'])
     col('incidents').update_one({'_id': incident}, {'$set': {'recall.rejected': pb['_id']}})
     return pb['_id']
+
+
+DYNAMIC_FACT_CLASSES = ('batch_abort', 'schema_drift')  # today's read-back facts replace the remembered ones
+
+
+def vet_recall(incident: str, hits: list[dict], summary: list[dict], usable: dict | None, query: str,
+               agent: str) -> tuple[dict | None, list[str]]:
+    """Provenance check at recall time for playbooks whose remembered facts are re-derived today
+    (wrong-record memory poisoning would otherwise be silently neutralised, never seen).
+
+    A playbook's fix must match the steps the Guard verified in the incident it was learned from. If it
+    doesn't, the memory was tampered with: retire it (stale), store a misfit lesson, and fall back to the
+    next usable hit (or the chain walk). Returns (usable, narration lines). Same switches as
+    ``reject_bad_memory``.
+    """
+    from common.db import col, now
+    from . import lessons
+
+    if not enabled() or not lessons.enabled():
+        return usable, []
+    sig = lambda s: (s.get('system'), s.get('op'), s.get('params') or {})
+    lines, rejected = [], set()
+    for row in summary:
+        if not row.get('usable') or row.get('fault_class') not in DYNAMIC_FACT_CLASSES:
+            continue
+        pb = col('playbooks').find_one({'_id': row['playbook_id']}, {'embedding': 0})
+        src = pb and pb.get('incident') and col('incidents').find_one({'_id': pb['incident']}, {'steps': 1})
+        if not src:
+            continue  # no provenance to judge by (incident history wiped): keep the memory
+        verified = [sig(s) for s in src.get('steps') or [] if not s.get('superseded_by_replan')]
+        remembered = [sig(s) for s in pb.get('fix') or []]
+        if remembered == verified:
+            continue
+        bad = next((r for r in remembered if r not in verified), remembered[0] if remembered else None)
+        evidence = (f"remembered {bad[1]} {bad[2]} on {bad[0]} was never verified in {pb['incident']}"
+                    if bad else f"fix differs from what was verified in {pb['incident']}")
+        col('playbooks').update_one({'_id': pb['_id']}, {'$set': {
+            'stale': True, 'staled_at': now(), 'stale_reason': f'Rejected memory at recall: {evidence[:180]}'}})
+        lessons.record_misfit(incident, {'playbook_id': pb['_id'], 'system': pb.get('system'),
+                                         'fault_class': pb.get('fault_class')},
+                              query, {'facts': [evidence], 'fault_class': 'a tampered memory'}, agent,
+                              pb.get('system_version'))
+        row.update(usable=False, stale=True, rejected=True)
+        rejected.add(pb['_id'])
+        lines.append(f"Rejected memory {pb['_id']}: {evidence}. Its fix doesn't match what the Guard verified; "
+                     "retiring it as stale and planning from today's read-back instead.")
+    if usable is not None and usable['_id'] in rejected:
+        ok = {r['playbook_id'] for r in summary if r.get('usable')}
+        usable = next((h for h in hits if h['_id'] in ok), None)
+    return usable, lines
