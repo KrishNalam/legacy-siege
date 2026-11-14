@@ -44,11 +44,13 @@ CHAIN = {"portal": "unix", "unix": "mainframe", "mainframe": None, "console": "p
 
 EMBED_DIM = int(os.environ.get("EMBED_DIM", 1024))
 VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY") or None
-VOYAGE_MODEL = os.environ.get("VOYAGE_MODEL", "voyage-3.5")
+VOYAGE_MODEL = os.environ.get("VOYAGE_MODEL", "voyage-4")
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY") or None
 LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-5-5")
 LLM_TIMEOUT_S = _f("LLM_TIMEOUT_S", 8)
+EMBED_TIMEOUT_S = _f("EMBED_TIMEOUT_S", 4)  # per Voyage call; on timeout/error we fall back to local-hash
+EMBED_COOLDOWN_S = _f("EMBED_COOLDOWN_S", 30)  # after a Voyage failure, skip Voyage this long (no repeated stalls)
 
 
 def pace(seconds: float) -> float:

@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import threading
+import time
 
 from . import config
 
@@ -35,23 +37,49 @@ def _local(text: str) -> list[float]:
 
 
 LOCAL_MODEL = "local-hash-v1"
+_voyage_down_until = 0.0  # monotonic time before which we don't even try Voyage (set after a failure)
+
+
+def _voyage(text: str, input_type: str) -> list[float]:
+    """One Voyage call, hard-bounded to EMBED_TIMEOUT_S of wall clock (the SDK's own timeout/retry handling
+    can take 3x longer, e.g. on an unreachable host). A straggler thread is a daemon and just finishes later."""
+    import voyageai
+
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            vo = voyageai.Client(api_key=config.VOYAGE_API_KEY, timeout=config.EMBED_TIMEOUT_S, max_retries=0)
+            r = vo.embed([text], model=config.VOYAGE_MODEL, input_type=input_type, output_dimension=config.EMBED_DIM)
+            box["vec"] = list(r.embeddings[0])
+        except BaseException as e:  # noqa: BLE001 - reported to the caller below
+            box["err"] = e
+
+    t = threading.Thread(target=run, daemon=True, name="voyage-embed")
+    t.start()
+    t.join(config.EMBED_TIMEOUT_S)
+    if t.is_alive():
+        raise TimeoutError(f"voyage embed exceeded {config.EMBED_TIMEOUT_S}s")
+    if "err" in box:
+        raise box["err"]
+    if len(box["vec"]) != config.EMBED_DIM:
+        raise ValueError(f"voyage returned {len(box['vec'])}-d vector, index expects {config.EMBED_DIM}")
+    return box["vec"]
 
 
 def embed_with_model(text: str, input_type: str = "document") -> tuple[list[float], str]:
     """Embed ``text`` and say which model ACTUALLY produced the vector.
 
-    If Voyage is configured but the call fails, we fall back to the local model so the demo never
-    dies on a network blip — and the returned model id says so, so a fallback vector is never stored
-    or queried under Voyage's label (the two vector spaces must never mix)."""
-    if config.VOYAGE_API_KEY:
+    If Voyage is configured but the call fails or times out, we fall back to the local model so the demo
+    never dies or stalls on a network blip (and skip Voyage for EMBED_COOLDOWN_S so a dead network costs
+    one wait, not one per call). The returned model id says which model was used, so a fallback vector is
+    never stored or queried under Voyage's label (the two vector spaces must never mix)."""
+    global _voyage_down_until
+    if config.VOYAGE_API_KEY and time.monotonic() >= _voyage_down_until:
         try:
-            import voyageai
-
-            vo = voyageai.Client(api_key=config.VOYAGE_API_KEY)
-            r = vo.embed([text], model=config.VOYAGE_MODEL, input_type=input_type, output_dimension=config.EMBED_DIM)
-            return list(r.embeddings[0]), config.VOYAGE_MODEL
+            return _voyage(text, input_type), config.VOYAGE_MODEL
         except Exception:
-            pass
+            _voyage_down_until = time.monotonic() + config.EMBED_COOLDOWN_S
     return _local(text), LOCAL_MODEL
 
 
