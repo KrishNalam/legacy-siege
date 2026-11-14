@@ -168,7 +168,7 @@ def reset(body: dict = Body(default_factory=dict)) -> dict:
     out: dict[str, Any] = {"mode": mode}
     try:  # stop pending scenario steps first (reset must still work if chaos isn't importable)
         runner, _ = _chaos()
-        out["cancelled_runs"] = runner.cancel()
+        out["cancelled_runs"] = runner.cancel(keep_memory=mode == "next_round")  # poisoned memory is memory too
     except HTTPException:
         out["cancelled_runs"] = []
     if mode == "full":

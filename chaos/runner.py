@@ -199,14 +199,17 @@ def run_scenario(name: str, round: int | None = None, block: bool = False, annou
     return run_id
 
 
-def cancel(run_id: str | None = None) -> list[str]:
+def cancel(run_id: str | None = None, keep_memory: bool = False) -> list[str]:
     """Stop pending steps of one run (or all runs). Already-fired faults stay fired.
-    Cancelling everything (a reset) also calls off manual kills still hunting for a victim."""
+    Cancelling everything (a reset) also calls off manual kills still hunting for a victim and removes Red's
+    planted memory, unless ``keep_memory`` (a next-round reset keeps the Hive's memory, poisoned or not, so a
+    poison planted after Night 1 is what Night 2 recalls)."""
     if run_id is None:
         # Thaw first: memory cleanup must never prevent waking a stopped bee.
-        for label, cleanup in [("thaw", lambda: faults.thaw_overdue(all_=True)),
-                               ("cancel hunts", faults.cancel_pending_hunts),
-                               ("clear planted memory", faults.clear_planted_memory)]:
+        cleanups = [("thaw", lambda: faults.thaw_overdue(all_=True)), ("cancel hunts", faults.cancel_pending_hunts)]
+        if not keep_memory:
+            cleanups.append(("clear planted memory", faults.clear_planted_memory))
+        for label, cleanup in cleanups:
             try:
                 cleanup()
             except Exception:
