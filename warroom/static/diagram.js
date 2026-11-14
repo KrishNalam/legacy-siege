@@ -65,6 +65,9 @@ function stepByAction(inc, aid) {
   for (const i of inc ? [inc] : state.incidents.values()) for (const s of i.steps || []) if ((s.attempts || []).includes(aid) || s.action_id === aid) return s;
   return null;
 }
+// a Guard/Scout "Rejected memory …" line is kind:reject too, but it caught a poisoned memory, not a lying system
+const isMemReject = (t) => /^Rejected memory/.test(String(t?.text || ""));
+const isLie = (t) => t?.kind === "reject" && !isMemReject(t);
 function translate(t) {
   const x = String(t.text || ""), k = t.kind, inc = state.incidents.get(t.incident);
   let m;
@@ -78,6 +81,7 @@ function translate(t) {
   if ((m = x.match(/^Root cause after (\d+) hops?.*?\[(\w+) on (\w+)\]/))) return { text: `Found it after ${m[1]} check${m[1] === "1" ? "" : "s"}: the real problem is the <b>${S(m[3])}</b> (${esc(FAULT[m[2]] || m[2])}).`, story: true };
   if ((m = x.match(/^Root cause.*?\[(\w+) on (\w+)\]/))) return { text: `The real problem is the <b>${S(m[2])}</b> (${esc(FAULT[m[1]] || m[1])}).`, story: true };
   if ((m = x.match(/^Plan, (\d+) steps?/))) return { text: `Made a ${m[1]}-step fix plan.`, story: true };
+  if (isMemReject(t)) return { text: `<b>Caught a poisoned memory</b>: the remembered fix didn’t match what the Guard verified. Retired it${/Restored /.test(x) ? " and restored the verified one" : ""}.`, story: true };
   if (k === "reject") { const s = t.system || stepByAction(inc, (x.match(/INC-\S+-a\d+/) || [])[0])?.system; return { text: `Re-checked the ${S(s || "system")} → <b>it LIED</b>: said “done”, nothing changed. Rejected.`, story: true }; }
   if ((m = x.match(/^Verified (\S+-a(\d+))/))) { const st = stepByAction(inc, m[1]); const n = +m[2]; return { text: `${n > 1 ? "Second try is real: " : "Confirmed: "}“${esc(op(st?.op))}” really happened on the ${S(st?.system || t.system || "system")} <span class="g">✓</span>`, story: true }; }
   if ((m = x.match(/^(\w+) on (\w+) is destructive/))) return { text: `“${esc(Op(m[1]))}” is risky. Asking a human first.`, story: true };
@@ -180,7 +184,7 @@ function nowLine() {
   if (apr) return apr.kind === "upgrade" ? `Waiting for <span class="a">your OK</span> to deploy the Gardener’s code fix.` : `Waiting for <span class="a">your OK</span>: a risky step needs a human.`;
   const inc = focusIncident();
   const rid = runId();
-  const recentReject = [...state.thoughts].reverse().find((t) => t.kind === "reject" && serverNow() - ts(t.ts) < 7000);
+  const recentReject = [...state.thoughts].reverse().find((t) => isLie(t) && serverNow() - ts(t.ts) < 7000);
   if (recentReject) return `The checker caught the ${esc(sn(recentReject.system || "mainframe"))} <b>lying</b>: it said “done”, nothing changed.`;
   const deadNow = [...state.agents.values()].find((a) => a.status === "dead" && a.role !== "nurse" && (a.task || a.incident));
   const lastHo = inc && (inc.handoffs || [])[inc.handoffs.length - 1];
@@ -294,9 +298,10 @@ const SHORT_OPS = { quarantine_record: "Set aside the bad record", restart_batch
   refresh_cache: "Refresh balances", map_field: "Use the new field name" };
 const sop = (o) => SHORT_OPS[o] || Op(o);
 const PERSONA = { batch_abort: "SABOTEUR", disk_fill: "SABOTEUR", cron_stop: "SABOTEUR", session_leak: "SABOTEUR",
-  agent_kill: "ASSASSIN", lying_success: "LIAR", slow_apply: "LIAR", false_log: "LIAR",
+  agent_kill: "ASSASSIN", agent_freeze: "ASSASSIN", lying_success: "LIAR", slow_apply: "LIAR", false_log: "LIAR", lie_to_agent: "LIAR",
+  poison_memory: "MEMORY",
   sqli_exploit: "HACKER", config_exploit: "HACKER", credential_exploit: "HACKER", schema_drift: "DRIFTER" };
-const persona = (e) => String(e?.red?.persona || PERSONA[e?.fault] || "ATTACKER").toUpperCase();
+const persona = (e) => String(e?.red?.persona || PERSONA[e?.fault] || "ATTACKER").toUpperCase().replace(/ STRIKER$/, ""); // "Memory Striker" → MEMORY
 
 function seatMap() {
   const out = {}; let spare = 0;
@@ -342,7 +347,7 @@ function seatModel(a, since, lt, inc) {
   }
   if (a.status === "standby") cls += " standby";
   if (a.phase === "awaiting_approval") cls += " ask";
-  if (role === "guard" && t?.kind === "reject" && serverNow() - ts(t.ts) < 15000) { cls = "work caught"; ph = "CAUGHT A LIE"; }
+  if (role === "guard" && t?.kind === "reject" && serverNow() - ts(t.ts) < 15000) { cls = "work caught"; ph = isMemReject(t) ? "CAUGHT A POISONED MEMORY" : "CAUGHT A LIE"; }
   else if (role === "guard" && t?.kind === "verify" && fresh) { cls += " ok"; ph = "VERIFIED ✓"; }
   if (t?.kind === "handoff" && fresh && role === "nurse") { cls = "work saved"; ph = "TOOK OVER A JOB"; }
   const ro = state.roster instanceof Map ? state.roster.get(a._id) : null; // W22 comms roster, when it is on
@@ -379,9 +384,9 @@ const sysBox = (s) => ({ x: SYSXY[s][0], y: SYSXY[s][1], w: SW, h: SH });
 // ------------------------------------------------------------------ attack → defence pairs
 function defenceFor(e, nightIncs) {
   const t0 = ts(e.ts);
-  if (e.fault === "agent_kill") {
+  if (e.fault === "agent_kill" || e.fault === "agent_freeze") { // a frozen bee loses its lease like a dead one: same nurse takeover
     const v = e.result?.agent;
-    if (!v) return ["failed", "error"].includes(e.status) || e.result?.how === "gave_up" ? { c: "wait", t: "NO BUSY AGENT TO KILL" } : { c: "wait", t: "HUNTING A BUSY AGENT…" };
+    if (!v) return ["failed", "error"].includes(e.status) || e.result?.how === "gave_up" ? { c: "wait", t: `NO BUSY AGENT TO ${e.fault === "agent_kill" ? "KILL" : "FREEZE"}` } : { c: "wait", t: "HUNTING A BUSY AGENT…" };
     if (roleOf(v) === "queen") {
       const q = [...state.thoughts].reverse().find((t) => /takes the queen lease/.test(t.text || "") && ts(t.ts) >= t0);
       return q ? { c: "ok", t: `${U(agentName(q.agent))} TOOK OVER AS QUEEN` } : { c: "wait", t: "BACKUP QUEEN NOTICES THE SILENCE…" };
@@ -391,10 +396,22 @@ function defenceFor(e, nightIncs) {
     return { c: "wait", t: "A NURSE PICKS UP ITS JOB…" };
   }
   if (["lying_success", "slow_apply", "false_log"].includes(e.fault)) {
-    const rj = state.thoughts.find((t) => t.kind === "reject" && ts(t.ts) >= t0 && (!t.system || t.system === e.target));
+    const rj = state.thoughts.find((t) => isLie(t) && ts(t.ts) >= t0 && (!t.system || t.system === e.target));
     const st = nightIncs.flatMap((i) => i.steps || []).find((s) => s.system === e.target && (s.attempts || []).length > 1);
     if (rj || st) return { c: "ok", t: `GUARD CAUGHT THE LIE${st?.status === "verified" ? " · REDONE, VERIFIED" : " (ACK ≠ APPLIED)"}` };
     return { c: "wait", t: "THE GUARD RE-CHECKS EVERY “DONE”" };
+  }
+  if (e.fault === "lie_to_agent") { // an injected log line: workers treat logs as data, the Guard's read-back decides
+    const rj = state.thoughts.find((t) => isLie(t) && ts(t.ts) >= t0 && (!t.system || t.system === e.target));
+    if (rj) return { c: "ok", t: "LOG DOUBTED · GUARD READ-BACK CAUGHT IT" };
+    return { c: "wait", t: "LOGS ARE DATA · GUARD READS BACK" };
+  }
+  if (e.fault === "poison_memory") { // judged where the plant is recalled, possibly a later night
+    if (["failed", "error"].includes(e.status) || e.result?.skipped) return { c: "wait", t: "NO MEMORY TO POISON" };
+    const mr = state.thoughts.find((t) => isMemReject(t) && ts(t.ts) >= t0);
+    const ri = [...state.incidents.values()].find((i) => ts(i.opened_at) >= t0 - 3000 && (i.recall?.rejected || (i.recall?.hits || []).some((h) => h.rejected)));
+    if (mr || ri) return { c: "ok", t: /Restored /.test(mr?.text || "") ? "RECALL REJECTED · VERIFIED FIX RESTORED" : "GUARD REJECTED THE POISONED FIX" };
+    return { c: "wait", t: "RECALL MUST MATCH WHAT THE GUARD VERIFIED" };
   }
   const after = nightIncs.filter((i) => ts(i.opened_at) >= t0 - 3000);
   const inc = after.find((i) => i.root_cause_system === e.target || (i.affected || []).includes(e.target) || i.system === e.target)
@@ -420,7 +437,8 @@ const ATKWORD = {
   false_log: (e) => `PLANTED FALSE LOGS ON ${U(sn(e.target))}`,
   batch_abort: (e) => `CORRUPTED THE ${U(sn(e.target))} BATCH`, disk_fill: (e) => `FILLED ${U(sn(e.target))}’S DISK`,
   cron_stop: (e) => `FROZE ${U(sn(e.target))}’S JOBS`, session_leak: (e) => `JAMMED ${U(sn(e.target))} SESSIONS`,
-  schema_drift: (e) => `RENAMED A FIELD ON ${U(sn(e.target))}`, agent_kill: (e) => (e.result?.agent ? `KILLED ${U(agentName(e.result.agent))}` : "HUNTING AN AGENT"),
+  schema_drift: (e) => `RENAMED A FIELD ON ${U(sn(e.target))}`, lie_to_agent: (e) => `PLANTED A LYING LOG ON ${U(sn(e.target))}`,
+  poison_memory: () => "POISONED A REMEMBERED FIX", agent_freeze: (e) => (e.result?.agent ? `FROZE ${U(agentName(e.result.agent))}` : "HUNTING AN AGENT"), agent_kill: (e) => (e.result?.agent ? `KILLED ${U(agentName(e.result.agent))}` : "HUNTING AN AGENT"),
   sqli_exploit: (e) => `BROKE IN TO ${U(sn(e.target))}`, config_exploit: (e) => `TAMPERED WITH ${U(sn(e.target))}`,
   credential_exploit: (e) => `USED A DEFAULT PASSWORD ON ${U(sn(e.target))}`,
 };
@@ -530,7 +548,7 @@ function renderBees() {
   const lt = lastThoughts(since);
   const seats = seatMap();
   // lies caught this night (Guard rejects)
-  const rejects = state.thoughts.filter((t) => t.kind === "reject" && ts(t.ts) >= since && !String(t.agent || "").startsWith("red-"));
+  const rejects = state.thoughts.filter((t) => isLie(t) && ts(t.ts) >= since && !String(t.agent || "").startsWith("red-"));
   const lieSys = new Set(rejects.map((t) => t.system || stepByAction(null, (String(t.text).match(/INC-\S+-a\d+/) || [])[0])?.system || "mainframe"));
   for (const s2 of (live?.steps || [])) if ((s2.attempts || []).length > 1) lieSys.add(s2.system);
   const lastRj = rejects[rejects.length - 1];
@@ -688,7 +706,8 @@ function rosterRowsHtml(n = 5) {
 }
 
 // ================================================================== level 0: four boxes · zoom in / out
-// CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES, THE GARDENER below Legacy pointing up into it.
+// CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES (the swarm), THE GARDENER below Legacy pointing up into it: a separate
+// system OUTSIDE the swarm; help/repeats, pause and tools/known fixes are arrows across the swarm boundary.
 const BOXR = {
   chaos: { x: 40, y: 104, w: 360, h: 420 }, legacy: { x: 500, y: 104, w: 600, h: 420 },
   bees: { x: 1200, y: 104, w: 360, h: 420 }, gardener: { x: 580, y: 608, w: 440, h: 206 },
@@ -745,10 +764,10 @@ function watchForPulses(m, prev) {
   if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") pulse("fix", "var(--green)");
 }
 
-// the Bees box's hive grid: one cell per agent
+// the Bees box's hive grid: one cell per swarm agent (the Gardener is a separate system outside the swarm)
 function hiveCells() {
   const R = state.roster instanceof Map ? state.roster : null;
-  return [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"))
+  return [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener")
     .sort((a, b) => String(a._id).localeCompare(String(b._id), undefined, { numeric: true }))
     .map((a) => {
       const r = R?.get(a._id), role = a.role || roleOf(a._id);
@@ -772,7 +791,7 @@ function legacyChain(inc, lieSys) {
   return `${box("portal")}${arrow("portal", "unix")}${box("unix")}${arrow("unix", "mainframe")}${box("mainframe")}`;
 }
 function liesTonight(since, live) {
-  const rejects = state.thoughts.filter((t) => t.kind === "reject" && ts(t.ts) >= since && !String(t.agent || "").startsWith("red-"));
+  const rejects = state.thoughts.filter((t) => isLie(t) && ts(t.ts) >= since && !String(t.agent || "").startsWith("red-"));
   const lieSys = new Set(rejects.map((t) => t.system || stepByAction(null, (String(t.text).match(/INC-\S+-a\d+/) || [])[0])?.system || "mainframe"));
   for (const s2 of (live?.steps || [])) if ((s2.attempts || []).length > 1) lieSys.add(s2.system);
   return { rejects, lieSys };
@@ -791,7 +810,7 @@ function renderOverview() {
   const since = (runStartedAt() || 0) - 5000;
   const inc = focusIncident(), live = inc?.active ? inc : null;
   const ds = duels(), lt = lastThoughts(since);
-  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"));
+  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener"); // swarm only
   const dead = agents.filter((a) => a.status === "dead").length, working = agents.filter((a) => a.status === "working" || a.phase).length;
   const { rejects, lieSys } = liesTonight(since, live);
   const hos = nightIncidents().flatMap((i) => i.handoffs || []).length;
@@ -817,7 +836,7 @@ function renderOverview() {
   const lastDuel = ds[ds.length - 1];
   const chaos = `<div class="big chaos ${ds.length ? "hot" : ""}" data-zoom="chaos" style="${pos(B.chaos)}">
     <div class="bh"><span class="bt">CHAOS MONKEY</span><span class="dim">US, ATTACKING</span></div>
-    <div class="pers">${["SABOTEUR", "LIAR", "ASSASSIN", "HACKER", "DRIFTER"].map((n) => `<span class="${struck.has(n) ? "on" : ""}">${n}</span>`).join("")}</div>
+    <div class="pers">${["SABOTEUR", "LIAR", "ASSASSIN", "HACKER", "DRIFTER", "MEMORY"].map((n) => `<span class="${struck.has(n) ? "on" : ""}">${n}</span>`).join("")}</div>
     <div class="bl-k">ATTACK <span class="ar">→</span> DEFENCE</div>
     ${ds.length ? ds.slice(-2).map((d) => `<div class="duo"><div><span class="pn">${esc(d.who)}</span> ${esc(d.atk)}</div><div class="def ${d.def.c}">↳ ${esc(d.def.t)}</div></div>`).join("") : '<div class="bl dim">—</div>'}
     ${liveLine("chaos", lastDuel ? `<span class="r">${esc(lastDuel.who)}</span> ${esc(lastDuel.atk)}` : '<span class="dim">READY</span>')}
@@ -846,7 +865,7 @@ function renderOverview() {
   // THE GARDENER
   const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
   const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="${pos(B.gardener)}">
-    <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">PERMANENT FIXES</span></div>
+    <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">OUTSIDE THE SWARM</span></div>
     <div class="gsteps">${["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"].map((n, i) => `<span class="${u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "cur" : ""}">${n}</span>`).join("")}</div>
     ${liveLine("gardener", u ? (u.status === "proven" ? `<span class="g">${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}: ATTACK REPLAYED, NOTHING BROKE</span>` : esc((gThought ? (translate(gThought)?.text || "").replace(/<[^>]+>/g, "") : String(u.status)).toUpperCase())) : '<span class="dim">WAITING FOR A REPEAT</span>')}
     <div class="look" style="height:24px;line-height:22px"><span>4</span>LOOK INSIDE +</div></div>`;
@@ -865,11 +884,14 @@ function renderOverview() {
     lie: { d: `M${bx - 6} 330 L${lx2 + 12} 330`, cls: `${rejects.length ? "red" : ""} ${lieFresh ? "on" : ""}`, label: rejects.length ? "LIE CAUGHT" : "CHECKS", lx: (bx + lx2) / 2, ly: 322 },
     kill: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y - 6} L${B.chaos.x + B.chaos.w / 2} 92 L${B.bees.x + B.bees.w / 2} 92 L${B.bees.x + B.bees.w / 2} ${B.bees.y - 12}`, cls: `red ${killFresh ? "on" : ""}`, label: "KILLS A BEE", lx: 800, ly: 88 },
     code: { d: `M800 ${gy - 6} L800 ${B.legacy.y + B.legacy.h + 12}`, cls: `${deployed ? "amb" : ""} ${u?.status === "deployed" ? "on" : ""}`, label: deployed ? `NEW CODE V${u.version_after ?? 2}` : "NEW CODE", lx: 810, ly: (gy + B.legacy.y + B.legacy.h) / 2 + 4, anchor: "start" },
-    req: { d: `M${B.bees.x + B.bees.w / 2} ${B.bees.y + B.bees.h + 6} L${B.bees.x + B.bees.w / 2} ${gy + 60} L${B.gardener.x + B.gardener.w + 12} ${gy + 60}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "SAME FAILURE ×2", lx: B.bees.x + B.bees.w / 2 - 10, ly: gy + 52, anchor: "end" },
+    req: { d: `M${B.bees.x + B.bees.w / 2} ${B.bees.y + B.bees.h + 6} L${B.bees.x + B.bees.w / 2} ${gy + 60} L${B.gardener.x + B.gardener.w + 12} ${gy + 60}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "ASKS FOR HELP · REPEATS", lx: B.bees.x + B.bees.w / 2 - 10, ly: gy + 52, anchor: "end" },
+    tools: { d: `M${B.gardener.x + B.gardener.w + 6} ${gy + 110} L1460 ${gy + 110} L1460 ${B.bees.y + B.bees.h + 20}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: "TOOLS + KNOWN FIXES → SCOUTS", lx: B.gardener.x + B.gardener.w + 20, ly: gy + 102, anchor: "start" },
+    pause: { d: `M${B.gardener.x + B.gardener.w + 6} ${gy + 160} L1530 ${gy + 160} L1530 ${B.bees.y + B.bees.h + 20}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: "PAUSE WHILE UPGRADING", lx: B.gardener.x + B.gardener.w + 20, ly: gy + 152, anchor: "start" },
     prove: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y + B.chaos.h + 6} L${B.chaos.x + B.chaos.w / 2} ${gy + 60} L${B.gardener.x - 12} ${gy + 60}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? "REPLAYED: NOTHING BROKE" : "PROOF: REPLAY", lx: B.chaos.x + B.chaos.w / 2 + 10, ly: gy + 52 },
   };
   const mk = (cls) => (cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i");
   const W = [{ k: "defs", html: `<defs>${[["r", "var(--red)"], ["a", "var(--amber)"], ["g", "var(--green)"], ["i", "var(--faint)"]].map(([n, c]) => `<marker id="ah-${n}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("")}</defs>` }];
+  W.push({ k: "swarm-edge", html: `<g><rect class="swarm-edge" x="${B.bees.x - 16}" y="${B.bees.y - 4}" width="${B.bees.w + 30}" height="${B.bees.h + 18}"/><text class="wl swarm-edge-l" x="${B.bees.x - 10}" y="${B.bees.y + B.bees.h + 34}" text-anchor="end">THE SWARM = DOTTED LINE ↗</text></g>` });
   for (const [k, w] of Object.entries(WIRES)) W.push({ k, html: `<g><path id="wire-${k}" class="w ${w.cls}" d="${w.d}" marker-end="url(#ah-${mk(w.cls)})"/><text class="wl ${w.cls.replace(/\bon\b/, "")}" x="${w.lx}" y="${w.ly}" text-anchor="${w.anchor || "middle"}">${esc(w.label)}</text></g>` });
   const now = Date.now();
   for (let i = pulses.length - 1; i >= 0; i--) if (now - pulses[i].at > 1400) pulses.splice(i, 1);
@@ -951,7 +973,7 @@ const HOW = {
     ],
     e: [["sent", "req", ""], ["req", "write", ""], ["write", "test", ""], ["test", "ok", ""], ["ok", "deploy", ""], ["deploy", "legacy", "NEW CODE", "amb"],
       ["legacy", "prove", "ATTACK AGAIN", "red"], ["prove", "stale", "", "faint"]],
-    note: "CLAUDE ONLY EXPLAINS THE FIX · NOTHING SHIPS WITHOUT TESTS AND A HUMAN OK · IT IS PROVEN BY THE SAME ATTACK",
+    note: "A SEPARATE SYSTEM OUTSIDE THE SWARM · CLAUDE ONLY EXPLAINS THE FIX · NOTHING SHIPS WITHOUT TESTS AND A HUMAN OK · PROVEN BY THE SAME ATTACK",
   },
 };
 let mode = "live"; // live | how
@@ -990,7 +1012,8 @@ function setMode(m) {
 function renderChaos() {
   const ds = duels();
   const PERS = [["SABOTEUR", "Legacy breakage: crashed batches, full disks, dead scheduled jobs, stuck sessions."], ["ASSASSIN", "Really kills (SIGKILL) an agent's process in the middle of a job."],
-    ["LIAR", "Makes a system answer “done” without doing anything, or apply late."], ["HACKER", "Walks in through holes planted in the old systems."], ["DRIFTER", "Silently renames data fields under the agents."]];
+    ["LIAR", "Makes a system answer “done” without doing anything, or apply late."], ["HACKER", "Walks in through holes planted in the old systems."], ["DRIFTER", "Silently renames data fields under the agents."],
+    ["MEMORY", "Poisons a fix the Hive remembers, so recall must match what the Guard verified."]];
   const struck = new Map(); for (const d of ds) struck.set(d.who, (struck.get(d.who) || 0) + 1);
   const clock = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour12: false }); };
   const rows = ds.slice(-15);
@@ -1085,7 +1108,7 @@ function renderDiagram() {
   const rid = runId();
   $("#ex-title").textContent = TITLE[zoom];
   $("#z-back").hidden = zoom === "overview";
-  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"));
+  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener"); // swarm only
   $("#ex-a-l").textContent = zoom === "overview" ? `${agents.filter((a) => a.status !== "dead").length} AGENTS ALIVE` : "";
   const t0 = runStartedAt();
   const el = rid && t0 ? Math.max(0, Math.floor((serverNow() - t0) / 1000)) : null;

@@ -2,8 +2,8 @@
 
 Self-healing ops team of AI agents ("the Hive", Blue) keeps a simulated bank's
 interconnected legacy estate online while a seeded Chaos Monkey ("the Fleet", Red)
-attacks both the systems and the agents. A neutral **Gardener** turns repeated fixes
-into permanent code upgrades. **MongoDB is the spine: every piece of state lives in
+attacks both the systems and the agents. A neutral **Gardener**, a separate system outside the
+swarm, turns repeated fixes into permanent code upgrades. **MongoDB is the spine: every piece of state lives in
 MongoDB; processes are disposable.** The war-room visualization only *watches* MongoDB
 (change streams) — it never holds state.
 
@@ -189,7 +189,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
 - `swarm.stats{_id:"roster_reset", at}`: written by the war room on every reset (`full` and `next_round`). The supervisor
   restores the original roster (killed workers come back in their own role, extra respawned nurses retire) so each night
   starts fully staffed. A `full` reset also calls `gardener.pipeline.revert("mainframe")` before wiping.
-- Agents re-register if a reset wiped `swarm.agents` (heartbeat and `Agent.set`); the Gardener too.
+- Agents re-register if a reset wiped `swarm.agents` (heartbeat and `Agent.set`); the Gardener too (it registers there only for liveness; it is a separate system outside the swarm, not a bee).
 - Recall confirm hop (round 2) narrates without the deliberate pause; `diagnosis_s` is measured before the final sentence in both paths.
 - Nurses pick up a task whose specialty has no live worker after 0.5 s (was `NURSE_PICKUP_S`).
 - Rehearsal: `python -m scripts.demo_check` (see README).

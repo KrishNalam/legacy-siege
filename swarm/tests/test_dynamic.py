@@ -35,7 +35,10 @@ def test_supervisor_death_takes_its_agents_and_spares_along(db, fake):
     try:
         docs = wait_for(lambda: (lambda d: d if len(d) == 2 else None)(
             list(col("agents").find({"status": {"$ne": "dead"}}))), 60, 0.2, "2 agents")
-        children = [int(x) for x in open(f"/proc/{s.p.pid}/task/{s.p.pid}/children").read().split()]
+        def registered_children():
+            children = [int(x) for x in open(f"/proc/{s.p.pid}/task/{s.p.pid}/children").read().split()]
+            return children if len(children) >= 3 and {d["pid"] for d in docs} <= set(children) else None
+        children = wait_for(registered_children, 30, .1, "registered agents and warm spare children")
         assert {d["pid"] for d in docs} <= set(children) and len(children) >= 3  # + warm spare(s)
         os.kill(s.p.pid, signal.SIGKILL)
         s.p.wait(10)

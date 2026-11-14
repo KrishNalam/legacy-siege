@@ -7,6 +7,7 @@ from swarm.tests.conftest import reset_runtime
 
 
 def test_roster_tracks_parent_death_takeover_and_retire(db):
+    reset_runtime()  # earlier modules (test_gardener_help, test_lessons, ...) may leave scout-1 in agents
     t = now()
     col("roster").delete_many({})
     col("agents").insert_many([

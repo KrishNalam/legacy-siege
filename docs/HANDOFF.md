@@ -5,7 +5,7 @@ _Last updated: 2026-11-14 ~10:50 EST (second orchestrator). This sheet is self-c
 ## 1. What this is (one paragraph)
 A self-healing operations team of AI agents ("the Hive", bees) keeps a simulated bank's legacy estate
 (mainframe → Unix middleware → web portal) online while a seeded Chaos Monkey ("the Fleet") attacks
-both the systems **and the agents themselves**. A neutral **Gardener** turns repeated fixes into
+both the systems **and the agents themselves**. A neutral **Gardener**, a separate system outside the swarm, turns repeated fixes into
 permanent code upgrades. **MongoDB Atlas is the spine:** every piece of state (systems, incidents,
 leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes are disposable. The live
 **war room** visualization only watches MongoDB change streams. Built for a MongoDB hackathon

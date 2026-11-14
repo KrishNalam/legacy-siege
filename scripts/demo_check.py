@@ -2,6 +2,7 @@
 
     .venv/bin/python -m scripts.demo_check                 # full reset, nights 1-3, Gardener, reset again
     .venv/bin/python -m scripts.demo_check --no-reset      # start from the current state
+    .venv/bin/python -m scripts.demo_check --drift         # also check schema adaptation and repeat memory
     .venv/bin/python -m scripts.demo_check --keep          # leave the upgraded estate (no final reset)
     .venv/bin/python -m scripts.demo_check --base http://127.0.0.1:8700 --approve-delay 2
 
@@ -609,14 +610,6 @@ class Demo:
                    f"{inc2['_id']}: plan {' → '.join(ops2)}; release_hold from {(rh2.get('workflow') or {}).get('memory')} "
                    f"v{(rh2.get('workflow') or {}).get('version')}; restart_batch attempts {len(rb2.get('attempts') or [])}")
 
-    def check_field_drift(self, timeout: float) -> None:
-        """--drift: one unix schema drift after night 3, judged by scripts.drift_check's own beats (a-e, v2)."""
-        from scripts.drift_check import Drift  # noqa: PLC0415 (drift_check imports this module)
-        dr = Drift(str(self.http.base_url).rstrip("/"), self.approve_delay, self.r)
-        log("=== DRIFT: a vendor patch renames a unix manifest field ===")
-        if dr.wait_good_sample():
-            dr.drift(lambda: dr.post("/api/scenario/bank-drift"), "balance", "acct_bal", 2, timeout)
-
     def final_reset(self) -> None:
         log("POST /api/reset {mode: full} (demo reset: Gardener revert)")
         out = self.post("/api/reset", {"mode": "full"})
@@ -646,7 +639,7 @@ def main() -> int:
     ap.add_argument("--check-ai", action="store_true",
                     help="also check Claude's second opinion on each night's incident (skipped without AI_SECOND_OPINION=1 + key)")
     ap.add_argument("--drift", action="store_true",
-                    help="also check Statement 3 Q3: a unix field drift, and (stack with WORKFLOW_DRIFT=1) the workflow drift")
+                    help="also rehearse schema drift and mapping reuse, and (stack with WORKFLOW_DRIFT=1) the workflow drift")
     a = ap.parse_args()
     rep = Report()
     d = Demo(a.base, a.approve_delay, rep, autoplay=a.autoplay, red_kill=a.red_kill)
@@ -669,7 +662,14 @@ def main() -> int:
                     d.check_workflow(n1, n2)
                 else:
                     log("--drift: workflow rows skipped (run the stack and this check with WORKFLOW_DRIFT=1)")
-                d.check_field_drift(a.night_timeout)
+                # Import only on opt-in; share the standalone rehearsal's assertions.
+                from scripts.drift_check import Drift
+                drift = Drift(a.base, a.approve_delay, rep)
+                drift.post("/api/reset", {"mode": "next_round"})
+                if drift.wait_good_sample():
+                    if drift.drift(lambda: drift.post("/api/scenario/bank-drift"),
+                                   "balance", "acct_bal", 2, a.night_timeout):
+                        drift.repeat(a.night_timeout)
             if not a.keep:
                 d.final_reset()
     except KeyboardInterrupt:

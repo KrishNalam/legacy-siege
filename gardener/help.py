@@ -1,4 +1,5 @@
-"""Gardener help desk (GARDENER_HELP=1, default OFF): two hand-offs into the Gardener, one collection.
+"""Gardener help desk (GARDENER_HELP=1, default OFF): two hand-offs from the swarm across
+its boundary into the Gardener (a separate system outside the swarm), one collection.
 
     swarm.gardener_requests  {_id, kind, from, system, status: open -> answering -> answered, answer, ts}
 

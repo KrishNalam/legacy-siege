@@ -69,7 +69,7 @@ def test_round1_cascade_lie_approval_resolve(hive, fake):
     assert pb["embedding_model"] == "local-hash-v1" and len(pb["embedding"]) == 1024 and pb["stale"] is False
 
     # waggle narrated it; checkpoints exist for task threads
-    assert col("messages").find_one({"from": "waggle-1", "body": {"$regex": f"{inc['_id']} resolved"}})
+    assert wait_for(lambda: col("messages").find_one({"from": "waggle-1", "body": {"$regex": f"{inc['_id']} resolved"}}), 15, what="waggle resolution message")
     assert col("checkpoints").find_one({"thread_id": f"{inc['_id']}:scout"})
     assert col("checkpoints").find_one({"thread_id": s1["task_id"]})
 
@@ -111,7 +111,7 @@ def test_round2_recall_is_faster_and_triggers_upgrade(hive, fake):
     fake.post("/_admin/reload/mainframe")
     wait_for(lambda: col("playbooks").count_documents({"system": "mainframe", "stale": False}) == 0, 15, 0.2,
              "playbooks to go stale")
-    assert col("thoughts").find_one({"kind": "learn", "text": {"$regex": "stale"}})
+    assert wait_for(lambda: col("thoughts").find_one({"kind": "learn", "text": {"$regex": "stale"}}), 15, what="stale-playbook narration")
 
 
 def test_denied_approval_fails_step_and_escalates(hive, fake):
@@ -135,8 +135,12 @@ def test_denied_approval_fails_step_and_escalates(hive, fake):
     assert wait_for(lambda: col("messages").find_one({"body": {"$regex": f"{inc['_id']} escalated"}}), 5)
     # cooldown: the hive doesn't immediately re-open an incident for the systems the Beekeeper just declined
     import time
-    time.sleep(2)
-    assert col("incidents").count_documents({"active": True}) == 0
+    deadline = time.monotonic() + 2
+    while True:
+        assert col("incidents").count_documents({"active": True}) == 0
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(.05)
 
 
 def test_exploit_seen_in_logs_opens_security_incident_and_probe_verified_fix(hive, fake):

@@ -1,0 +1,224 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" font-family="Helvetica, Arial, sans-serif">
+<defs>
+ <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#333"/></marker>
+ <marker id="r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#c0392b"/></marker>
+ <marker id="g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#1e8449"/></marker>
+ <marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#00684A"/></marker>
+ <style>
+  .t{font-size:15px;font-weight:bold;fill:#1b1b1b}
+  .s{font-size:12px;fill:#444}
+  .h{font-size:20px;font-weight:bold}
+  .l{font-size:12px;fill:#333}
+  .box{stroke-width:1.5;rx:8}
+ </style>
+</defs>
+<rect width="1600" height="1000" fill="#fbfaf7"/>
+<text x="800" y="36" text-anchor="middle" font-size="26" font-weight="bold" fill="#1b1b1b">Legacy Siege — system architecture</text>
+<text x="800" y="58" text-anchor="middle" class="s">Red attacks a mock legacy bank · the Blue swarm heals it · the Gardener upgrades the code · MongoDB Atlas is the spine</text>
+
+<!-- ATTACKERS -->
+<rect x="30" y="85" width="330" height="290" rx="12" fill="#fdecea" stroke="#c0392b" stroke-width="2"/>
+<text x="45" y="112" class="h" fill="#c0392b">Attackers (Red)</text>
+<rect x="50" y="125" width="290" height="62" class="box" fill="#fff" stroke="#c0392b"/>
+<text x="62" y="148" class="t">Chaos Monkey (seeded)</text>
+<text x="62" y="167" class="s">chaos/faults + scenarios: cascade, lying</text>
+<text x="62" y="181" class="s">system, slow ops · SIGKILLs agents</text>
+<rect x="50" y="197" width="290" height="162" class="box" fill="#fff" stroke="#c0392b"/>
+<text x="62" y="220" class="t">AI Red fleet (chaos/redfleet)</text>
+<text x="62" y="240" class="s">Red Commander / Planner (optional)</text>
+<text x="62" y="256" class="s">  picks targets, learns between nights</text>
+<text x="62" y="278" class="s">Strikers (personas) propose attacks,</text>
+<text x="62" y="294" class="s">  incl. Memory Striker (playbook poison)</text>
+<text x="62" y="316" class="s">Runner: executes ONLY listed, allowed</text>
+<text x="62" y="332" class="s">  attacks (chaos/runner) → chaos_events</text>
+<text x="62" y="350" class="s">  scored in chaos/score</text>
+
+<!-- ESTATE -->
+<rect x="30" y="420" width="330" height="300" rx="12" fill="#eef2f7" stroke="#34495e" stroke-width="2"/>
+<text x="45" y="447" class="h" fill="#34495e">Legacy estate (mock bank)</text>
+<text x="45" y="466" class="s">systems.app (FastAPI) · /health /logs /state /ops</text>
+<rect x="70" y="480" width="250" height="50" class="box" fill="#fff" stroke="#34495e"/>
+<text x="195" y="502" text-anchor="middle" class="t">Web portal</text>
+<text x="195" y="520" text-anchor="middle" class="s">customer-facing symptom</text>
+<rect x="70" y="565" width="250" height="50" class="box" fill="#fff" stroke="#34495e"/>
+<text x="195" y="587" text-anchor="middle" class="t">Unix batch</text>
+<text x="195" y="605" text-anchor="middle" class="s">nightly jobs</text>
+<rect x="70" y="650" width="250" height="50" class="box" fill="#fff" stroke="#34495e"/>
+<text x="195" y="672" text-anchor="middle" class="t">Mainframe</text>
+<text x="195" y="690" text-anchor="middle" class="s">root cause lives here</text>
+<line x1="195" y1="530" x2="195" y2="563" stroke="#333" stroke-width="1.6" marker-end="url(#a)"/>
+<line x1="195" y1="615" x2="195" y2="648" stroke="#333" stroke-width="1.6" marker-end="url(#a)"/>
+<text x="205" y="552" class="l">blames (cascade traced)</text>
+<text x="205" y="637" class="l">blames</text>
+
+<!-- Red -> estate -->
+<line x1="195" y1="375" x2="195" y2="418" stroke="#c0392b" stroke-width="2.5" marker-end="url(#r)"/>
+<text x="205" y="402" class="l" fill="#c0392b" font-weight="bold">inject faults (HTTP hooks)</text>
+
+<!-- SWARM BOX -->
+<rect x="440" y="85" width="720" height="635" rx="14" fill="#fff8e6" stroke="#d68910" stroke-width="2.5"/>
+<text x="458" y="113" class="h" fill="#b9770e">The Swarm — one box, 1 OS process per agent (LangGraph)</text>
+<!-- main pipeline -->
+<rect x="465" y="135" width="150" height="70" class="box" fill="#fff" stroke="#d68910"/>
+<text x="540" y="160" text-anchor="middle" class="t">Sentinel</text>
+<text x="540" y="178" text-anchor="middle" class="s">polls /health,</text>
+<text x="540" y="193" text-anchor="middle" class="s">opens incidents</text>
+<rect x="650" y="135" width="150" height="70" class="box" fill="#fff" stroke="#d68910"/>
+<text x="725" y="160" text-anchor="middle" class="t">Queen</text>
+<text x="725" y="178" text-anchor="middle" class="s">assigns, scales</text>
+<text x="725" y="193" text-anchor="middle" class="s">the fleet</text>
+<rect x="835" y="135" width="150" height="70" class="box" fill="#fff" stroke="#d68910"/>
+<text x="910" y="160" text-anchor="middle" class="t">Scouts</text>
+<text x="910" y="178" text-anchor="middle" class="s">recall, diagnose</text>
+<text x="910" y="193" text-anchor="middle" class="s">hop by hop, plan</text>
+<rect x="1020" y="135" width="125" height="70" class="box" fill="#fff" stroke="#d68910"/>
+<text x="1082" y="160" text-anchor="middle" class="t">Workers</text>
+<text x="1082" y="178" text-anchor="middle" class="s">mainframe /</text>
+<text x="1082" y="193" text-anchor="middle" class="s">unix / web</text>
+<line x1="615" y1="170" x2="648" y2="170" stroke="#333" stroke-width="1.6" marker-end="url(#a)"/>
+<line x1="800" y1="170" x2="833" y2="170" stroke="#333" stroke-width="1.6" marker-end="url(#a)"/>
+<line x1="985" y1="170" x2="1018" y2="170" stroke="#333" stroke-width="1.6" marker-end="url(#a)"/>
+
+<!-- safety row -->
+<rect x="465" y="250" width="215" height="90" class="box" fill="#fff" stroke="#d68910"/>
+<text x="572" y="275" text-anchor="middle" class="t">Guard</text>
+<text x="572" y="294" text-anchor="middle" class="s">read-back verification: only it</text>
+<text x="572" y="309" text-anchor="middle" class="s">may mark a step "verified" —</text>
+<text x="572" y="324" text-anchor="middle" class="s">catches the lying system</text>
+<rect x="700" y="250" width="215" height="90" class="box" fill="#fff" stroke="#d68910"/>
+<text x="807" y="275" text-anchor="middle" class="t">Nurse ×2</text>
+<text x="807" y="294" text-anchor="middle" class="s">expired lease → takes over a</text>
+<text x="807" y="309" text-anchor="middle" class="s">killed agent's task, resumes</text>
+<text x="807" y="324" text-anchor="middle" class="s">from its LangGraph checkpoint</text>
+<rect x="935" y="250" width="210" height="90" class="box" fill="#fff" stroke="#d68910"/>
+<text x="1040" y="275" text-anchor="middle" class="t">Comms (Waggle)</text>
+<text x="1040" y="294" text-anchor="middle" class="s">live roster + priorities,</text>
+<text x="1040" y="309" text-anchor="middle" class="s">merges duplicate incidents,</text>
+<text x="1040" y="324" text-anchor="middle" class="s">handoff notes</text>
+
+<!-- second row -->
+<rect x="465" y="385" width="330" height="80" class="box" fill="#fff" stroke="#d68910"/>
+<text x="630" y="410" text-anchor="middle" class="t">Sentinel #2</text>
+<text x="630" y="429" text-anchor="middle" class="s">spots repeat fault classes ($group over</text>
+<text x="630" y="444" text-anchor="middle" class="s">history) → files upgrade requests</text>
+<rect x="815" y="385" width="330" height="80" class="box" fill="#fff" stroke="#d68910"/>
+<text x="980" y="410" text-anchor="middle" class="t">Platform engineers (opt-in)</text>
+<text x="980" y="429" text-anchor="middle" class="s">improve the swarm's own tooling;</text>
+<text x="980" y="444" text-anchor="middle" class="s">tool delivery to Scouts</text>
+
+<rect x="465" y="500" width="680" height="100" rx="8" fill="#fdf2d0" stroke="#d68910" stroke-dasharray="5 4"/>
+<text x="480" y="524" class="t">Supervisor + harness</text>
+<text x="480" y="545" class="s">swarm.supervisor launches every role as its own process; each role is a LangGraph StateGraph whose thread id</text>
+<text x="480" y="562" class="s">is the task id, so the checkpoint follows the work, not the process. Task/incident leases use generation fencing:</text>
+<text x="480" y="579" class="s">a killed-and-replaced agent can never write. Destructive steps need Beekeeper approval first.</text>
+
+<!-- swarm <-> estate -->
+<path d="M440,640 L362,640" stroke="#d68910" stroke-width="2.5" fill="none" marker-end="url(#a)"/>
+<text x="372" y="630" class="l" font-weight="bold" fill="#b9770e">diagnose + fix</text>
+<text x="372" y="660" class="l" fill="#b9770e">/health /ops</text>
+<line x1="465" y1="640" x2="1145" y2="640" stroke="#d68910" stroke-width="1" stroke-dasharray="3 3"/>
+<text x="480" y="680" class="s">Workers send ops with unique action ids (exactly-once receipts); Guard reads state back before "verified".</text>
+<text x="480" y="700" class="s">Round 2: playbooks recalled by Vector Search → same fault fixed much faster.</text>
+<!-- red kill -> swarm -->
+<path d="M360,145 L400,145 L400,300 L438,300" stroke="#c0392b" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#r)"/>
+<text x="364" y="137" class="l" fill="#c0392b" font-weight="bold">SIGKILL</text>
+
+
+<!-- GARDENER -->
+<rect x="1225" y="85" width="350" height="400" rx="12" fill="#e9f7ef" stroke="#1e8449" stroke-width="2.5"/>
+<text x="1240" y="112" class="h" fill="#1e8449">The Gardener</text>
+<text x="1240" y="131" class="s">separate system, outside the swarm box</text>
+<rect x="1245" y="145" width="310" height="175" class="box" fill="#fff" stroke="#1e8449"/>
+<text x="1260" y="168" class="t">Code-upgrade pipeline</text>
+<text x="1260" y="190" class="s">plan → patch → test → gate → deploy</text>
+<text x="1260" y="210" class="s">· vetted fix (remediations, backups)</text>
+<text x="1260" y="228" class="s">· replay proof: re-runs the recorded</text>
+<text x="1260" y="244" class="s">  fault against the patched code</text>
+<text x="1260" y="262" class="s">· Beekeeper approval before deploy</text>
+<text x="1260" y="280" class="s">· tool upgrades for the swarm</text>
+<text x="1260" y="302" class="s">gardener/pipeline, replay, tool_upgrade</text>
+<rect x="1245" y="335" width="310" height="130" class="box" fill="#fff" stroke="#1e8449"/>
+<text x="1260" y="358" class="t">Help desk + pause</text>
+<text x="1260" y="380" class="s">gardener/help: the swarm can ask for help;</text>
+<text x="1260" y="398" class="s">pauses while new incidents land during</text>
+<text x="1260" y="416" class="s">prove, so it never fights the swarm</text>
+<text x="1260" y="440" class="s">queue = upgrade_requests (change stream)</text>
+
+<!-- swarm <-> gardener arrows -->
+<path d="M795,425 L1100,425" stroke="none"/>
+<path d="M1160,190 L1243,190" stroke="#1e8449" stroke-width="2.2" fill="none" marker-start="url(#g)"/>
+<path d="M1160,365 L1243,365" stroke="#1e8449" stroke-width="2.2" fill="none" marker-end="url(#g)"/>
+<path d="M1160,445 L1243,445" stroke="#1e8449" stroke-width="2.2" fill="none" marker-end="url(#g)"/>
+<path d="M1160,405 L1243,405" stroke="#1e8449" stroke-width="2.2" fill="none" marker-start="url(#g)"/>
+<text x="1166" y="182" class="l" fill="#1e8449" font-size="11">tools/fixes</text>
+<text x="1166" y="208" class="l" fill="#1e8449" font-size="11">→ Scouts</text>
+<text x="1166" y="358" class="l" fill="#1e8449" font-size="11">ask help</text>
+<text x="1166" y="398" class="l" fill="#1e8449" font-size="11">pause</text>
+<text x="1166" y="438" class="l" fill="#1e8449" font-size="11">repeats</text>
+<text x="1166" y="462" class="l" fill="#1e8449" font-size="11">(S #2)</text>
+
+<!-- gardener upgrades legacy code: route around bottom -->
+<path d="M1225,478 L1192,478 L1192,745 L250,745 L250,722" stroke="#1e8449" stroke-width="2.5" fill="none" marker-end="url(#g)"/>
+<text x="1180" y="738" text-anchor="end" class="l" fill="#1e8449" font-weight="bold">Gardener upgrades legacy code (after replay proof)</text>
+
+<!-- WAR ROOM -->
+<rect x="1225" y="530" width="350" height="190" rx="12" fill="#f4ecf7" stroke="#7d3c98" stroke-width="2.5"/>
+<text x="1240" y="557" class="h" fill="#7d3c98">War room (live map)</text>
+<text x="1240" y="580" class="s">warroom.server (FastAPI + Canvas2D page)</text>
+<text x="1240" y="600" class="s">· one cluster-level change stream,</text>
+<text x="1240" y="617" class="s">  persisted resume token → /ws live updates</text>
+<text x="1240" y="637" class="s">· scenario / kill / judge buttons</text>
+<text x="1240" y="657" class="s">· Beekeeper approves destructive steps</text>
+<text x="1240" y="677" class="s">· scorecards + /api/spine learning curve</text>
+<text x="1240" y="697" class="s">  ($facet, $setWindowFields, $percentile)</text>
+
+<!-- MONGO SPINE -->
+<rect x="30" y="790" width="1545" height="190" rx="14" fill="#e3f4ec" stroke="#00684A" stroke-width="3"/>
+<text x="48" y="818" class="h" fill="#00684A">MongoDB Atlas — the spine under everything</text>
+<g font-size="13">
+ <rect x="48" y="832" width="290" height="132" rx="8" fill="#fff" stroke="#00684A"/>
+ <text x="60" y="853" class="t">Ledger</text>
+ <text x="60" y="873" class="s">multi-document transactions:</text>
+ <text x="60" y="889" class="s">lease + step + receipt together</text>
+ <text x="60" y="905" class="s">unique action ids (exactly-once,</text>
+ <text x="60" y="921" class="s">op_receipts._id = action_id)</text>
+ <text x="60" y="941" class="s">$jsonSchema: no "verified" w/o evidence</text>
+ <rect x="350" y="832" width="240" height="132" rx="8" fill="#fff" stroke="#00684A"/>
+ <text x="362" y="853" class="t">Leases</text>
+ <text x="362" y="873" class="s">findOneAndUpdate claim</text>
+ <text x="362" y="889" class="s">generation fencing</text>
+ <text x="362" y="905" class="s">custody chain from</text>
+ <text x="362" y="921" class="s">change-stream pre-images</text>
+ <rect x="602" y="832" width="250" height="132" rx="8" fill="#fff" stroke="#00684A"/>
+ <text x="614" y="853" class="t">LangGraph checkpoints</text>
+ <text x="614" y="873" class="s">MongoDBSaver</text>
+ <text x="614" y="889" class="s">thread id = task id →</text>
+ <text x="614" y="905" class="s">Nurse resumes mid-task</text>
+ <rect x="864" y="832" width="250" height="132" rx="8" fill="#fff" stroke="#00684A"/>
+ <text x="876" y="853" class="t">Playbooks + Vector Search</text>
+ <text x="876" y="873" class="s">$vectorSearch recall by symptom</text>
+ <text x="876" y="889" class="s">pre-filter: model, not stale</text>
+ <text x="876" y="905" class="s">→ round-2 speedup</text>
+ <rect x="1126" y="832" width="200" height="132" rx="8" fill="#fff" stroke="#00684A"/>
+ <text x="1138" y="853" class="t">chaos_events</text>
+ <text x="1138" y="873" class="s">every Red attack,</text>
+ <text x="1138" y="889" class="s">runs, scenarios,</text>
+ <text x="1138" y="905" class="s">scorecards</text>
+ <rect x="1338" y="832" width="222" height="132" rx="8" fill="#fff" stroke="#00684A"/>
+ <text x="1350" y="853" class="t">Change streams</text>
+ <text x="1350" y="873" class="s">→ war room (live map)</text>
+ <text x="1350" y="889" class="s">→ Guard wake-up, Waggle</text>
+ <text x="1350" y="905" class="s">→ Gardener queue + pause</text>
+ <text x="1350" y="925" class="s">also: TTL logs, counters,</text>
+ <text x="1350" y="941" class="s">aggregation pipelines</text>
+</g>
+<!-- spine arrows -->
+<line x1="120" y1="375" x2="120" y2="418" stroke="none"/>
+<line x1="800" y1="720" x2="800" y2="788" stroke="#00684A" stroke-width="2.5" marker-end="url(#m)" marker-start="url(#m)"/>
+<text x="810" y="772" class="l" fill="#00684A" font-weight="bold">leases · txns · checkpoints · playbooks</text>
+<line x1="1500" y1="788" x2="1500" y2="722" stroke="#00684A" stroke-width="2.5" marker-end="url(#m)"/>
+<text x="1492" y="772" text-anchor="end" class="l" fill="#00684A" font-weight="bold">change streams</text>
+<line x1="1300" y1="485" x2="1300" y2="528" stroke="none"/>
+<line x1="100" y1="720" x2="100" y2="788" stroke="#00684A" stroke-width="2.5" marker-end="url(#m)"/>
+<text x="108" y="772" class="l" fill="#00684A" font-weight="bold">state, receipts</text>
+</svg>

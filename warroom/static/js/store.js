@@ -71,6 +71,8 @@ function applyChange(m) {
     prev = state.current; state.current = doc;
   } else if (coll === "stats" && key === "gardener_pause") {
     prev = state.gardenerPause; state.gardenerPause = doc;
+  } else if (coll === "stats" && key === "comms") {
+    prev = state.comms; state.comms = op === "delete" ? null : doc;
   } else if (coll === "checkpoints" && doc) {
     state.lastCheckpoint = doc;
   }

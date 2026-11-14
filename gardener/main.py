@@ -1,4 +1,4 @@
-"""The Gardener process: `python -m gardener.main`.
+"""The Gardener process: `python -m gardener.main`. A separate system OUTSIDE the swarm (not a bee).
 
 Registers as swarm.agents/gardener-1 (role 'gardener', target 'workshop'), heartbeats
 every HEARTBEAT_S, resumes any upgrade it was in the middle of, then waits for
