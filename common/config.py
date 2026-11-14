@@ -38,6 +38,12 @@ SLOW_APPLY_S = _f("SLOW_APPLY_S", 20)
 PARTITION_S = _f("PARTITION_S", 15)
 NURSE_RESPAWN_S = _f("NURSE_RESPAWN_S", 15)
 RECALL_THRESHOLD = _f("RECALL_THRESHOLD", 0.70)
+PROVE_WINDOW_S = _f("PROVE_WINDOW_S", 30)  # Gardener prove: replay the fault, watch this long for incidents
+
+# Demo autoplay (war room, opt-in): nights advance by themselves, approvals after the first auto-approve
+DEMO_AUTOPLAY = os.environ.get("DEMO_AUTOPLAY", "").strip().lower() in ("1", "true", "yes", "on")
+AUTOPLAY_GAP_S = _f("AUTOPLAY_GAP_S", 4)        # pause after a night goes green before the next one starts
+AUTOPLAY_APPROVE_S = _f("AUTOPLAY_APPROVE_S", 3)  # a later approval stays on screen this long, then auto-approves
 
 SYSTEM_IDS = ["mainframe", "unix", "portal"]  # + "console" if stretch is built
 CHAIN = {"portal": "unix", "unix": "mainframe", "mainframe": None, "console": "portal"}
