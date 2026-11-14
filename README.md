@@ -38,6 +38,20 @@ What the demo shows, all checked automatically by `scripts/demo_check.py`:
 5. The **Gardener** turns two identical incidents into a code upgrade. After that, night 3's identical
    attack is shrugged off and no incident opens.
 
+
+## What we built for Statement 3 (code you can open)
+
+| Statement 3 question | What we built | Where |
+|---|---|---|
+| Took effect, or only sent? | Unique action id per op, written in one Atlas transaction with the incident step; only the Guard's read-back can mark a step verified (ACK ≠ APPLIED) | `swarm/steps.py` `attempt_id()`, `mark_sent()`, `record_response()` · `swarm/verify.py` `check()` · `common/db.py` `txn()` |
+| Resume after a crash without replaying? | Leases claimed with one atomic findOneAndUpdate plus a generation fence; a Nurse takes over an expired lease; LangGraph checkpoints in MongoDBSaver (thread id = task id) | `swarm/leases.py` `claim()`, `takeover()`, `fence()` · `swarm/steps.py` `take_over_sent()` · `swarm/harness.py` `checkpointer()` |
+| Adapt when fields or workflow change? | $jsonSchema check + field diff spots a renamed field; the mapping is verified against real values and stored per system version; workflow drift is checked too | `swarm/schema.py` `json_schema()`, `conforms()`, `mapping()` · `swarm/workflow.py` `check()`, `propose()` |
+| Past experience (Vector Search) | Fixes saved as playbooks, recalled with Atlas $vectorSearch over Voyage AI embeddings, filtered by model, stale ones skipped; poisoned memories rejected | `swarm/recall.py` `search()`, `build_playbook()` · `common/embed.py` `embed()` · `swarm/recovery.py` `reject_bad_memory()` |
+| Systems that won't hold still | Red Strikers attack live, but every strike goes through one allow-list; the Gardener turns repeat faults into code upgrades proven by replay | `chaos/runner.py` `fire()` · `chaos/redfleet/` · `gardener/pipeline.py` · `gardener/replay.py` |
+| Knowing what actually happened | Tamper-evident hash chain of every ownership change, built from change-stream pre-images (behind the MONGO_SPINE switch) | `swarm/custody.py` `append()`, `verify_chain()` |
+
+All of this was built during the hackathon by Krish Nalam and Mohammad Anwar.
+
 ## Architecture
 
 ![Legacy Siege architecture](docs/diagrams/architecture-v3.png)
