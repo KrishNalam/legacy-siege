@@ -65,3 +65,27 @@ def test_repeat_note_once_and_lesson_repeat(db, monkeypatch):
     assert db.gardener_notes.count_documents({}) == 2
     assert emit.call_count == 2
     db.gardener_notes.delete_many({})
+
+
+def test_sentinel_tells_queen_only_with_switch(db, monkeypatch):
+    """Structure v3 step 1: with SWARM_COMMS=1 opening an incident also posts sentinel -> queen on the bus."""
+    from swarm.roles.sentinel import build_graphs
+    agent = SimpleNamespace(id='sentinel-1', think=Mock(),
+                            systems=SimpleNamespace(health=lambda s: {'status': 'degraded'}))
+    detect = build_graphs(agent)[0]
+    for on in (False, True):
+        db.incidents.delete_many({})
+        db.messages.delete_many({})
+        if on:
+            monkeypatch.setenv('SWARM_COMMS', '1')
+        else:
+            monkeypatch.delenv('SWARM_COMMS', raising=False)
+        out = detect.invoke({'kind': 'chain', 'segment': ['portal'], 'symptoms': {'portal': 'portal stale'}},
+                            {'configurable': {'thread_id': f'test:v3-notify:{on}'}}, durability='exit')
+        assert out['action'] == 'opened'
+        sent = list(db.messages.find({'from': 'sentinel-1', 'to': 'queen'}))
+        assert len(sent) == (1 if on else 0)
+        if on:
+            assert sent[0]['kind'] == 'incident' and sent[0]['incident'] == out['incident']
+    db.incidents.delete_many({})
+    db.messages.delete_many({})

@@ -125,6 +125,10 @@ def build_graphs(agent: Agent):
                 continue
             agent.think(f"Opened {doc['_id']}: {doc['symptoms'][0]}.", kind="action", incident=doc["_id"],
                         system=head, pause=False)
+            if comms.enabled():  # structure v3 step 1: the Sentinel tells the Queen (the Queen still reads the incident)
+                say(agent.id, "queen", "incident", {"incident": doc["_id"], "system": head, "affected": list(seg),
+                                                    "text": f"Opened {doc['_id']} on {head}: {doc['symptoms'][0]}"},
+                    incident=doc["_id"], system=head, severity="warning")
             if recovery.enabled() and not security:  # visible final recovery after an escalation
                 prev = col("incidents").find_one({"status": "failed", "affected": {"$in": list(seg)}},
                                                  {"failure": 1}, sort=[("closed_at", -1)])

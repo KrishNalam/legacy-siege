@@ -168,7 +168,7 @@ def reset(body: dict = Body(default_factory=dict)) -> dict:
     out: dict[str, Any] = {"mode": mode}
     try:  # stop pending scenario steps first (reset must still work if chaos isn't importable)
         runner, _ = _chaos()
-        out["cancelled_runs"] = runner.cancel()
+        out["cancelled_runs"] = runner.cancel(keep_memory=mode == "next_round")  # poisoned memory is memory too
     except HTTPException:
         out["cancelled_runs"] = []
     if mode == "full":
@@ -247,6 +247,7 @@ def scorecard_pipeline() -> list[dict]:
 
 def chaos_by_run_pipeline() -> list[dict]:
     return [
+        {"$match": {"kind": {"$ne": "decision"}}},   # Red Planner / Runner decisions are not attacks
         {"$group": {"_id": "$run_id", "round": {"$first": "$round"}, "scenario": {"$first": "$scenario"},
                     "events": {"$sum": 1}, "faults": {"$push": "$fault"},
                     "manual": {"$sum": {"$cond": ["$manual", 1, 0]}}, "first_ts": {"$min": "$ts"}}},

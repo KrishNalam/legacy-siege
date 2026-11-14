@@ -53,6 +53,7 @@ function applySnapshot(s) {
 
 function applyChange(m) {
   const { coll, op, key, doc } = m;
+  if (coll === "chaos_events" && doc?.kind === "decision") return;  // Red Planner / Runner decision log, not a strike
   let prev = null;
   const mk = MAP_COLLS[coll];
   if (mk) {

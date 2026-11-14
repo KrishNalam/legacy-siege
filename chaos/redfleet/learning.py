@@ -8,8 +8,13 @@ def outcome(event: dict) -> dict:
     ids = list(event.get('red', {}).get('incident_ids', []))
     if (event.get('result') or {}).get('incident'):
         ids.append(event['result']['incident'])
-    query = {'$or': [{'_id': {'$in': ids}}, {'opened_at': {'$gte': event['ts']}}]}
-    if event.get('run_id'):
+    planted = (event.get('result') or {}).get('playbook') if event.get('fault') == 'poison_memory' else None
+    if planted:  # poisoned memory lands at the NEXT recall, usually a later night: follow the plant, not the run
+        query = {'$or': [{'recall.rejected': planted}, {'recall.memory_rejected': planted},
+                         {'recall.hits.playbook_id': planted, 'opened_at': {'$gte': event['ts']}}]}
+    else:
+        query = {'$or': [{'_id': {'$in': ids}}, {'opened_at': {'$gte': event['ts']}}]}
+    if event.get('run_id') and not planted:
         query['run_id'] = event['run_id']
     for inc in swarm().incidents.find(query).sort('opened_at', -1).limit(12):
         if target != 'swarm' and target not in [inc.get('system'), inc.get('root_cause_system'), *(inc.get('affected') or [])]:

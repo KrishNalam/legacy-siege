@@ -123,7 +123,7 @@ def test_full_pipeline_approve_deploy_prove(env, monkeypatch):
     assert led["status"] == "verified" and led["approver"] == "beekeeper"
     assert led["params"]["diff_sha256"] == patcher.sha256(doc["diff"]) and led["version_after"] == 2
     kinds = {t["kind"] for t in col("thoughts").find({"agent": "gardener-1"})}
-    assert kinds == {"upgrade"}
+    assert kinds - {"progress"} == {"upgrade"}  # PROGRESS_ETA adds progress lines
     # a second request for the same weakness is refused: already remediated
     col("upgrade_requests").insert_one({"_id": "UPG-0002", "system": "mainframe", "status": "requested",
                                         "evidence": [], "ts": now()})

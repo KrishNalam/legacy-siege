@@ -18,10 +18,10 @@ import time
 
 from pymongo import DESCENDING, ReturnDocument
 
-from common import config
+from common import config, progress
 from common.db import next_id, now, swarm, world
 
-from . import faults, scenarios
+from . import decider, faults, scenarios
 
 log = logging.getLogger("chaos.runner")
 
@@ -86,7 +86,7 @@ def announce_current(run_id: str, round: int) -> None:
 # ------------------------------------------------------------------ fire one fault
 def fire(fault: str, target: str | None = None, params: dict | None = None, manual: bool = True,
          run_id: str | None = None, extra: dict | None = None, who: str | None = None,
-         why: str | None = None) -> dict:
+         why: str | None = None, step: tuple[int, int] | None = None) -> dict:
     """Execute one fault and record it. Returns the final ``chaos_events`` document.
 
     The event is inserted *before* the fault executes (status ``firing``) so the war room
@@ -105,6 +105,12 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
     run = _runs().find_one({"_id": run_id}) if run_id else current_run()
     extra = extra or {}
     red = str(extra.get("by") or "").startswith("red-")
+    if red and decider.enabled() and not extra.get("runner_decision"):   # RUNNER_DECIDES=1: admit every Red fire
+        planner = (extra.get("red") or {}).get("campaign") and "commander"
+        decision = decider.admit(f.name, target, params, extra["by"], source=planner or "striker")
+        if decision["decision"] != "execute":
+            return decider.refused(decision, f.name, target, params)
+        extra = {**extra, "runner_decision": decision["_id"]}
     source = "red-fleet" if red else ("manual" if manual else "scenario")
     who = who or extra.get("by") or ("beekeeper" if manual else f"scenario:{(run or {}).get('scenario') or '?'}")
     why = why or ((extra.get("red") or {}).get("reason") if red else None) or f.tests
@@ -117,11 +123,18 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
     }
     event = {**{k: v for k, v in extra.items() if k not in event}, **event}
     _events().insert_one(event)
-    try:
-        result = faults.execute(f, target, params)
-    except Exception as e:  # never lose the event record because a fault blew up
-        log.exception("fault %s failed", fault)
-        result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    if event.get("runner_decision"):
+        decider.link(event["runner_decision"], event["_id"])
+    # PROGRESS_ETA (off = no-op): ETA from past runs on start, one duration record + done line at the end
+    with progress.track("world", f"attack:{f.name}", target, "red" if red else "chaos", agent=who,
+                        label=f"{'Red fleet' if red else 'Chaos'}: {f.name} on {target or 'hive'}",
+                        step=step[0] if step else None, of=step[1] if step else None) as tracked:
+        try:
+            result = faults.execute(f, target, params)
+        except Exception as e:  # never lose the event record because a fault blew up
+            log.exception("fault %s failed", fault)
+            result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        tracked.outcome = "ok" if result.get("ok") else "failed"
     finished = _events().find_one_and_update(
         {"_id": event["_id"]},
         {"$set": {"result": result, "status": "ok" if result.get("ok") else "failed", "done_at": now()}},
@@ -153,15 +166,19 @@ def _observe_later(event_id: str) -> None:
 # ------------------------------------------------------------------ play a scenario
 def _play(run_id: str, scn: dict, stop: threading.Event, on_event=None) -> None:
     t0 = time.monotonic()
+    total = len(scn["steps"])
     try:
-        for step in scn["steps"]:
+        for i, step in enumerate(scn["steps"], 1):
             delay = config.pace(step["t"]) - (time.monotonic() - t0)  # PACE=0 -> back-to-back, same order
             if delay > 0 and stop.wait(delay):
                 break
             if stop.is_set():
                 break
+            if decider.enabled():
+                decider.seeded_step(step, scn["_id"], run_id)
             ev = fire(step["fault"], step["target"], step.get("params"), manual=False, run_id=run_id,
-                      who=f"scenario:{scn['_id']}", why=step.get("why"))
+                      who=f"scenario:{scn['_id']}", why=step.get("why"),
+                      **({"step": (i, total)} if progress.enabled() else {}))
             _runs().update_one({"_id": run_id}, {"$inc": {"steps_fired": 1}})
             if on_event:
                 on_event(ev)
@@ -199,14 +216,17 @@ def run_scenario(name: str, round: int | None = None, block: bool = False, annou
     return run_id
 
 
-def cancel(run_id: str | None = None) -> list[str]:
+def cancel(run_id: str | None = None, keep_memory: bool = False) -> list[str]:
     """Stop pending steps of one run (or all runs). Already-fired faults stay fired.
-    Cancelling everything (a reset) also calls off manual kills still hunting for a victim."""
+    Cancelling everything (a reset) also calls off manual kills still hunting for a victim and removes Red's
+    planted memory, unless ``keep_memory`` (a next-round reset keeps the Hive's memory, poisoned or not, so a
+    poison planted after Night 1 is what Night 2 recalls)."""
     if run_id is None:
         # Thaw first: memory cleanup must never prevent waking a stopped bee.
-        for label, cleanup in [("thaw", lambda: faults.thaw_overdue(all_=True)),
-                               ("cancel hunts", faults.cancel_pending_hunts),
-                               ("clear planted memory", faults.clear_planted_memory)]:
+        cleanups = [("thaw", lambda: faults.thaw_overdue(all_=True)), ("cancel hunts", faults.cancel_pending_hunts)]
+        if not keep_memory:
+            cleanups.append(("clear planted memory", faults.clear_planted_memory))
+        for label, cleanup in cleanups:
             try:
                 cleanup()
             except Exception:
@@ -234,7 +254,7 @@ def refresh_outcomes(limit: int = 12) -> list[dict]:
     Called by the opt-in Strikers' OBSERVE so seeded/manual attacks also acquire outcomes.
     """
     from .redfleet.learning import outcome
-    events = list(_events().find({"status": {"$in": ["ok", "failed"]}}).sort("ts", -1).limit(limit))
+    events = list(_events().find({"status": {"$in": ["ok", "failed"]}, "kind": {"$ne": "decision"}}).sort("ts", -1).limit(limit))
     for event in events:
         observed = outcome(event)
         _events().update_one({"_id": event["_id"]}, {"$set": {"outcome": observed}})

@@ -103,7 +103,7 @@ def scout(agent_id: str) -> dict:
         systems["unix"]["feed_field"] = feed["field"]   # what the Drifter renames next
     mine, fleet = [], []
     if run_id:
-        for e in w.chaos_events.find({"run_id": run_id, "by": {"$regex": "^red-"}},
+        for e in w.chaos_events.find({"run_id": run_id, "by": {"$regex": "^red-"}, "kind": {"$ne": "decision"}},
                                      {"fault": 1, "target": 1, "status": 1, "ts": 1, "by": 1, "outcome": 1, "lesson": 1,
                                       "params.playbook": 1}).sort("ts", 1):
             row = {"fault": e["fault"], "target": e.get("target"), "status": e.get("status"), "ts": e.get("ts"),
@@ -122,6 +122,7 @@ def scout(agent_id: str) -> dict:
         "run_id": run_id, "scenario": (run or {}).get("scenario") or cur.get("scenario"),
         "night_running": bool(run and run.get("ended_at") is None),
         "night_started": (run or {}).get("started_at"),
+        "run_incidents": s.incidents.count_documents({"run_id": run_id}) if run_id else 0,
         "incidents": incidents, "agents": agents, "systems": systems,
         "mid_send": [a for a in agents if a["role"] == "worker" and a["status"] == "working"
                      and a["phase"] == "step_sent"],
@@ -146,12 +147,18 @@ def _age_s(ts: datetime | None, at: datetime) -> float:
     return float("inf") if ts is None else (at - ts).total_seconds()
 
 
-def gate(snap: dict, cfg: Settings, stagger_s: float = 0.0, at: datetime | None = None) -> str | None:
-    """Why this attacker must hold its fire right now, or None. Only pacing and no-permanent-damage rules."""
+def gate(snap: dict, cfg: Settings, stagger_s: float = 0.0, at: datetime | None = None,
+         latent: bool = False) -> str | None:
+    """Why this attacker must hold its fire right now, or None. Only pacing and no-permanent-damage rules.
+
+    ``latent`` (the Memory Striker): its hit only lands when the Hive next RECALLS, so it may also plant at the very
+    start of a night, before that night has opened any incident, even a skipped one and without the first-strike
+    stagger (a learned repair lives only seconds between Night 1's resolve and Night 2's recall)."""
     at = at or now()
     if not snap.get("night_running"):
         return "no night running"
-    if snap.get("scenario") in cfg.skip_scenarios:
+    early = latent and snap.get("run_incidents") == 0 and bool(snap.get("poisonable"))
+    if snap.get("scenario") in cfg.skip_scenarios and not early:
         return f"{snap['scenario']} is off limits"
     if snap.get("upgrade_busy"):
         return "the Gardener is mid-upgrade"   # a strike mid-deploy could strand a half-done upgrade
@@ -160,7 +167,7 @@ def gate(snap: dict, cfg: Settings, stagger_s: float = 0.0, at: datetime | None 
         return f"attack budget spent ({len(mine)}/{cfg.max_attacks})"
     if any(a.get("status") == "firing" for a in mine):
         return "my last attack is still in flight"
-    if _age_s(snap.get("night_started"), at) < cfg.first_strike_s + stagger_s:
+    if not early and _age_s(snap.get("night_started"), at) < cfg.first_strike_s + stagger_s:
         return "waiting for the night to unfold"
     last = max((a["ts"] for a in mine if a.get("ts")), default=None)
     if _age_s(last, at) < cfg.cooldown_s:

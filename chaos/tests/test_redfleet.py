@@ -154,6 +154,13 @@ def test_gate():
     assert "in flight" in gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "firing"}]), c, 0, t)
     assert "cooling" in gate(snap(red_attacks=[{"fault": "a", "ts": recent, "status": "ok"}]), c, 0, t)
     assert "unfold" in gate(snap(night_started=t - timedelta(seconds=10)), c, 25, t)
+    # Memory Striker (latent): plants before a (skipped) night's first incident so the next recall sees it
+    skip, fresh = cfg(skip_scenarios=("bank-night-2",)), t - timedelta(seconds=2)
+    early = snap(scenario="bank-night-2", night_started=fresh, run_incidents=0, poisonable=[{"id": "PB-0001"}])
+    assert gate(early, skip, 30, t, latent=True) is None
+    assert "off limits" in gate(early, skip, 30, t)                                      # not for the others
+    assert "off limits" in gate({**early, "run_incidents": 1}, skip, 30, t, latent=True)  # recall already happened
+    assert "off limits" in gate({**early, "poisonable": []}, skip, 30, t, latent=True)    # nothing to poison
 
 
 # ------------------------------------------------------------------ deterministic playbooks
@@ -309,3 +316,11 @@ def test_outcome_counts_a_rejected_recalled_repair_as_a_guard_catch(systems):
                                   'recall': {'used': True, 'rejected': 'RED-POISON:PB-0001'}})
     observed = outcome(event)
     assert observed['guard_caught'] is True and observed['incidents'][0]['memory_rejected'] == 'RED-POISON:PB-0001'
+    # the plant is recalled a night later (RUN-0002): the outcome follows the planted playbook, not the run
+    later = {**event, '_id': 'CHX-poison-2', 'run_id': 'RUN-0001', 'result': {'playbook': 'RED-POISON:PB-0009'}}
+    swarm().incidents.insert_one({'_id': 'INC-0003', 'run_id': 'RUN-0002', 'opened_at': now(), 'status': 'resolved',
+                                  'closed_at': now(), 'steps': [],
+                                  'recall': {'used': True, 'memory_rejected': ['RED-POISON:PB-0009'],
+                                             'rejected': 'RED-POISON:PB-0009'}})
+    observed = outcome(later)
+    assert observed['guard_caught'] is True and [r['incident'] for r in observed['incidents']] == ['INC-0003']

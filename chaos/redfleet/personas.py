@@ -31,6 +31,11 @@ class Persona:
     menu_fn: Callable[[dict], list[dict]] = field(repr=False)
     policy_fn: Callable[[dict, list[dict]], dict | None] = field(repr=False)
 
+    @property
+    def latent(self) -> bool:
+        """Its attacks land later, at the Hive's next recall (memory poison), not on a running system."""
+        return set(self.faults) <= {"poison_memory"}
+
     def menu(self, snap: dict, cfg: Settings) -> list[dict]:
         allowed = set(cfg.allowed) if cfg.allowed else None
         out = []
@@ -210,7 +215,7 @@ def drifter_policy(snap: dict, menu: list[dict]) -> dict | None:
 
 
 # ------------------------------------------------------------------ Memory Striker: poisons what the Hive learned
-POISON_FOR = {"disk_fill": "unix", "cron_stop": "unix", "session_leak": "portal",
+POISON_FOR = {"batch_abort": "mainframe", "disk_fill": "unix", "cron_stop": "unix", "session_leak": "portal",
               "config_exploit": "unix", "sqli_exploit": "portal", "credential_exploit": "mainframe"}
 
 
@@ -223,8 +228,11 @@ def memory_menu(snap: dict) -> list[dict]:
 def memory_policy(snap: dict, menu: list[dict]) -> dict | None:
     used = {a.get("victim") for a in snap.get("red_attacks") or []}
     item = next((m for m in menu if m["victim"] not in used), None)
-    return _with(item, f"the Hive will replay its {item['fault_class']} repair from memory; aim it at the wrong "
-                       "system and see whether read-back or memory wins") if item else None
+    if not item:
+        return None
+    how = "the wrong record" if faults.poison_shape(item["fault_class"]) == "wrong_record" else "the wrong system"
+    return _with(item, f"the Hive will replay its {item['fault_class']} repair from memory; aim it at {how} "
+                       "and see whether evidence or memory wins")
 
 
 PERSONAS: dict[str, Persona] = {p.id: p for p in [
@@ -240,7 +248,7 @@ PERSONAS: dict[str, Persona] = {p.id: p for p in [
             "an intruder mid-job: detect, patch, retest", tuple(VULN_OF), 40, hacker_menu, hacker_policy),
     Persona("red-drifter", "Drifter", "silently renames fields under the Hive",
             "Q3 adapt when fields change underneath it", ("schema_drift",), 55, drifter_menu, drifter_policy),
-    Persona("red-memory", "Memory Striker", "poisons what the Hive learned: a remembered repair aimed at the wrong system",
+    Persona("red-memory", "Memory Striker", "poisons what the Hive learned: a remembered repair aimed at the wrong system or record",
             "Q2/Q3 memory you can't trust: read-back must beat recall", ("poison_memory",), 30, memory_menu, memory_policy),
 ]}
 

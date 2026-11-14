@@ -17,7 +17,10 @@ Design doc: https://claude.ai/artifact/TYfnA6aTSG99oMb9t1nzpr
   It writes a diff, runs the tests and a replay, gets human approval, hot-deploys the patch and then
   proves it by replaying the attack.
 - **The War Room** (`warroom/`): a live visualisation that only *watches* MongoDB through change
-  streams. It holds no state, and every pixel comes from a change event.
+  streams. It holds no state, and every pixel comes from a change event. Views: `/diagram` (Chaos Monkey →
+  Legacy ← Bees, Gardener below; click or 1-4 to zoom, V toggles Live / How it works), `/flow`, the classic
+  page, and `/why` (use cases and how each Statement 3 question is answered). `WARROOM_VIEW=diagram|flow|classic`
+  picks what `/` serves (default classic).
 
 What the demo shows, all checked automatically by `scripts/demo_check.py`:
 
@@ -260,6 +263,31 @@ the wrong system (a full unix spool → "purge_spool on mainframe") and hides th
 With W16's defence on (`SWARM_RECOVERY=1 FAILURE_MEMORY=1`) the next recall picks it, the Guard's read-back rejects it
 ("Rejected memory RED-POISON:PB-0001 … retiring it"), and the Hive re-plans and learns a clean playbook. Batch-abort and
 schema-drift repairs are never poisoned (the Hive re-derives those from today's facts anyway).
+
+**Red Planner (`RED_PLANNER=1`, off by default, needs `RED_COMMANDER=1` + `RED_FLEET=1`).** Before each campaign
+the Planner spawns two one-shot scouts: a Swarm Scout studies the Blue Hive (who is busy or mid-send, free Nurses,
+open incidents, what it just learned) and a Legacy Scout studies the estate (weak or lying systems, open vulns).
+From both reports it picks a focus (guard, nurse, memory, intrusion or compound) and a priority, with Claude or,
+with no key, by rules. The Commander plans with that brief and prefers its combos. With `RUNNER_DECIDES=1` the
+Planner hands the campaign to the Runner (`decider.propose`, one request per step) and the Runner decides when each
+step fires. Every Planner decision (spawn, brief, propose, handoff) is logged in `chaos_events` as `kind:"decision"`,
+`by:"red-planner"`.
+
+**Runner decisions (`RUNNER_DECIDES=1`, off by default).** The Runner stops being a dumb door. Every Red fire
+(Strikers, Commander steps, Planner requests) is admitted first: `execute`, `hold` (nothing fired, retry later) or
+`deny`. The stage caps keep autoplay moving:
+- a night budget (`RUNNER_MAX_PER_NIGHT`, 3) and spacing between strikes (`RUNNER_GAP_S`, 20);
+- no system fault while an incident is open;
+- agent faults only hit workers;
+- demo nights (`RUNNER_PROTECTED_SCENARIOS`, bank-night-1/2) take agent attacks only;
+- `RUNNER_QUIET_SCENARIOS` (bank-night-3) takes no Red at all;
+- no strikes mid-upgrade, or during autoplay's green gap.
+
+With `RED_FLEET=1` a Runner loop also picks ONE candidate per tick: a queued Planner request
+(`chaos.decider.propose`), a memory poison of what the Hive just learned, or a replay of tonight's seeded attack.
+It then spawns the owning Striker (agent-victim faults, `RUNNER_MAX_SPAWNS` 1/night) or executes the fault directly.
+Every decision is a `kind:"decision", by:"runner"` doc in `world.chaos_events` plus a `runner` feed line.
+`RUNNER_LLM=1` lets Claude pick among the vetted candidates.
 
 ## Rehearse: `scripts/demo_check.py`
 
