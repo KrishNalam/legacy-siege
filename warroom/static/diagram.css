@@ -275,7 +275,7 @@ button { font: inherit; color: inherit; }
 .gs { color: var(--gutter); }
 .gs b { display: inline-block; width: 2.4ch; text-align: center; border: 1px solid var(--faint); margin-right: .8ch; line-height: 1.3; }
 .gs.done { color: var(--ink); } .gs.done b { color: var(--green); border-color: var(--green); }
-.gs.now { color: var(--ink); } .gs.now b { background: var(--amber); color: #111; border-color: var(--amber); animation: blink 1s steps(2, jump-none) infinite; }
+.gs.cur { color: var(--ink); } .gs.cur b { background: var(--amber); color: #111; border-color: var(--amber); animation: blink 1s steps(2, jump-none) infinite; }
 .gv { font-size: 18px; letter-spacing: .05em; margin-top: 4px; }
 
 /* the zoom lens: a frame that steps from the box to the full exhibit (or back) */
@@ -302,7 +302,7 @@ button { font: inherit; color: inherit; }
 .gz .gzn { font-size: 14px; letter-spacing: .05em; margin-bottom: 4px; }
 .gz .gzn b { display: inline-block; width: 2.6ch; text-align: center; border: 1px solid currentColor; margin-right: .6ch; }
 .gz.done { border-color: var(--green); color: var(--ink); } .gz.done .gzn b { color: var(--green); }
-.gz.now { border-color: var(--amber); color: var(--ink); box-shadow: 0 0 0 4px var(--paper), 0 0 0 5px var(--amber); } .gz.now .gzn b { background: var(--amber); color: #111; border-color: var(--amber); }
+.gz.cur { border-color: var(--amber); color: var(--ink); box-shadow: 0 0 0 4px var(--paper), 0 0 0 5px var(--amber); } .gz.cur .gzn b { background: var(--amber); color: #111; border-color: var(--amber); }
 .kv { display: grid; grid-template-columns: 14ch 1fr; column-gap: 2ch; border-bottom: 1px dashed var(--faint); white-space: nowrap; }
 .kv > span { overflow: hidden; text-overflow: ellipsis; }
 /* slot for W24's progress + ETA lines (PROGRESS_ETA); empty = hidden */
@@ -351,7 +351,7 @@ main > .l { z-index: 5; }
 .gsteps { display: flex; gap: 6px; margin-top: 10px; }
 .gsteps span { flex: 1; border: 1px solid var(--faint); color: var(--gutter); font-size: 10px; text-align: center; line-height: 22px; }
 .gsteps span.done { border-color: var(--green); color: var(--green); }
-.gsteps span.now { background: var(--amber); border-color: var(--amber); color: #111; animation: blink 1s steps(2, jump-none) infinite; }
+.gsteps span.cur { background: var(--amber); border-color: var(--amber); color: #111; animation: blink 1s steps(2, jump-none) infinite; }
 .pulse { filter: drop-shadow(0 0 4px currentColor); }
 /* inside Legacy */
 .lz { position: absolute; top: 136px; width: 440px; height: 548px; border: 1px solid var(--ink); box-shadow: 0 0 0 5px var(--paper), 0 0 0 6px var(--ink); padding: 10px 2ch; font-size: 12px; line-height: 1.7; background: var(--paper); }
@@ -383,7 +383,7 @@ main > .l { z-index: 5; }
 .cnt { font-size: 13px; margin-top: 16px; }
 .ttf { font-size: 13px; margin-top: 4px; }
 .ttf i { height: 10px; }
-.gsteps span { font-size: 12px; line-height: 28px; }
+.gsteps span { font-size: 12px; line-height: 26px; }
 .wl { font-size: 12px; }
 .hint { font-size: 13px; }
 /* Live / How it works toggle + architecture diagrams */
@@ -414,3 +414,5 @@ main > .l { z-index: 5; }
 .pp-e { display: flex; gap: 2ch; } .pp-eta { color: var(--amber); }
 .pp-l { font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .eta:has(.pp) { border-top: 0; }
+.pp-b { overflow: hidden; }
+.du.ro { grid-template-columns: 17ch 1.7fr 2ch .8fr; }

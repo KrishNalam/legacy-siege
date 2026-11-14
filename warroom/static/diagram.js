@@ -483,7 +483,7 @@ function renderStrips(since) {
 
 function renderBoard() {
   const ds = duels().slice(-4);
-  const roster = rosterRowsHtml(5);
+  const roster = rosterRowsHtml(4);
   let html = roster || `<div class="du head" style="top:0"><span class="who">ATTACKER</span><span>ATTACK</span><span class="ar"></span><span>DEFENCE</span></div>`;
   if (!roster && !ds.length) html += `<div class="du" style="top:22px"><span class="who" style="background:var(--faint)">—</span><span class="dim">EVERY ATTACK WE LAUNCH</span><span class="ar">→</span><span class="dim">AND HOW THE AGENTS ANSWERED IT</span></div>`;
   if (!roster) ds.forEach((d, i) => {
@@ -497,7 +497,11 @@ function renderBoard() {
   const y = 22 * 5 + 8;
   html += `<div class="score" style="top:${y}px"><span class="dim">TIME TO FIX</span><span>NIGHT 1 ${t1 != null ? secs(t1).toUpperCase() : "—"}</span>${t1 != null ? `<span class="bar2" style="width:${bw(t1)}px"></span>` : ""}</div>`;
   html += `<div class="score" style="top:${y + 22}px"><span class="dim" style="visibility:hidden">TIME TO FIX</span><span>NIGHT 2 ${t2 != null ? secs(t2).toUpperCase() : "—"}</span>${t2 != null ? `<span class="bar2 r2" style="width:${bw(t2)}px"></span>` : ""}${r[1] && r[2] && r[2].ttr < r[1].ttr ? `<span class="x">${(r[1].ttr / r[2].ttr).toFixed(1)}× FASTER · ${Math.round(r[2].hops)} CHECK, NOT ${Math.round(r[1].hops)}</span>` : r[1] && !r[2] ? '<span class="dim">SAME ATTACK NEXT NIGHT. FASTER?</span>' : ""}</div>`;
-  html += `<div class="eta" data-eta="bees" style="top:${y + 50}px">${progressPanel("bees")}</div>`; // W24 progress + ETA (PROGRESS_ETA)
+  const pp = progressPanel("bees", null, true);
+  if (pp) { // W24 on: the progress panel takes the fix-time rows (fix time stays on the overview box)
+    html = html.replace(/<div class="score"[\s\S]*$/, "");
+    html += `<div class="eta" data-eta="bees" style="top:${22 * 5 + 6}px">${pp}</div>`;
+  }
   const host = $("#board");
   if (host.dataset.html !== html) { host.innerHTML = html; host.dataset.html = html; }
 }
@@ -652,20 +656,21 @@ function etaWords(p) {
 // one short chip for a box's NOW line
 function etaChip(area, filter) {
   const p = prog(area, 90);
-  if (!p || (filter && !filter(p))) return "";
-  const step = p.step != null && p.of ? `${p.step}/${p.of} · ` : "";
-  return `${step}${etaWords(p)}`;
+  if (!p || p.phase === "done" || (filter && !filter(p))) return "";
+  if (p.eta_s == null || !p.eta_k) return "NO ETA YET";
+  const left = Math.round(p.eta_s - (serverNow() - p.at) / 1000);
+  return left > 0 ? `~${left} S LEFT` : "ANY MOMENT";
 }
 // the panel inside a zoomed box: latest line, a bar, the ETA, and the last few events
-function progressPanel(area, filter) {
+function progressPanel(area, filter, compact = false) {
   const p = prog(area, 600);
   if (!p || (filter && !filter(p))) return "";
   const hist = state.thoughts.filter((t) => isProgress(t) && t.progress?.area === area && (!filter || filter(t.progress))).slice(-4).reverse();
-  const pct = p.pct != null ? Math.round(p.pct * 100) : null;
+  const pct = p.pct != null ? Math.max(0, Math.min(100, Math.round(p.pct > 1 ? p.pct : p.pct * 100))) : null; // 0..1 or 0..100
   return `<div class="pp"><div class="pp-h"><span class="pp-k">PROGRESS</span><span>${esc(String(p.text || "").toUpperCase())}</span></div>
     <div class="pp-b">${pct != null ? `<i style="width:${pct}%"></i>` : ""}</div>
     <div class="pp-e"><span class="pp-eta">${esc(etaWords(p))}</span>${p.eta_p90_s != null && p.phase !== "done" ? `<span class="dim">P90 ${secs(p.eta_p90_s).toUpperCase()}</span>` : ""}${pct != null ? `<span class="dim">${pct}%</span>` : ""}</div>
-    ${hist.slice(1).map((t) => `<div class="pp-l dim">${esc(String(t.progress?.text || t.text || "").toUpperCase())}</div>`).join("")}</div>`;
+    ${compact ? "" : hist.slice(1).map((t) => `<div class="pp-l dim">${esc(String(t.progress?.text || t.text || "").toUpperCase())}</div>`).join("")}</div>`;
 }
 const bySystem = (sys) => (p) => !sys || p.system === sys;
 const fixing = (p) => /^(step:|incident|diagnose:)/.test(String(p.action_type || ""));
@@ -678,15 +683,15 @@ function rosterRowsHtml(n = 5) {
   if (!R.length) return "";
   const rank = { working: 0, dead: 1, standby: 2, idle: 3, retired: 4 };
   const rows = R.filter((r) => !String(r._id).startsWith("red-")).sort((a, b) => (rank[a.state] ?? 5) - (rank[b.state] ?? 5)).slice(0, n);
-  return `<div class="du head" style="top:0"><span class="who">AGENT</span><span>STATE · DOING</span><span class="ar"></span><span>REPORTS TO</span></div>`
-    + rows.map((r, i) => `<div class="du" style="top:${22 * (i + 1)}px"><span class="who ${r.state === "dead" ? "" : "rw"}" style="${r.state === "dead" ? "" : "background:var(--ink);color:var(--paper)"}">${U(agentName(r._id))}</span><span class="${r.state === "dead" ? "r" : r.state === "working" ? "" : "dim"}">${U(r.state)}${r.doing ? ` · ${esc(String(r.doing).toUpperCase())}` : ""}</span><span class="ar">${r.parent ? "←" : ""}</span><span class="dim">${r.parent ? U(agentName(r.parent)) : r.took_over ? `TOOK OVER ${U(agentName(r.took_over.from))}` : ""}</span></div>`).join("");
+  return `<div class="du ro head" style="top:0"><span class="who">AGENT</span><span>STATE · DOING</span><span class="ar"></span><span>REPORTS TO</span></div>`
+    + rows.map((r, i) => `<div class="du ro" style="top:${22 * (i + 1)}px"><span class="who ${r.state === "dead" ? "" : "rw"}" style="${r.state === "dead" ? "" : "background:var(--ink);color:var(--paper)"}">${U(agentName(r._id))}</span><span class="${r.state === "dead" ? "r" : r.state === "working" ? "" : "dim"}">${U(r.state)}${r.doing ? ` · ${esc(String(r.doing).toUpperCase())}` : ""}</span><span class="ar">${r.parent ? "←" : ""}</span><span class="dim">${r.parent ? U(agentName(r.parent)) : r.took_over ? `TOOK OVER ${U(agentName(r.took_over.from))}` : ""}</span></div>`).join("");
 }
 
 // ================================================================== level 0: four boxes · zoom in / out
 // CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES, THE GARDENER below Legacy pointing up into it.
 const BOXR = {
   chaos: { x: 40, y: 104, w: 360, h: 420 }, legacy: { x: 500, y: 104, w: 600, h: 420 },
-  bees: { x: 1200, y: 104, w: 360, h: 420 }, gardener: { x: 580, y: 618, w: 440, h: 186 },
+  bees: { x: 1200, y: 104, w: 360, h: 420 }, gardener: { x: 580, y: 608, w: 440, h: 206 },
 };
 const FULL = { x: 0, y: 84, w: 1600, h: 760 };
 const ZOOMS = ["overview", "chaos", "legacy", "bees", "gardener"];
@@ -842,7 +847,7 @@ function renderOverview() {
   const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
   const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="${pos(B.gardener)}">
     <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">PERMANENT FIXES</span></div>
-    <div class="gsteps">${["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"].map((n, i) => `<span class="${u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "now" : ""}">${n}</span>`).join("")}</div>
+    <div class="gsteps">${["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"].map((n, i) => `<span class="${u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "cur" : ""}">${n}</span>`).join("")}</div>
     ${liveLine("gardener", u ? (u.status === "proven" ? `<span class="g">${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}: ATTACK REPLAYED, NOTHING BROKE</span>` : esc((gThought ? (translate(gThought)?.text || "").replace(/<[^>]+>/g, "") : String(u.status)).toUpperCase())) : '<span class="dim">WAITING FOR A REPEAT</span>')}
     <div class="look" style="height:24px;line-height:22px"><span>4</span>LOOK INSIDE +</div></div>`;
 
@@ -1054,7 +1059,7 @@ function renderGardener() {
   const WHY = ["Same failure twice → the Lookout files a request", "Reads the old code, writes a small fix", "Runs the tests and replays the attack in a sandbox", "Nothing ships without a human OK", "Installs the code and bumps the version", "Chaos Monkey replays the original attack", "The attack came back. Nothing broke."];
   const at = u ? order.indexOf(u.status) : -1;
   const x0 = 60, wd = 200, gap = 13;
-  const stages = NAMES.map((n, i) => { const st = u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "now" : ""; return `<div class="gz ${st}" style="left:${x0 + i * (wd + gap)}px;top:160px;width:${wd}px"><div class="gzn"><b>${st === "done" ? "✓" : i + 1}</b> ${n}</div><div class="pd">${WHY[i]}</div></div>`; }).join("");
+  const stages = NAMES.map((n, i) => { const st = u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "cur" : ""; return `<div class="gz ${st}" style="left:${x0 + i * (wd + gap)}px;top:160px;width:${wd}px"><div class="gzn"><b>${st === "done" ? "✓" : i + 1}</b> ${n}</div><div class="pd">${WHY[i]}</div></div>`; }).join("");
   const thoughts = state.thoughts.filter((t) => roleOf(t.agent) === "gardener" || t.kind === "upgrade").slice(-9);
   const tests = u?.tests ? ((u.tests.pytest_passed ?? u.tests.passed) ? '<span class="g">PASSED</span>' : '<span class="r">FAILED</span>') : "—";
   const kv = [["SYSTEM", u ? U(sn(u.system)) : "—"], ["WEAKNESS", u ? esc(u.weakness || "") : "—"], ["EVIDENCE", u ? esc((u.evidence || []).join(" · ")) : "—"],
