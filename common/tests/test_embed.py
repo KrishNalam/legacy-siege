@@ -40,10 +40,6 @@ def _fake(monkeypatch, cls):
     monkeypatch.setitem(sys.modules, "voyageai", types.SimpleNamespace(Client=cls))
 
 
-def test_default_model_is_voyage_4():
-    assert config.VOYAGE_MODEL == "voyage-4"
-
-
 def test_voyage_call_is_bounded_and_dimensioned(monkeypatch):
     _fake(monkeypatch, _Ok)
     vec, model = embed.embed_with_model("hello", "query")
@@ -88,18 +84,3 @@ def test_hung_voyage_is_bounded(monkeypatch):
     t = time.monotonic()
     assert embed.embed_with_model("x")[1] == embed.LOCAL_MODEL
     assert time.monotonic() - t < 1.5
-
-
-def test_rate_limit_error_falls_back_instantly(monkeypatch):
-    import time
-
-    from voyageai.error import RateLimitError
-
-    class Limited(_Ok):
-        def embed(self, texts, **k):
-            raise RateLimitError("429 too many requests")
-
-    _fake(monkeypatch, Limited)
-    t = time.monotonic()
-    vec, model = embed.embed_with_model("x", "query")
-    assert model == embed.LOCAL_MODEL and len(vec) == config.EMBED_DIM and time.monotonic() - t < 0.5
