@@ -1,6 +1,7 @@
 """Visible recovery when an attack (e.g. the Red fleet) outlasts the normal attempt budget.
 
-Switch: ``SWARM_RECOVERY`` (default: on when ``RED_FLEET`` is on, otherwise off, so the seeded demo is unchanged).
+Switch: ``SWARM_RECOVERY`` (default off, independent of ``RED_FLEET``: a Red stage run keeps the seeded lie and
+round-2 timing unless recovery is switched on explicitly).
 
 With it on:
   * a fix task that ran out of attempts (or timed out) is NOT escalated at once: the scout backs off,
@@ -24,7 +25,7 @@ def _on(name: str, default: str = "") -> bool:
 
 
 def enabled() -> bool:
-    return _on("SWARM_RECOVERY", "1" if _on("RED_FLEET") else "")
+    return _on("SWARM_RECOVERY")
 
 
 ROUNDS = int(_f("RECOVERY_ROUNDS", 2))          # fresh attempt budgets before escalating to the Beekeeper
