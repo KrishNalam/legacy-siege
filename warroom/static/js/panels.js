@@ -78,6 +78,14 @@ export class Panels {
     $("#run-id").textContent = run?._id || cur?.run_id || "—";
     $("#run-round").textContent = cur?.round ?? run?.round ?? "—";
     $("#run-scn").textContent = run?.scenario || cur?.scenario || "";
+    const comms = state.comms, chip = $("#commschip");
+    if (chip) {
+      chip.hidden = !comms;
+      if (comms) {
+        $("#comms-msgs").textContent = (comms.messages || 0).toLocaleString("en-US");
+        $("#comms-merged").textContent = (comms.merged || 0).toLocaleString("en-US");
+      }
+    }
     const armed = [...state.agents.values()].some((a) => a.role !== "nurse" && a.status !== "dead" && a.phase === "step_sent");
     $("#btn-kill").classList.toggle("armed", armed);
   }
