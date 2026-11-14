@@ -200,6 +200,13 @@ def cancel_pending_hunts() -> None:
     _hunt_epoch += 1
 
 
+def _current_night() -> str | None:
+    """Id of the chaos run (night) in progress, or None between nights. Read from MongoDB so every
+    process agrees: a reset ends the run, and starting a scenario opens a new one."""
+    doc = col("runs").find_one({"ended_at": None}, {"_id": 1}, sort=[("started_at", -1)])
+    return doc["_id"] if doc else None
+
+
 SELECTOR_FIELDS = {"agent", "role", "phase", "specialty", "incident", "task", "target"}
 
 
@@ -221,8 +228,17 @@ def find_victim(selector: dict, wait_s: float = 30, poll_s: float = 0.25) -> tup
     ``{"role": "worker", "phase": "step_sent"}``) restricted to working agents
     with a fresh heartbeat. After ``wait_s`` without a match, fall back to any
     busy worker. Returns ``(agent, how, waited_s)``.
+
+    A kill belongs to the night it was requested in: if that night ends (a reset) or another one
+    starts before a victim turns up, the hunt is called off (``how="cancelled"``). Unlike the
+    in-process reset epoch alone, this holds across processes (war room, ``chaos.cli``), so a stray
+    request can never strike a worker in the next round.
     """
-    t0, epoch = time.monotonic(), _hunt_epoch
+    t0, epoch, night = time.monotonic(), _hunt_epoch, _current_night()
+
+    def called_off() -> bool:
+        return _hunt_epoch != epoch or _current_night() != night
+
     if "agent" in selector:
         query = {"_id": selector["agent"], "status": {"$ne": "dead"}}
     else:
@@ -231,13 +247,15 @@ def find_victim(selector: dict, wait_s: float = 30, poll_s: float = 0.25) -> tup
         fresh = {**query, "last_seen": {"$gte": _fresh_cutoff()}}
         for a in _candidates(fresh):
             if _killable(a) is None:
+                if called_off():
+                    return None, "cancelled", time.monotonic() - t0
                 return a, "selector", time.monotonic() - t0
         if time.monotonic() - t0 >= wait_s:
             break
         time.sleep(poll_s)
-        if _hunt_epoch != epoch:
+        if called_off():
             return None, "cancelled", time.monotonic() - t0
-    if "agent" not in selector and _hunt_epoch == epoch:
+    if "agent" not in selector and not called_off():
         for a in _candidates({**BUSY_WORKER, "last_seen": {"$gte": _fresh_cutoff()}}):
             if _killable(a) is None:
                 return a, "fallback_busy_worker", time.monotonic() - t0
@@ -253,7 +271,9 @@ def kill_agent(params: dict) -> dict:
     poll_s = min(max(float(params.get("poll_s", 0.25)), 0.1), 5.0)   # never a busy loop
     agent, how, waited = find_victim(selector, wait_s, poll_s)
     if agent is None:
-        return {"ok": False, "error": "no live agent matched", "selector": selector, "waited_s": round(waited, 2)}
+        error = ("called off: the night ended or a new one started before a victim appeared"
+                 if how == "cancelled" else "no live agent matched")
+        return {"ok": False, "error": error, "selector": selector, "waited_s": round(waited, 2)}
     pid = agent["pid"]
     try:
         os.kill(pid, signal.SIGKILL)   # a real crash: no cleanup, no goodbye heartbeat

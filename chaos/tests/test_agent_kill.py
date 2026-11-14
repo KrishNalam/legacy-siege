@@ -88,3 +88,32 @@ def test_refuses_recycled_pid(spawn):
                              {"$set": {"last_seen": now() - timedelta(seconds=10)}})  # still "fresh"
     ev = runner.fire("agent_kill", params={"wait_s": 0.2})
     assert ev["status"] == "failed" and p.poll() is None
+
+
+def test_stray_kill_never_crosses_into_the_next_night(spawn):
+    """A kill requested in night 1 (here from another process's point of view: no in-process reset
+    epoch bump) must not strike a worker in night 2, even via the busy-worker fallback."""
+    w = world()
+    w.runs.insert_one({"_id": "RUN-0001", "started_at": now() - timedelta(minutes=2), "ended_at": None})
+
+    def next_night():  # Reset ▸ Next round ends night 1, then night 2 starts and a worker gets busy
+        time.sleep(0.4)
+        w.runs.update_one({"_id": "RUN-0001"}, {"$set": {"ended_at": now()}})
+        w.runs.insert_one({"_id": "RUN-0002", "started_at": now(), "ended_at": None})
+        spawn("worker-mainframe-1", phase="diagnosing", incident="INC-0002", task="INC-0002-d1")
+
+    threading.Thread(target=next_night, daemon=True).start()
+    ev = runner.fire("agent_kill", params={"selector": {"role": "worker"}, "wait_s": 3}, run_id="RUN-0001")
+    assert ev["status"] == "failed" and ev["result"]["error"].startswith("called off")
+    victim = col("agents").find_one({"_id": "worker-mainframe-1"})
+    assert victim is not None
+    time.sleep(0.2)
+    import os  # noqa: PLC0415
+    os.kill(victim["pid"], 0)  # still alive: raises ProcessLookupError if it was killed
+
+
+def test_kill_within_the_same_night_still_lands(spawn):
+    world().runs.insert_one({"_id": "RUN-0002", "started_at": now(), "ended_at": None})
+    p = spawn("worker-web-1", specialty="web", phase="diagnosing")
+    ev = runner.fire("agent_kill", params={"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0.3})
+    assert ev["status"] == "ok" and ev["result"]["matched"] == "fallback_busy_worker" and _killed(p)
