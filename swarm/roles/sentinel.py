@@ -342,6 +342,12 @@ def run(agent: Agent) -> None:
             except Exception as e:
                 log(agent.id, f"schema sample error: {type(e).__name__}: {e}")
 
+        if gardener_help.enabled():  # Sentinel #2: push a remembered fix to the Scout that just took an incident
+            try:
+                push_known_fixes(agent, versions)
+            except Exception as e:
+                log(agent.id, f"known-fix push error: {type(e).__name__}: {e}")
+
         if time.monotonic() - last_slow > 3:
             last_slow = time.monotonic()
             note_repeated_problems(agent)
@@ -394,3 +400,41 @@ def note_repeated_problems(agent):
             where = f" on {g['system']}" if g.get('system') and g['system'] not in str(g['problem']) else ''
             agent.think(f"Sentinel #2 → Gardener: {g['problem']}{where} repeated {g['count']}× "
                         f"({', '.join(g['evidence'][-4:])}).", kind='upgrade', system=g['system'], pause=False)
+
+
+def known_fix_for(symptoms: list[str], versions: dict) -> dict | None:
+    """The newest current playbook whose ROOT system's symptom line appears verbatim in these symptoms
+    (symptom lines are canonical and number-free, so the same fault reads the same way twice)."""
+    lines = set(symptoms or [])
+    if not lines:
+        return None
+    for pb in col("playbooks").find({"stale": False, "system": {"$ne": None}},
+                                    {"embedding": 0}).sort("verified_at", -1).limit(50):
+        root = [ln for ln in pb.get("symptoms") or [] if ln.split(" ", 1)[0] == pb["system"]]
+        cur = versions.get(pb["system"])
+        if root and root[0] in lines and (cur is None or pb.get("system_version") == cur) and pb.get("fix"):
+            return pb
+    return None
+
+
+def push_known_fixes(agent, versions: dict) -> None:
+    """Sentinel #2 cuts duplicate work: when a Scout has taken an incident whose root symptom matches a fix the
+    hive already verified, push that fix onto the incident (known_fix) and the bus, so the Scout uses it instead
+    of rediscovering it. The Scout still confirms it with one read and the Guard still verifies every step."""
+    for inc in col("incidents").find({"active": True, "kind": {"$ne": "security"}, "owner": {"$ne": None},
+                                      "status": {"$in": ["open", "diagnosing"]}, "known_fix": {"$exists": False}},
+                                     {"symptoms": 1, "owner": 1}):
+        pb = known_fix_for(inc.get("symptoms"), versions)
+        if pb is None:
+            continue
+        fix = {"from": agent.id, "source": "playbook", "playbook_id": pb["_id"], "system": pb["system"],
+               "fault_class": pb.get("fault_class"), "system_version": pb.get("system_version"),
+               "learned_in": pb.get("incident"), "fix": pb.get("fix") or [], "to": inc["owner"], "ts": now()}
+        r = col("incidents").update_one({"_id": inc["_id"], "known_fix": {"$exists": False}}, {"$set": {"known_fix": fix}})
+        if not r.modified_count:
+            continue
+        say(agent.id, inc["owner"], "known_fix", {k: fix[k] for k in ("playbook_id", "system", "fault_class")},
+            incident=inc["_id"], system=pb["system"])
+        agent.think(f"Sentinel #2 → {inc['owner']}: {inc['_id']} has the same root symptom as {pb.get('incident')} "
+                    f"({pb.get('fault_class')} on {pb['system']}); pushed known fix {pb['_id']} so nobody rediscovers it.",
+                    kind="recall", incident=inc["_id"], system=pb["system"], pause=False)
