@@ -728,7 +728,7 @@ function renderOverview() {
   const t1 = r[1]?.ttr, t2 = r[2]?.ttr ?? (liveR2 ? (serverNow() - ts(liveR2.opened_at)) / 1000 : null);
   const mx = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / mx) * 150);
   const look = (n) => `<div class="look"><span>${n}</span>LOOK INSIDE +</div>`;
-  const liveLine = (k, html) => `<div class="live"><span class="lk">NOW</span>${html} <span class="eta" data-eta="${k}"></span></div>`; // .eta = W24 progress/ETA slot
+  const liveLine = (k, html) => `<div class="nowl"><span class="lk">NOW</span>${html} <span class="eta" data-eta="${k}"></span></div>`; // .eta = W24 progress/ETA slot
   const B = BOXR;
   const lieFresh = rejects.some((t) => serverNow() - ts(t.ts) < 12000);
   const killFresh = ds.some((d) => d.e.fault === "agent_kill" && d.e.result?.agent && serverNow() - ts(d.e.done_at || d.e.ts) < 20000);

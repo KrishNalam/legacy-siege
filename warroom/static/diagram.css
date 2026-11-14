@@ -333,8 +333,8 @@ main > .l { z-index: 5; }
 .layer > .wires, .layer > #nodes, .layer > #ov-nodes, .layer > .zc { pointer-events: none; }
 .layer.anim { transition: transform .45s cubic-bezier(.2,.75,.2,1), opacity .45s cubic-bezier(.2,.75,.2,1); }
 .big { padding: 10px 2ch 0; }
-.live { margin-top: 8px; border-top: 1px dashed var(--faint); padding-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
-.live .lk { color: var(--gutter); font-size: 10px; letter-spacing: .08em; margin-right: 1ch; }
+.nowl { margin-top: 8px; border-top: 1px dashed var(--faint); padding-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.nowl .lk { color: var(--gutter); font-size: 10px; letter-spacing: .08em; margin-right: 1ch; }
 .big .eta { position: static; border: 0; padding: 0; color: var(--amber); }
 .big.legacy { cursor: pointer; }
 .chainL { display: flex; align-items: stretch; margin-top: 10px; gap: 0; }
