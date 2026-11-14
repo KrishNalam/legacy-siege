@@ -17,7 +17,6 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from common import tracing
 from common.db import col, now, txn
 
 from .. import diagnosis, leases, settings, steps, verify
@@ -245,7 +244,7 @@ def execute(agent: Agent, graph, task: dict, resume: bool = False) -> None:
 
 
 def run(agent: Agent) -> None:
-    graph = tracing.traced_graph(build_graph(agent), agent)
+    graph = build_graph(agent)
 
     def tick():
         task = leases.claim(col("tasks"), {"status": "open", "specialty": agent.specialty}, agent.id,

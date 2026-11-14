@@ -21,7 +21,6 @@ from langgraph.types import Command, interrupt
 from pymongo.errors import DuplicateKeyError
 
 from common import config as shared
-from common import tracing
 from common.db import col, next_id, now, txn
 from common.events import say as bus
 
@@ -429,7 +428,7 @@ def drive(agent: Agent, graph, inc_id: str, generation: int) -> dict | None:
 
 
 def run(agent: Agent) -> None:
-    graph = tracing.traced_graph(build_graph(agent), agent)
+    graph = build_graph(agent)
     def tick():
         # Take an incident the queen assigned to me — or any unassigned one if the queen is slow/absent.
         inc = leases.claim(col("incidents"), {

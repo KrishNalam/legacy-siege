@@ -17,7 +17,6 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from common import config as shared
-from common import tracing
 from common.db import col, now
 
 from .. import settings, steps, verify
@@ -133,7 +132,7 @@ def build_graph(agent: Agent):
 
 
 def run(agent: Agent) -> None:
-    graph = tracing.traced_graph(build_graph(agent), agent)
+    graph = build_graph(agent)
     busy = False
     while not agent.stop.is_set():
         try:
