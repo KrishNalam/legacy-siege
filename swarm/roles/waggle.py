@@ -18,6 +18,8 @@ from common.db import col, swarm
 from common.events import say, think
 from common import comms
 
+from .. import roster
+
 from ..harness import Agent, checkpointer, log
 
 PIPELINE = [{"$match": {"$or": [
@@ -108,6 +110,7 @@ def run(agent: Agent) -> None:
         custody.start(agent.stop, lambda text, row: think(agent.id, "waggle", text, incident=row.get("incident"),
                                                            kind="handoff"))
     if comms.enabled():
+        roster.start(agent)  # live roster of every agent beside the prioritised bus (swarm/roster.py)
         return run_prioritiser(agent)
     graph = build_graph(agent)
     while not agent.stop.is_set():

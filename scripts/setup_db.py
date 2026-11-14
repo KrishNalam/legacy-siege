@@ -245,7 +245,7 @@ def reset() -> None:
     for n in ["incidents", "tasks", "agents", "thoughts", "messages", "ledger", "playbooks", "approvals",
               "schema_samples", "schema_mappings",
               "upgrade_requests", "stats", "counters", "checkpoints", "checkpoint_writes", "spawn_requests",
-              "custody"]:
+              "custody", "roster"]:
         try:
             s[n].delete_many({})
         except OperationFailure:
