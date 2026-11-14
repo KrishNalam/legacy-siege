@@ -271,10 +271,8 @@ def candidates(st: dict, caps: Caps) -> list[dict]:
     pm = faults.FAULTS.get("poison_memory")
     if pm is not None and pm.enabled():
         s = swarm()
-        learned = s.playbooks.find_one({"red_planted": {"$ne": True}, "stale": False,
-                                        "fault_class": {"$nin": list(getattr(faults, "REBOUND", ()))}},
-                                       sort=[("created_at", -1)])
-        if learned and learned.get("fix") and not s.playbooks.find_one({"red_planted": True}, {"_id": 1}):
+        learned = next(iter(faults.poisonable(1)), None)   # both shapes (W27): batch_abort -> wrong-record
+        if learned and not s.playbooks.find_one({"red_planted": True}, {"_id": 1}):
             out.append({"source": "poison", "fault": "poison_memory", "target": "swarm", "params": {},
                         "by": RUNNER_ID, "prefer": "auto",
                         "why": f"the Hive just learned {learned['_id']} ({learned.get('fault_class')}): poison that "
