@@ -64,3 +64,17 @@ def test_disk_fill_mid_repair_replans_instead_of_looping(db, fake):
         assert col('thoughts').find_one({'incident': inc['_id'], 'text': {'$regex': 'Re-planning: purge_spool'}})
     finally:
         hive.stop()
+
+
+def test_second_drift_replaces_stale_map_field():
+    """A second schema drift mid-repair: map_field to the newer field replaces the pending one (no stale retry)."""
+    from swarm import recovery
+    steps = [{"step_id": "I-s1", "n": 1, "system": "portal", "op": "map_field", "params": {"field": "balance",
+              "source": "acct_bal"}, "status": "failed", "destructive": False},
+             {"step_id": "I-s2", "n": 2, "system": "portal", "op": "refresh_cache", "params": {}, "status": "planned",
+              "destructive": False}]
+    out, added = recovery.replan_steps(steps, "I", {"fault_class": "schema_drift", "params": {
+        "field": "balance", "to": "ledger_bal"}}, None)
+    live = [s for s in out if not s.get("superseded_by_replan")]
+    assert [(s["op"], (s.get("params") or {}).get("source")) for s in live] == [
+        ("map_field", "ledger_bal"), ("refresh_cache", None)]

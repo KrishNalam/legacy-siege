@@ -118,6 +118,12 @@ def good_sample() -> dict | None:
     return col("schema_samples").find_one({"_id": f"good:{SYSTEM}:{FEED}"})
 
 
+def lined_up(ok: int, total: int) -> bool:
+    """Most accounts line up. Not all: a batch re-run between the good sample and the drift legitimately moves
+    some balances past TOLERANCE (a drift landing mid batch-repair), while a wrong field (other units) misses all."""
+    return total > 0 and ok * 2 > total
+
+
 def line_up(good_records: list[dict], old: str, new_records: list[dict], new: str) -> tuple[int, int]:
     """How many accounts present in both samples have new[new] ≈ good[old] (within TOLERANCE)."""
     good = {r.get(KEY): r.get(old) for r in good_records or []}
@@ -179,7 +185,7 @@ def detect(state: dict) -> dict | None:
                 "facts": facts, "params": {}}
     def score(new: str) -> tuple[bool, int, int]:
         ok, total = line_up(good["records"], old, recs, new) if good else (0, 0)
-        return (types.get(new) in NUMERIC and (total > 0 and ok == total or not good)), ok, total
+        return (types.get(new) in NUMERIC and (lined_up(ok, total) or not good)), ok, total
 
     cands = sorted(((*score(n), n) for n in added if types.get(n) in NUMERIC), reverse=True)
     if not cands:
@@ -360,7 +366,7 @@ def verify_mapping(field: str, source: str, portal_state: dict, unix_state: dict
     if good:
         ok, total = line_up(good["records"], old, recs, source)
         lined = f"values line up with good sample: {ok}/{total} accounts ({old} → {source})"
-        values_ok = total > 0 and ok == total
+        values_ok = lined_up(ok, total)
     else:
         lined, values_ok = "no good sample: numeric check only", present > 0
     applied = pm == source and recs and present == len(recs) and values_ok

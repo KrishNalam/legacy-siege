@@ -92,7 +92,10 @@ def replan_steps(steps: list[dict], inc_id: str, findings: dict, ts) -> tuple[li
         added.append(st)
     if not added:
         return None
+    replaced = {(s["system"], s["op"]) for s in added}
     for s in pending:
+        if (s["system"], s["op"]) in replaced:
+            continue  # the new fault's remediation replaces it (e.g. a second drift: map_field to the newer field)
         n += 1
         keep = {k: v for k, v in s.items() if k not in fresh and k not in ("superseded_by_replan", "judged_at")}
         out.append({**keep, "step_id": f"{inc_id}-s{n}", "n": n, "retry_of": s["step_id"], **fresh})
