@@ -173,6 +173,7 @@ def test_atlas_lists_collections(app_client):
 
 
 def test_reset_next_round_keeps_memory_full_wipes(app_client):
+    world().red_agents.insert_one({"_id": "red-liar", "pending_reflection": "CHX-0001"})
     swarm().playbooks.insert_one({"_id": "PB-1", "embedding_model": "m"})
     swarm().incidents.insert_one({"_id": "INC-1", "status": "fixing", "system": "portal", "opened_at": now(), "active": True})
     swarm().approvals.insert_one({"_id": "APR-1", "status": "pending", "ts": now()})
@@ -192,6 +193,7 @@ def test_reset_next_round_keeps_memory_full_wipes(app_client):
     assert app_client.post("/api/reset", json={"mode": "full"}).json()["ok"]
     assert swarm().playbooks.count_documents({}) == 0 and swarm().incidents.count_documents({}) == 0
     assert swarm().schema_mappings.count_documents({}) == 0
+    assert world().red_agents.count_documents({}) == 0
     assert app_client.post("/api/reset", json={"mode": "bogus"}).status_code == 400
 
 
