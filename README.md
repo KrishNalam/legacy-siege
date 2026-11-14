@@ -256,7 +256,7 @@ Striker executes it from its own menu through `runner.fire` (event `red.campaign
 last step it watches the Hive (`RED_COMMANDER_OBSERVE_S`, 45 s) and reflects (Guard catch, Nurse handoffs, recovery
 time) into `chaos_events.red.campaign_reflection` and its lessons, which feed its next THINK. Knobs:
 `RED_COMMANDER_COOLDOWN_S` (45), `RED_COMMANDER_FIRST_S` (20), `RED_COMMANDER_STEP_GAP_S` (3),
-`RED_COMMANDER_STEP_TIMEOUT_S` (90, an unexecuted step calls the campaign off), `RED_COMMANDER_MAX` (0 = unlimited).
+`RED_COMMANDER_STEP_TIMEOUT_S` (90, an unexecuted step calls the campaign off), `RED_COMMANDER_MAX` (1 per night; 0 = unlimited).
 
 **Memory Striker (`CHAOS_POISON_MEMORY=1`, off by default).** `red-memory` plants a copy of a learned repair aimed at
 the wrong system (a full unix spool → "purge_spool on mainframe") and hides the genuine playbook until the next reset.

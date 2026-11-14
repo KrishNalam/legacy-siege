@@ -302,6 +302,14 @@ def build_graph(agent: Agent):
         path, findings = state["path"], state["findings"]
         culprits = [s for s in path if (findings.get(s) or {}).get("fault_class")]
         if not culprits:
+            if recovery.enabled() and path and all((findings.get(s) or {}).get("status") == "up" for s in path):
+                # SWARM_RECOVERY: a transient blip (another incident's fix landed meanwhile): nothing is wrong
+                # any more, so close it as self-healed instead of handing the Beekeeper a false alarm
+                fenced(config, inc_id, {"$set": {"status": "resolved", "active": False, "closed_at": now(),
+                                                  "resolution": "self_healed", "lease_until": leases.EPOCH}})
+                say(inc_id, f"Walked {' → '.join(path)}: every system reads healthy now, no fault left to fix. "
+                            f"Closing {inc_id} as self-healed (no playbook learned).", kind="action", pause=False)
+                return {"outcome": "failed"}  # ends the graph; the incident itself is resolved
             return escalate(config, inc_id, f"walked {' → '.join(path)} but found no known fault")
         root = culprits[-1]  # most upstream system with a diagnosed fault
         f = findings[root]
@@ -474,16 +482,26 @@ def build_graph(agent: Agent):
         sys = first["system"]
         used = sum(len(s.get("attempts") or []) for s in todo)
         agent.set(target=sys, phase="recovering")
+        wait_s = recovery.backoff_s(rnd)
         say(inc_id, f"Recovery {rnd}/{recovery.ROUNDS}: {first['step_id']} {policy.fmt_op(first)} did not take effect "
                     f"after {used} attempt(s): {recovery.why_failed(todo)}. Not giving up: backing off "
-                    f"{recovery.BACKOFF_S * rnd:.0f}s, re-reading {sys}, then a fresh attempt budget.",
+                    f"{wait_s:.0f}s, re-diagnosing {sys}, then a fresh attempt budget.",
             kind="action", system=sys, pause=False)
-        agent.nap(recovery.BACKOFF_S * rnd)
+        agent.nap(wait_s)
         agent.check("incidents", inc_id)
+        # re-read after the nap: a Guard verdict may have landed while we backed off
+        inc = inc_doc(inc_id)
+        todo = [s for s in sorted(inc.get("steps") or [], key=lambda s: s["n"])
+                if s["step_id"] in ids and s["status"] != "verified"]
+        if not todo:
+            return {"outcome": "await"}
+        out = replan_after_new_fault(config, inc, [sys], todo)
+        if out:  # a second fault landed mid-repair: fix it first, then redo the unverified steps
+            return out
         try:
             h = sysc.health(sys)
             say(inc_id, f"Re-read {sys}: /health {h.get('status')}"
-                        + (f", blames {h['blames']}" if h.get("blames") else "") + ". Re-dispatching "
+                        + (f", blames {h['blames']}" if h.get("blames") else "") + ", no new fault. Re-dispatching "
                         f"{', '.join(s['op'] for s in todo)} with {settings.MAX_ATTEMPTS} more attempts each.",
                 kind="action", system=sys, pause=False)
         except Exception:
@@ -501,6 +519,49 @@ def build_graph(agent: Agent):
             "round": rnd, "step_ids": [s["step_id"] for s in todo], "attempts_used": used, "task": task_id,
             "reason": recovery.why_failed(todo), "ts": now()}}}, array_filters=filters)
         return {"outcome": "await"}
+
+    def replan_after_new_fault(config, inc: dict, systems: list[str], todo: list[dict] | None = None) -> dict | None:
+        """Re-diagnose `systems`; if one shows a fault the plan doesn't cover, put its remediation in front of the
+        unverified steps (one recovery round). None when nothing new is wrong."""
+        inc_id, rnd = inc["_id"], inc.get("recovery_rounds", 0) + 1
+        since = (inc.get("opened_at") or now()).isoformat()
+        for sys in systems:
+            f = recovery.rediagnose(sysc, sys, since=since)
+            replanned = recovery.replan_steps(inc.get("steps") or [], inc_id, f, now()) if f else None
+            if not replanned:
+                continue
+            new_steps, added = replanned
+            todo = todo or []
+            n_old = len(inc.get("steps") or [])
+            superseded = [s["step_id"] for s in new_steps[:n_old] if s.get("superseded_by_replan")]
+            appended = new_steps[n_old:]
+            # One server-side pipeline update (like the memory replan): steps are flagged superseded only if still
+            # unverified *at write time*, and a retry copy is dropped when its original got verified meanwhile, so
+            # a Guard verdict landing during the backoff nap is never overwritten or redone.
+            unverified = {"$and": [{"$in": ["$$s.step_id", superseded]}, {"$ne": ["$$s.status", "verified"]}]}
+            verified_ids = {"$map": {"input": {"$filter": {"input": "$steps", "as": "v",
+                                                           "cond": {"$eq": ["$$v.status", "verified"]}}},
+                                     "as": "v", "in": "$$v.step_id"}}
+            rec = {"round": rnd, "step_ids": [s["step_id"] for s in todo],
+                   "attempts_used": sum(len(s.get("attempts") or []) for s in todo),
+                   "replan": {"system": f["system"], "fault_class": f["fault_class"], "facts": f.get("facts") or [],
+                              "added": [s["step_id"] for s in added]},
+                   "reason": recovery.why_failed(todo) if todo else f"{sys} still unhealthy", "ts": now()}
+            fenced(config, inc_id, [{"$set": {
+                "steps": {"$concatArrays": [
+                    {"$map": {"input": "$steps", "as": "s", "in": {"$cond": [
+                        unverified, {"$mergeObjects": ["$$s", {"superseded_by_replan": True}]}, "$$s"]}}},
+                    {"$filter": {"input": {"$literal": appended}, "as": "a", "cond": {
+                        "$not": [{"$in": [{"$ifNull": ["$$a.retry_of", None]}, verified_ids]}]}}}]},
+                "recoveries": {"$concatArrays": [{"$ifNull": ["$recoveries", []]}, {"$literal": [rec]}]},
+                "recovery_rounds": rnd, "status": "fixing"}}])
+            say(inc_id, f"Recovery {rnd}/{recovery.ROUNDS}: re-diagnosis found a new fault on {f['system']}: "
+                        f"{f.get('root_cause') or f['fault_class']}. Re-planning: "
+                        f"{', '.join(policy.fmt_op(s) for s in added)} first"
+                        + (f", then the {len(todo)} unverified step(s) again." if todo else "."),
+                kind="action", system=f["system"], pause=False)
+            return {"outcome": "await"}
+        return None
 
     def approve(state: ScoutState, config) -> dict:
         inc_id = state["incident"]
@@ -550,12 +611,21 @@ def build_graph(agent: Agent):
         watch = sorted(set(inc.get("affected") or []) | {state["root"]}, key=policy.rank)
         verified = "Current plan" if inc.get("memory_replanned") else "Every step"
         say(inc_id, f"{verified} verified by the Guard. Waiting for {', '.join(watch)} to report healthy.")
-        deadline, health = time.monotonic() + settings.RESOLVE_TIMEOUT_S, {}
+        t0 = time.monotonic()
+        deadline, health, next_look = t0 + settings.RESOLVE_TIMEOUT_S, {}, t0 + recovery.HEALTH_GRACE_S
         while time.monotonic() < deadline:
             agent.check("incidents", inc_id)
             health = {s: sysc.health(s).get("status") for s in watch}
             if all(v == "up" for v in health.values()):
                 break
+            if recovery.enabled() and inc.get("recovery_rounds", 0) < recovery.ROUNDS and time.monotonic() >= next_look:
+                # SWARM_RECOVERY: every step verified, yet a system stays down: something new hit it (a re-struck
+                # fault, a second attack). Re-diagnose and fix that instead of waiting out the timeout.
+                next_look = time.monotonic() + recovery.HEALTH_GRACE_S
+                inc = inc_doc(inc_id)
+                out = replan_after_new_fault(config, inc, [s for s, v in health.items() if v != "up"])
+                if out:
+                    return out
             agent.nap(settings.POLL_S)
         else:
             return escalate(config, inc_id, f"steps verified but health still {health}")
@@ -612,7 +682,8 @@ def build_graph(agent: Agent):
                             ["resolve", "await_group", "approve", END])
     g.add_conditional_edges("approve", lambda s: END if failed(s) else "dispatch", ["dispatch", END])
     g.add_edge("await_group", "dispatch")
-    g.add_edge("resolve", END)
+    g.add_conditional_edges("resolve", lambda s: "dispatch" if s.get("outcome") == "await" else END,
+                            ["dispatch", END])
     return g.compile(checkpointer=checkpointer())
 
 

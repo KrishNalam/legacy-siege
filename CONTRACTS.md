@@ -295,7 +295,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     exploitable (`rotate_credential`); `/_admin/reset` restores the default credential.
   - Guardrails kept (no permanent damage): refuses `WORLD_DB=world`/`SWARM_DB=swarm` unless `RED_FLEET_ALLOW_LIVE=1`;
     holds while an `upgrade_requests` doc is mid-pipeline; never kills a `gardener` or the last live queen.
-    Pacing knobs: `RED_FLEET_COOLDOWN_S` (30, per attacker), `RED_FLEET_MAX_ATTACKS` (0 = unlimited, per attacker per night),
+    Pacing knobs: `RED_FLEET_COOLDOWN_S` (30, per attacker), `RED_FLEET_MAX_ATTACKS` (default 2 per attacker per night; 0 = unlimited),
     `RED_FLEET_FIRST_STRIKE_S`, `RED_FLEET_SKIP_SCENARIOS`, `RED_FLEET_FAULTS`, `RED_FLEET_AGENTS`, `RED_FLEET_LLM=0`.
 - **Dynamic swarm scaling (additive, W15; switch `SWARM_DYNAMIC=1`, default off = the fixed roster above, unchanged).**
   - Standing roster shrinks to `queen-1/2, guard-1, waggle-1, sentinel-1, nurse-1/2`; no standing scouts or workers.

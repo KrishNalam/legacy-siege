@@ -291,7 +291,7 @@ class Commander:
         self.step_gap_s = _f("RED_COMMANDER_STEP_GAP_S", 3)
         self.step_timeout_s = _f("RED_COMMANDER_STEP_TIMEOUT_S", 90)
         self.observe_s = _f("RED_COMMANDER_OBSERVE_S", 45)
-        self.max_campaigns = int(_f("RED_COMMANDER_MAX", 0))
+        self.max_campaigns = int(_f("RED_COMMANDER_MAX", 1))  # per night; 0 = unlimited
         self.llm_calls = 0
         self.fallback_count = 0
         self._restored = False

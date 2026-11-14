@@ -68,6 +68,12 @@ def md5(p: Path) -> str:
     return hashlib.md5(p.read_bytes()).hexdigest()
 
 
+def worker_kill(ev: dict) -> bool:
+    """A kill chaos event aimed at a worker (by role selector, or by a worker's agent id)."""
+    sel = (ev.get("params") or {}).get("selector") or {}
+    return sel.get("role") == "worker" or str(sel.get("agent") or "").startswith("worker")
+
+
 # ---------------------------------------------------------------------------------------------- driver
 class Demo:
     def __init__(self, base: str, approve_delay: float, report: Report, autoplay: bool = False,
@@ -163,6 +169,31 @@ class Demo:
         log(f"autoplay started {scenario} as {cur['run_id']} (waited {secs:.1f}s)")
         return cur
 
+    def chain_only(self) -> dict:
+        """With the Red fleet on, its exploits open their own security incidents: the cascade beats count chain ones."""
+        return {"kind": {"$ne": "security"}} if self.red_kill else {}
+
+    def night_incidents(self, obs: dict) -> list[dict]:
+        """The night's incidents. Red mode: the chain incidents opened while the night's cascade incident was open
+        (a Red re-strike after it closed is a new attack wave, not a failed coalesce)."""
+        q = {"run_id": obs["run_id"], **self.chain_only()}
+        first = self.s.incidents.find_one({"_id": obs.get("incident")}) if self.red_kill and obs.get("incident") else None
+        if first and first.get("closed_at"):
+            q["opened_at"] = {"$lte": first["closed_at"]}
+        return list(self.s.incidents.find(q).sort("opened_at", 1))
+
+    def red_worker_kill(self, run_id: str, obs: dict) -> dict | None:
+        """The Red Assassin's first kill of a worker this night. Beat d is the worker kill + nurse takeover; the
+        Assassin may also take out a queen first (the standby takes the crown), which is logged, not scored."""
+        for ev in self.w.chaos_events.find({"run_id": run_id, "fault": "agent_kill", "by": "red-assassin",
+                                            "_id": {"$nin": obs.setdefault("other_kills", [])}}).sort("ts", 1):
+            if worker_kill(ev):
+                return ev
+            obs["other_kills"].append(ev["_id"])
+            log(f"Red Assassin fired {ev['_id']} {ev.get('params', {}).get('selector')} (not a worker: a takeover, "
+                "not the scored kill)")
+        return None
+
     def play_night(self, scenario: str, kill: bool, timeout: float) -> dict:
         """Start a scenario and service it until its incident closes. Returns observations."""
         out = self.start(scenario)
@@ -179,7 +210,7 @@ class Demo:
                     and mf.get("status") == "up" and (mf.get("metrics") or {}).get("batch_status") == "ABENDED":
                 obs["cascade_at"] = time.monotonic() - t0
                 log(f"cascade visible: portal→unix→mainframe (mainframe up, batch ABENDED) at {obs['cascade_at']:.1f}s")
-            active = list(self.s.incidents.find({"active": True}, {"_id": 1}))
+            active = list(self.s.incidents.find({"active": True, **self.chain_only()}, {"_id": 1}))
             obs["max_active"] = max(obs["max_active"], len(active))
             for apr in self.s.approvals.find({"status": "pending", "kind": "step"}):
                 a = obs["approvals"].setdefault(apr["_id"], {"seen_at": time.monotonic(), "doc": apr})
@@ -189,18 +220,24 @@ class Demo:
                     approved.add(apr["_id"])
                     self.approve(apr["_id"])
                     step = apr.get("step_id", "")
-                    if kill and not self.red_kill and obs["kill_fired_at"] is None and "restart_batch" in apr.get("desc", ""):
+                    if kill and obs["kill_fired_at"] is None and "restart_batch" in apr.get("desc", "") \
+                            and not (self.red_kill and self.red_worker_kill(run_id, obs)):
+                        if self.red_kill:  # the Assassin spent its strike elsewhere (e.g. a queen): press Kill
+                            log(f"no Red worker kill yet (other kills: {obs.get('other_kills') or []}); "
+                                "the presenter presses Kill")
+                            obs["kill_source"] = "manual"
                         log(f"POST /api/kill {{role: worker, phase: step_sent}} (restart_batch {step} is next)")
                         self.post("/api/kill", {"selector": {"role": "worker", "phase": "step_sent"}})
                         obs["kill_fired_at"] = time.monotonic() - t0
                         obs["kill_wall"] = datetime.now(tz=timezone.utc)
             if kill and self.red_kill and obs["kill_fired_at"] is None:  # the Red Assassin presses Kill itself
-                ev = self.w.chaos_events.find_one({"run_id": run_id, "fault": "agent_kill", "by": "red-assassin"})
+                ev = self.red_worker_kill(run_id, obs)
                 if ev:
                     log(f"Red Assassin fired {ev['_id']} {ev.get('params', {}).get('selector')}")
                     obs["kill_fired_at"] = time.monotonic() - t0
                     obs["kill_wall"] = ev["ts"]
-            inc = self.s.incidents.find_one({"run_id": run_id}, sort=[("opened_at", 1)])
+                    obs["kill_event"] = ev["_id"]
+            inc = self.s.incidents.find_one({"run_id": run_id, **self.chain_only()}, sort=[("opened_at", 1)])
             if inc:
                 obs["incident"] = inc["_id"]
                 if inc["status"] in ("resolved", "failed") and not inc.get("active"):
@@ -218,7 +255,7 @@ class Demo:
         log("=== NIGHT 1: cascade, lying system, approval, agent kill ===")
         obs = self.play_night("bank-night-1", kill=True, timeout=timeout)
         run_id = obs["run_id"]
-        incs = list(self.s.incidents.find({"run_id": run_id}))
+        incs = self.night_incidents(obs)
         inc = incs[0] if incs else None
         # (a) cascade + coalescing + diagnosis
         self.r.add("a. cascade visible in world.systems", obs["cascade_at"] is not None,
@@ -295,8 +332,11 @@ class Demo:
         if obs["kill_fired_at"] is None:
             self.r.add("d. agent kill → nurse takeover", False, "kill never fired (no restart_batch approval)")
             return
+        q = {"_id": obs["kill_event"]} if obs.get("kill_event") else \
+            {"run_id": obs["run_id"], "fault": "agent_kill", "source": "manual"} if obs.get("kill_source") else \
+            {"run_id": obs["run_id"], "fault": "agent_kill"}
         ev, _ = self.wait("kill event", lambda: self.w.chaos_events.find_one(
-            {"run_id": obs["run_id"], "fault": "agent_kill", "status": {"$in": ["ok", "failed"]}}), 40)
+            {**q, "status": {"$in": ["ok", "failed"]}}), 40)
         res = (ev or {}).get("result") or {}
         if not res.get("ok"):
             self.r.add("d. worker SIGKILLed in step_sent", False, f"kill event: {res}")
@@ -359,6 +399,9 @@ class Demo:
         inc = self.s.incidents.find_one({"_id": inc["_id"]})
         systems = obs.get("systems_at_close") if self.autoplay and obs.get("systems_at_close") else \
             {d["_id"]: d["status"] for d in self.w.systems.find()}
+        if self.red_kill:  # other Red attacks may still be on screen elsewhere: green = this incident's systems
+            mine = set(inc.get("affected") or []) | {inc.get("root_cause_system")}
+            systems = {k: v for k, v in systems.items() if k in mine}
         m = inc.get("metrics") or {}
         self.r.add(f"{tag} incident resolved, estate green",
                    inc["status"] == "resolved" and all(v == "up" for v in systems.values()),
@@ -379,7 +422,7 @@ class Demo:
             log(f"POST /api/reset {{mode: next_round}} → closed {out.get('closed_incidents')} incidents")
             self.wait("estate green", lambda: all(d["status"] == "up" for d in self.w.systems.find()), 20)
         obs = self.play_night("bank-night-2", kill=False, timeout=timeout)
-        incs = list(self.s.incidents.find({"run_id": obs["run_id"]}))
+        incs = self.night_incidents(obs)
         if len(incs) != 1:
             self.r.add("f. round-2 incident", False, f"{len(incs)} incidents for {obs['run_id']}")
             return None
@@ -445,6 +488,11 @@ class Demo:
         st = self.mf_state()
         stale = list(self.s.playbooks.find({"system": "mainframe", "system_version": {"$lt": mf.get("version", 0)}},
                                            {"stale": 1}))
+        # Under autoplay + Red fleet the upgrade can deploy before this phase starts, so before_md5 may already be the
+        # patched file: compare against the Gardener's backup of the original when it has one.
+        backup = Path(doc.get("backup") or "")
+        if backup.is_file():
+            before_md5 = md5(backup)
         deployed = (md5(MAINFRAME_PY) != before_md5 and mf.get("version") == 2 and st.get("validation_enabled") is True
                     and doc.get("version_after") == 2)
         self.r.add("g. deployed: mainframe.py patched, v2", deployed,
@@ -469,15 +517,20 @@ class Demo:
         out = self.start("bank-night-3")
         run_id, t0 = out["run_id"], time.monotonic()
         max_active, worst = 0, {}
+        # With the Red fleet on, other attacks may open their own incidents on unix/portal this night; the beat is
+        # that the replayed batch_abort opens none: count only incidents that touch the mainframe or its fault.
+        mine = {"$or": [{"fault_class": "batch_abort"}, {"system": "mainframe"}, {"affected": "mainframe"},
+                        {"root_cause_system": "mainframe", "kind": {"$ne": "security"}}]} if self.red_kill else {}
         while time.monotonic() - t0 < watch_s:
-            max_active = max(max_active, self.s.incidents.count_documents({"active": True}))
+            max_active = max(max_active, self.s.incidents.count_documents({"active": True, **mine}))
             for d in self.w.systems.find():
-                if d["status"] != "up":
+                if d["status"] != "up" and (d["_id"] == "mainframe" or not self.red_kill):
                     worst[d["_id"]] = d["status"]
             time.sleep(0.5)
-        ev = self.w.chaos_events.find_one({"run_id": run_id, "fault": "batch_abort"}) or {}
+        ev = self.w.chaos_events.find_one({"run_id": run_id, "fault": "batch_abort",
+                                           "source": {"$ne": "red-fleet"}}) or {}
         st = self.mf_state()
-        n = self.s.incidents.count_documents({"run_id": run_id})
+        n = self.s.incidents.count_documents({"run_id": run_id, **mine})
         ok = (ev.get("status") == "ok" and n == 0 and max_active == 0 and not worst
               and st["batch"]["status"] == "OK")
         self.r.add("g. night 3: batch_abort shrugged off", ok,

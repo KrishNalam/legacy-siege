@@ -28,13 +28,83 @@ def enabled() -> bool:
     return _on("SWARM_RECOVERY")
 
 
-ROUNDS = int(_f("RECOVERY_ROUNDS", 2))          # fresh attempt budgets before escalating to the Beekeeper
-BACKOFF_S = _f("RECOVERY_BACKOFF_S", 3.0)       # x round number: let late ops land / injected lies drain
+ROUNDS = int(_f("RECOVERY_ROUNDS", 3))          # recovery rounds (re-diagnose + fresh budget or replan), then escalate
+FIRST_BUDGET = int(_f("RECOVERY_FIRST_BUDGET", 2))  # attempts before the first re-diagnosis (each can cost ~30 s)
+BACKOFF_S = _f("RECOVERY_BACKOFF_S", 3.0)       # base backoff, doubled each round: let late ops land / lies drain
+BACKOFF_MAX_S = _f("RECOVERY_BACKOFF_MAX_S", 20.0)
+HEALTH_GRACE_S = _f("RECOVERY_HEALTH_GRACE_S", 8.0)  # steps verified but a system still down this long: re-diagnose
+
+
+def backoff_s(rnd: int) -> float:
+    """Exponential backoff for recovery round `rnd` (1-based), capped."""
+    return min(BACKOFF_S * (2 ** max(rnd - 1, 0)), BACKOFF_MAX_S)
+
+
+def rediagnose(sysc, system: str, since: str | None = None, max_hops: int = 3) -> dict | None:
+    """Re-read the system a failing step targets (and what it blames, upstream) for a fault that landed
+    mid-repair. Returns the first diagnosis with a fault class, or None if nothing new is wrong."""
+    from . import diagnosis
+
+    seen, sys = set(), system
+    while sys and sys not in seen and len(seen) < max_hops:
+        seen.add(sys)
+        try:
+            h, m = sysc.health(sys), sysc.metrics(sys)
+            f = diagnosis.classify(sys, h, m, sysc.logs(sys, limit=50, since=since), sysc.state(sys),
+                                   probe=sysc.probe)
+        except Exception:
+            return None
+        if f.get("fault_class"):
+            return f
+        sys = f.get("blames")
+    return None
+
+
+def replan_steps(steps: list[dict], inc_id: str, findings: dict, ts) -> tuple[list[dict], list[dict]] | None:
+    """A new fault blocks the plan: put its policy remediation in front of every unverified step.
+
+    Unverified steps are kept as superseded evidence and re-appended (fresh ids, fresh attempt budget) after
+    the remediation. Remediation steps equal to a still-pending step are not duplicated. Returns
+    (new full step list, the remediation steps added) or None when policy has no fix for the new fault."""
+    from . import policy
+
+    raw = policy.fix_plan(findings["fault_class"], findings.get("params") or {})
+    if not raw:
+        return None
+    sig = lambda s: (s["system"], s["op"], s.get("params") or {})  # noqa: E731
+    old = [dict(s) for s in steps]
+    pending = [s for s in sorted(old, key=lambda s: s["n"])
+               if s["status"] != "verified" and not s.get("superseded_by_replan")]
+    pend_sigs = [sig(s) for s in pending]
+    for s in pending:
+        s["superseded_by_replan"] = True
+    n = max((s["n"] for s in old), default=0)
+    added, out = [], old
+    fresh = {"task_id": None, "status": "planned", "action_id": None, "attempts": [], "agent": None,
+             "evidence": None, "approval_id": None, "max_attempts": None, "ts": ts}
+    for s in raw:
+        if sig(s) in pend_sigs:
+            continue
+        n += 1
+        st = {**s, "destructive": bool(s["destructive"] or (s["system"], s["op"]) in policy.DESTRUCTIVE),
+              "step_id": f"{inc_id}-s{n}", "n": n, "replan_for": findings["fault_class"], **fresh}
+        out.append(st)
+        added.append(st)
+    if not added:
+        return None
+    replaced = {(s["system"], s["op"]) for s in added}
+    for s in pending:
+        if (s["system"], s["op"]) in replaced:
+            continue  # the new fault's remediation replaces it (e.g. a second drift: map_field to the newer field)
+        n += 1
+        keep = {k: v for k, v in s.items() if k not in fresh and k not in ("superseded_by_replan", "judged_at")}
+        out.append({**keep, "step_id": f"{inc_id}-s{n}", "n": n, "retry_of": s["step_id"], **fresh})
+    return out, added
 
 
 def budget(step: dict) -> int:
     """How many attempts this step may use (a recovery round raises it)."""
-    return int(step.get("max_attempts") or settings.MAX_ATTEMPTS)
+    return int(step.get("max_attempts") or (max(FIRST_BUDGET, 1) if enabled() else settings.MAX_ATTEMPTS))
 
 
 def why_failed(steps: list[dict]) -> str:
