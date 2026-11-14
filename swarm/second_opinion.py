@@ -16,6 +16,8 @@ import time
 import uuid
 from datetime import datetime
 
+import pymongo
+
 from common import config, events, llm
 from common.db import col, now
 
@@ -39,11 +41,14 @@ FIXED = {("restart_batch", "job"): "NIGHTBAT", ("rotate_credential", "account"):
          ("apply_patch", "patch"): "parameterize_search"}
 DESTRUCTIVE_OPS = {op for _s, op in policy.DESTRUCTIVE}
 
-# op -> the op that must have run before it, and why (only enforced when the plan contains the prerequisite)
-PREREQ = {
-    "restart_batch": ("quarantine_record", "poison record still queued: NIGHTBAT would ABEND S0C7 again"),
-    "rerun_transfer": ("restart_batch", "no fresh batch file yet: NIGHTBAT hasn't re-run"),
-    "refresh_cache": ("rerun_transfer", "would reload the same stale balances: the transfer hasn't re-run"),
+# Every fix plan is a dependency chain (each op needs the previous one's effect). Specific reasons for the
+# (op, prerequisite) pairs the plans contain; anything else gets a generic one.
+PREREQ_WHY = {
+    ("restart_batch", "quarantine_record"): "poison record still queued: NIGHTBAT would ABEND S0C7 again",
+    ("rerun_transfer", "restart_batch"): "no fresh batch file yet: NIGHTBAT hasn't re-run",
+    ("rerun_transfer", "purge_spool"): "spool still full: the transfer would fail again",
+    ("rerun_transfer", "restart_cron"): "xfer_pull still stopped: nothing would pull the file",
+    ("refresh_cache", "rerun_transfer"): "would reload the same stale balances: the transfer hasn't re-run",
 }
 
 SYSTEM_PROMPT = (
@@ -134,8 +139,8 @@ def normalize(out: dict) -> dict:
 
 
 def _same(op: str, k: str, a, b) -> bool:
-    a, b = str(a).strip(), str(b).strip()
-    return a.lower() == b.lower() if (op, k) in FIXED or k == "job" else a == b
+    """Exact match (after trimming): the systems reject `nightbat` or `/VAR/SPOOL/XFER`."""
+    return str(a).strip() == str(b).strip()
 
 
 def _outside_reason(p: dict, rb: dict) -> str:
@@ -218,15 +223,18 @@ def judge(proposal: dict, plan_steps: list[dict], root: str, fault_class: str, r
                                  else _outside_reason(p, readback))
 
     # Dependency order, judged on the matches above (so one misplaced op costs one cross, not a cascade):
-    # a matched op whose prerequisite (when the plan has one) wasn't proposed before it is refused.
+    # a matched op is refused unless every plan step of the op before it in the chain was proposed earlier.
+    chain = list(dict.fromkeys(s["op"] for s in plan))  # distinct ops in plan order
     matched = dict(used)
     for k, row in enumerate(rows):
-        if row["verdict"] != "agree" or row["op"] not in PREREQ:
+        g = chain.index(row["op"]) if row["verdict"] == "agree" and row["op"] in chain else 0
+        if g == 0:
             continue
-        pre, why = PREREQ[row["op"]]
+        pre = chain[g - 1]
         need = [i for i, s in enumerate(plan) if s["op"] == pre]
-        if need and not all(i in matched and matched[i] < k for i in need):
+        if not all(i in matched and matched[i] < k for i in need):
             later = any(i in matched and matched[i] > k for i in need)
+            why = PREREQ_WHY.get((row["op"], pre), f"{row['op']} needs {pre}'s effect first")
             row.update(verdict="overruled", gated=False, note=None,
                        reason=f"{'out of order' if later else f'{pre} missing'}: {why}")
             used = {i: kk for i, kk in used.items() if kk != k}
@@ -278,6 +286,14 @@ def _log(agent_id: str, msg: str) -> None:
 
 
 def _run(agent_id: str, inc_id: str, opened_at, ev: dict, plan: list[dict], root: str, fault_class: str) -> None:
+    try:
+        with pymongo.timeout(DEADLINE_S + 5):  # bounds every MongoDB call in this thread too
+            _opinion(agent_id, inc_id, opened_at, ev, plan, root, fault_class)
+    finally:
+        _slots.release()
+
+
+def _opinion(agent_id: str, inc_id: str, opened_at, ev: dict, plan: list[dict], root: str, fault_class: str) -> None:
     t0 = time.monotonic()
     rid = uuid.uuid4().hex[:12]
     mine = {"_id": inc_id, "opened_at": opened_at, "ai.request_id": rid}  # a reset may reuse the INC id
@@ -287,24 +303,27 @@ def _run(agent_id: str, inc_id: str, opened_at, ev: dict, plan: list[dict], root
                                         {"$set": {"ai": {**base, "status": "thinking"}}})
         if r.matched_count != 1:
             return
-        sysc = Systems(timeout=3.0)
+        left = lambda: DEADLINE_S - (time.monotonic() - t0)  # noqa: E731
         catalog, readback = {}, {}
+        sysc = Systems(timeout=2.0)
         try:
-            for s in config.SYSTEM_IDS:
+            for s in config.SYSTEM_IDS:  # read-backs get at most ~half the budget; the LLM keeps the rest
+                fast = left() > DEADLINE_S / 2
                 try:
-                    catalog[s] = sysc.ops(s)
+                    catalog[s] = sysc.ops(s) if fast else static_catalog()[s]
                 except Exception:
                     catalog[s] = static_catalog()[s]
                 try:
-                    readback[s] = sysc.state(s)
+                    readback[s] = sysc.state(s) if fast else None
                 except Exception:
                     readback[s] = None
         finally:
             sysc.close()
         evidence_at = now()
-        left = DEADLINE_S - (time.monotonic() - t0)
         out = llm.complete_json(SYSTEM_PROMPT, build_prompt(ev, catalog), _schema(), max_tokens=900,
-                                timeout=min(LLM_TIMEOUT_S, left)) if left > 3 else None
+                                timeout=min(LLM_TIMEOUT_S, left() - 1)) if left() > 4 else None
+        if left() < 0:  # answered after the deadline: too late to show as live analysis
+            out = None
         latency = int((time.monotonic() - t0) * 1000)
         if out is None:
             col("incidents").update_one(mine, {"$set": {"ai": {**base, "status": "offline", "latency_ms": latency,
@@ -326,5 +345,3 @@ def _run(agent_id: str, inc_id: str, opened_at, ev: dict, plan: list[dict], root
             col("incidents").update_one(mine, {"$set": {"ai.status": "offline", "ai.error": type(e).__name__}})
         except Exception:
             pass
-    finally:
-        _slots.release()

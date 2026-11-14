@@ -85,8 +85,15 @@ export function installBeats(stage, panels, caption) {
       const bad = (doc.ai.overruled_ops || []);
       const who = doc.owner || "scout-1";
       const p = stage.posOfAgent(who); if (p) stage.float(p.x, p.y - 44, "Claude: second opinion", C.violet, 13, 3);
-      caption(doc.ai.agrees_with_policy ? "AI second opinion: agrees" : `AI second opinion: ${bad.length} op${bad.length === 1 ? "" : "s"} overruled`,
-        bad.length ? `${bad[0].op}: ${bad[0].reason}` : `Claude reached the same plan independently · policy still decides`, "#b388ff");
+      const missed = doc.ai.missed_ops || [];
+      const title = doc.ai.agrees_with_policy ? "AI second opinion: agrees"
+        : bad.length ? `AI second opinion: ${bad.length} op${bad.length === 1 ? "" : "s"} overruled`
+        : !doc.ai.root_agrees ? "AI second opinion: different root cause" : `AI second opinion: missed ${missed.length} step${missed.length === 1 ? "" : "s"}`;
+      const sub = doc.ai.agrees_with_policy ? "Claude reached the same plan independently · policy still decides"
+        : bad.length ? `${bad[0].op}: ${bad[0].reason}`
+        : !doc.ai.root_agrees ? `Claude: ${doc.ai.root_system}/${doc.ai.fault_class} · policy: ${doc.ai.policy?.root_system}/${doc.ai.policy?.fault_class} · policy decides`
+        : `policy adds ${missed.map((m) => m.op).join(", ")}`;
+      caption(title, sub, C.violet);
     }
     // recall ($vectorSearch) — golden path from the playbooks cell to the scout
     if (doc.recall && !prev.recall) {
