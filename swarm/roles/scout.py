@@ -180,7 +180,7 @@ def build_graph(agent: Agent):
                             "fault_class": usable["fault_class"], "fix": usable.get("fix") or []},
                     "diag_started": time.time(), "current": usable["system"]}
         pushed = (inc.get("known_fix") or {}) if gardener_help.enabled() else {}
-        if pushed.get("playbook_id"):  # Sentinel #2 pushed a verified fix for this root symptom
+        if pushed.get("playbook_id"):  # Sentinel #2 pushed a verified fix for these exact symptoms
             pb = col("playbooks").find_one({"_id": pushed["playbook_id"], "stale": False}, {"embedding": 0})
             try:
                 cur = sysc.version(pushed["system"])

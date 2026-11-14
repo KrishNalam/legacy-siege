@@ -403,26 +403,30 @@ def note_repeated_problems(agent):
 
 
 def known_fix_for(symptoms: list[str], versions: dict) -> dict | None:
-    """The newest current playbook whose ROOT system's symptom line appears verbatim in these symptoms
-    (symptom lines are canonical and number-free, so the same fault reads the same way twice)."""
+    """The newest current playbook whose remembered symptom lines match these verbatim (symptom lines are
+    canonical and number-free, so the same fault reads the same way twice). One shared downstream line that
+    doesn't point at the playbook's root system is not enough."""
     lines = set(symptoms or [])
     if not lines:
         return None
     for pb in col("playbooks").find({"stale": False, "system": {"$ne": None}},
                                     {"embedding": 0}).sort("verified_at", -1).limit(50):
-        root = [ln for ln in pb.get("symptoms") or [] if ln.split(" ", 1)[0] == pb["system"]]
-        cur = versions.get(pb["system"])
-        if root and root[0] in lines and (cur is None or pb.get("system_version") == cur) and pb.get("fix"):
+        seen, root = set(pb.get("symptoms") or []), pb["system"]
+        cur = versions.get(root)
+        # whole remembered cascade present, or an early part of it that already points at the remembered root
+        # (the Scout's confirm hop checks the fault class either way, so a near-miss costs one read)
+        early = lines <= seen and any(ln.split(" ", 1)[0] == root or f"blames {root}" in ln for ln in lines)
+        if seen and (seen <= lines or early) and (cur is None or pb.get("system_version") == cur) and pb.get("fix"):
             return pb
     return None
 
 
 def push_known_fixes(agent, versions: dict) -> None:
-    """Sentinel #2 cuts duplicate work: when a Scout has taken an incident whose root symptom matches a fix the
+    """Sentinel #2 cuts duplicate work: when a Scout has taken an incident whose symptoms match a fix the
     hive already verified, push that fix onto the incident (known_fix) and the bus, so the Scout uses it instead
     of rediscovering it. The Scout still confirms it with one read and the Guard still verifies every step."""
     for inc in col("incidents").find({"active": True, "kind": {"$ne": "security"}, "owner": {"$ne": None},
-                                      "status": {"$in": ["open", "diagnosing"]}, "known_fix": {"$exists": False}},
+                                      "status": {"$in": ["claimed", "diagnosing"]}, "known_fix": {"$exists": False}},
                                      {"symptoms": 1, "owner": 1}):
         pb = known_fix_for(inc.get("symptoms"), versions)
         if pb is None:
@@ -435,6 +439,6 @@ def push_known_fixes(agent, versions: dict) -> None:
             continue
         say(agent.id, inc["owner"], "known_fix", {k: fix[k] for k in ("playbook_id", "system", "fault_class")},
             incident=inc["_id"], system=pb["system"])
-        agent.think(f"Sentinel #2 → {inc['owner']}: {inc['_id']} has the same root symptom as {pb.get('incident')} "
+        agent.think(f"Sentinel #2 → {inc['owner']}: {inc['_id']} shows the same symptoms as {pb.get('incident')} "
                     f"({pb.get('fault_class')} on {pb['system']}); pushed known fix {pb['_id']} so nobody rediscovers it.",
                     kind="recall", incident=inc["_id"], system=pb["system"], pause=False)

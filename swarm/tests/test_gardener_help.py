@@ -78,8 +78,8 @@ def test_sentinel2_pushes_known_fix_to_scout(db, monkeypatch):
                              "symptoms": ["portal degraded, blames unix", root],
                              "fix": [{"system": "mainframe", "op": "quarantine_record", "params": {}}]})
     db.incidents.insert_many([
-        {"_id": "INC-0002", "active": True, "kind": "chain", "owner": "scout-1", "status": "diagnosing",
-         "symptoms": [root], "system": "mainframe", "opened_at": now(), "correlation_key": "chain:mainframe"},
+        {"_id": "INC-0002", "active": True, "kind": "chain", "owner": "scout-1", "status": "claimed",
+         "symptoms": ["portal degraded, blames unix", root], "system": "mainframe", "opened_at": now(), "correlation_key": "chain:mainframe"},
         {"_id": "INC-0003", "active": True, "kind": "chain", "owner": "scout-2", "status": "diagnosing",
          "symptoms": ["portal degraded, blames unix"], "system": "portal", "opened_at": now(),
          "correlation_key": "chain:portal"}])  # a shared downstream line alone is not a match
@@ -90,4 +90,5 @@ def test_sentinel2_pushes_known_fix_to_scout(db, monkeypatch):
     assert db.incidents.find_one({"_id": "INC-0002"})["known_fix"]["playbook_id"] == "PB-0001"
     assert "known_fix" not in db.incidents.find_one({"_id": "INC-0003"})
     assert agent.think.call_count == 1 and "Sentinel #2 → scout-1" in agent.think.call_args.args[0]
+    assert sentinel.known_fix_for([root], {"mainframe": 1})["_id"] == "PB-0001"  # early part naming the root
     assert sentinel.known_fix_for([root], {"mainframe": 2}) is None  # learned on v1, mainframe is v2 now
