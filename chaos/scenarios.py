@@ -30,6 +30,11 @@ SCENARIOS: list[dict] = [
         "title": "Bank night 3 — replay after the Gardener's upgrade (expect no incident)",
         "steps": [{"t": 0, "fault": "batch_abort", "target": "mainframe", "params": {}}],
     },
+    {
+        "_id": "bank-drift", "seed": 1004,
+        "title": "Bank drift — a vendor patch renames a unix manifest field (the Hive must learn a mapping)",
+        "steps": [{"t": 0, "fault": "schema_drift", "target": "unix", "params": {}}],
+    },
     {"_id": "free-play", "seed": 0, "title": "Free play — manual chaos buttons only", "steps": []},
 ]
 

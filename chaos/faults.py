@@ -72,6 +72,11 @@ FAULTS: dict[str, Fault] = {f.name: f for f in [
     Fault("config_exploit", "system", ("unix",), "unix",
           "A world-writable /etc/xfer.conf is exploited to redirect transfers.",
           "Security patch (chmod) + exploit retest."),
+    Fault("schema_drift", "system", ("unix",), "unix",
+          "A vendor patch silently renames a field in the unix xfer manifest (balance -> acct_bal); unix stays "
+          "healthy, the portal can no longer unmarshal balances and serves stale ones with HTTP 200.",
+          "Adapting to a changed layout: detect the field diff, propose and verify a mapping, remember it.",
+          {}),
     Fault("agent_kill", "agent", ("swarm",), "swarm",
           "SIGKILL a live bee process (by id, or the worker that just sent a step).",
           "Lease expiry, Undertaker detection, Nurse takeover from a MongoDB checkpoint.",

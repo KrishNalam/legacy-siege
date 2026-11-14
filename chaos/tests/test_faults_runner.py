@@ -13,7 +13,7 @@ from common.db import world
 
 def test_library_has_every_contract_fault():
     expected = {"batch_abort", "disk_fill", "cron_stop", "session_leak", "lying_success", "slow_apply",
-                "sqli_exploit", "config_exploit", "agent_kill"}
+                "sqli_exploit", "config_exploit", "agent_kill", "schema_drift"}  # schema_drift: additive (§8)
     assert set(faults.FAULTS) == expected
     for f in faults.FAULTS.values():
         assert f.description and f.tests and f.default_target in f.targets
@@ -26,7 +26,7 @@ def test_seed_is_idempotent_and_matches_contract():
     scenarios.seed()
     assert list(world().chaos_scenarios.find().sort("_id", 1)) == first
     by_id = {s["_id"]: s for s in first}
-    assert set(by_id) == {"bank-night-1", "bank-night-2", "bank-night-3", "free-play"}
+    assert set(by_id) == {"bank-night-1", "bank-night-2", "bank-night-3", "bank-drift", "free-play"}
     assert [(s["t"], s["fault"], s["target"], s["params"]) for s in by_id["bank-night-1"]["steps"]] == [
         (0, "lying_success", "mainframe", {"count": 1}), (1, "batch_abort", "mainframe", {})]
     for n in ("bank-night-2", "bank-night-3"):
