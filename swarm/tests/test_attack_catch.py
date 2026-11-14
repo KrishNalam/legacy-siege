@@ -108,3 +108,23 @@ def test_cron_stop_caught_from_silence_and_restarted(c):
     plan = fix_and_verify(c, "cron_stop")
     assert [s["op"] for s in plan] == ["restart_cron", "rerun_transfer", "refresh_cache"]
     assert all(c.get(f"/{s}/health").json()["status"] == "up" for s in ALL)
+
+
+# ------------------------------------------------------------------ G2 exploits (Hacker): health never shows them
+@pytest.mark.parametrize("sys,fault,op", [("mainframe", "credential_exploit", "rotate_credential"),
+                                          ("portal", "sqli_exploit", "apply_patch")])
+def test_exploit_caught_by_signature_and_probe_then_patched(c, sys, fault, op):
+    vid = policy.VULNS[sys]
+    assert not policy.exploit_signs(sys, logs(c, sys))      # an open vuln alone is a finding, not an incident
+    assert look(c, sys)["fault_class"] is None
+    chaos(c, sys, fault)
+    tick(c, 2)
+    assert c.get(f"/{sys}/health").json()["status"] == "up"   # only the Sentinel's log scan can see it
+    assert policy.exploit_signs(sys, logs(c, sys))            # Sentinel security_scan trigger
+    f = only(c, sys, fault)
+    assert any(f"probe {vid}: exploitable" in x for x in f["facts"])
+    plan = fix_and_verify(c, fault)
+    assert [s["op"] for s in plan] == [op]
+    assert plan[0]["destructive"] == ((sys, op) in policy.DESTRUCTIVE)   # rotate_credential goes to approval
+    assert not c.post(f"/{sys}/security/probe/{vid}").json()["exploitable"]   # retest: the exploit bounces
+    assert look(c, sys)["fault_class"] is None
