@@ -67,9 +67,18 @@ def reject_bad_memory(incident: str, evidence: str, agent: str) -> str | None:
     if not hits:
         return None
     pb = col('playbooks').find_one({'_id': hits[0]['playbook_id']})
-    canonical = (inc.get('steps') or []) if fc in ('batch_abort', 'schema_drift') else policy.fix_plan(fc)
-    signature = lambda s: (s['system'], s['op'], s.get('params') or {})
-    if not pb or not canonical or [signature(s) for s in pb.get('fix') or []] == [signature(s) for s in canonical]:
+    if not pb:
+        return None
+    if fc in ('batch_abort', 'schema_drift'):
+        # Dynamic-fact classes: today's record ids / field names always differ from the remembered ones (and
+        # rebind replaced them anyway), so judge only WHAT the memory does: the same (system, op) kinds as policy.
+        canonical = inc.get('steps') or []
+        same = {(s['system'], s['op']) for s in pb.get('fix') or []} == {(s['system'], s['op']) for s in canonical}
+    else:
+        canonical = policy.fix_plan(fc)
+        signature = lambda s: (s['system'], s['op'], s.get('params') or {})  # noqa: E731
+        same = [signature(s) for s in pb.get('fix') or []] == [signature(s) for s in canonical]
+    if not canonical or same:
         return None
     col('playbooks').update_one({'_id': pb['_id']}, {'$set': {
         'stale': True, 'staled_at': now(), 'stale_reason': f'Guard rejected recalled repair: {evidence[:180]}'}})
