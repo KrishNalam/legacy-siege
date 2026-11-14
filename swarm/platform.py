@@ -29,7 +29,10 @@ def template(fault):
 
 def valid(ops, fault):
     # Exact whitelist includes parameters, ordering, required recovery ops and approvals.
-    return fault in SUPPORTED and ops == template(fault)
+    try:
+        return fault in SUPPORTED and json.dumps(ops, sort_keys=True) == json.dumps(template(fault), sort_keys=True)
+    except (TypeError, ValueError):
+        return False
 
 
 def build(agent):
@@ -94,9 +97,9 @@ def lookup(fault, params, version_fn, received=None):
     if received is not None:
         query['_id'] = {'$in': received}
     for tool in col('tools').find(query).limit(20):
-        pre = tool['preconditions']
+        pre = tool.get('preconditions') or {}
         if pre != {'system': SUPPORTED[fault], 'system_version': version_fn(SUPPORTED[fault]),
-                   'fault_class': fault, 'requires_current_diagnosis': True} or not valid(tool['ops'], fault):
+                   'fault_class': fault, 'requires_current_diagnosis': True} or not valid(tool.get('ops'), fault):
             continue
         ops = []
         for op in tool['ops']:
@@ -168,7 +171,7 @@ def judged(agent, incident, step, success):
             updates['$set'] = {'status': 'retired', 'retired_at': now(), 'retired_reason': 'Guard verification failed'}
         col('tools').update_one({'_id': tool_id}, updates, session=session)
         tool = col('tools').find_one({'_id': tool_id}, session=session)
-        col('tools').update_one({'_id': tool_id}, {'$set': {'success_rate': tool['successes'] / tool['uses']}}, session=session)
+        col('tools').update_one({'_id': tool_id}, {'$set': {'success_rate': tool['successes'] / (tool['successes'] + tool['failures'])}}, session=session)
         return True
     if txn(fn):
         agent.think(f"Tool {tool_id}: " + ('all operations Guard-verified.' if success else

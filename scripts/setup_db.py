@@ -142,7 +142,7 @@ def ensure() -> None:
         _ensure(s, "tool_runs")
         _ensure(s, "platform_signals")
         _ensure(s, "gardener_requests")
-        s.gardener_requests.create_index([("status", ASCENDING), ("ts", ASCENDING)])
+        s.gardener_requests.create_index([("status", ASCENDING), ("ts", ASCENDING)], name="open_requests")
         s.tools.create_index([("status", ASCENDING), ("fault_class", ASCENDING)])
         s.tool_runs.create_index([("incident", ASCENDING)])
 
