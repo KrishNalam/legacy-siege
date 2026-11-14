@@ -1,0 +1,56 @@
+"""All configuration in one place. Values come from env (or a .env file at repo root)."""
+import os
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+try:  # optional .env support
+    from dotenv import load_dotenv
+
+    load_dotenv(ROOT / ".env")
+except Exception:  # pragma: no cover
+    pass
+
+
+def env_float(name: str, default: float) -> float:
+    """Float from the environment, falling back to ``default`` when unset or malformed."""
+    try:
+        return float(os.environ.get(name, default))
+    except ValueError:
+        return default
+
+
+_f = env_float
+
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27027/?directConnection=true")
+WORLD_DB = os.environ.get("WORLD_DB", "world")
+SWARM_DB = os.environ.get("SWARM_DB", "swarm")
+
+SYSTEMS_PORT = int(os.environ.get("SYSTEMS_PORT", 8701))
+WARROOM_PORT = int(os.environ.get("WARROOM_PORT", 8700))
+SYSTEMS_URL = os.environ.get("SYSTEMS_URL", f"http://127.0.0.1:{SYSTEMS_PORT}")
+PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "100.105.248.23")
+
+HEARTBEAT_S = _f("HEARTBEAT_S", 3)
+LEASE_S = _f("LEASE_S", 10)
+PACE = _f("PACE", 1.0)  # multiplier on deliberate "thinking" delays; 0 in tests
+SLOW_APPLY_S = _f("SLOW_APPLY_S", 20)
+PARTITION_S = _f("PARTITION_S", 15)
+NURSE_RESPAWN_S = _f("NURSE_RESPAWN_S", 15)
+RECALL_THRESHOLD = _f("RECALL_THRESHOLD", 0.70)
+
+SYSTEM_IDS = ["mainframe", "unix", "portal"]  # + "console" if stretch is built
+CHAIN = {"portal": "unix", "unix": "mainframe", "mainframe": None, "console": "portal"}
+
+EMBED_DIM = int(os.environ.get("EMBED_DIM", 1024))
+VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY") or None
+VOYAGE_MODEL = os.environ.get("VOYAGE_MODEL", "voyage-3.5")
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY") or None
+LLM_MODEL = os.environ.get("LLM_MODEL", "claude-haiku-5-5")
+LLM_TIMEOUT_S = _f("LLM_TIMEOUT_S", 8)
+
+
+def pace(seconds: float) -> float:
+    """Scaled demo delay."""
+    return max(0.0, seconds * PACE)
