@@ -1,0 +1,199 @@
+"""Nurse bee — standby on the bench; takes over work whose owner died.
+
+Takeover of a TASK (worker died mid-fix), as a LangGraph graph on thread "nurse:<task>:<generation>":
+    load_checkpoint  -> read the dead worker's LangGraph checkpoint (thread = task id) from MongoDB
+    reconcile        -> for every step stuck in 'sent': READ BACK /state first.
+                        already applied -> leave it for the Guard (no resend)
+                        not applied     -> resend with the SAME action_id (the system dedupes receipts)
+    record_handoff   -> incident.handoffs[] += {from, to, ts, reason, checkpoint_id, skipped_steps, takeover_s}
+then the nurse resumes the worker graph from that checkpoint, as the new lease holder (generation+1).
+
+Takeover of an INCIDENT (scout died): same idea with the scout graph (thread "<incident>:scout").
+Nurses also pick up open work no live specialist/scout can take.
+"""
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import TypedDict
+
+from langgraph.graph import END, START, StateGraph
+
+from common import config as shared
+from common.db import col, now, txn
+
+from .. import leases, settings
+from ..harness import Agent, checkpointer, main_loop
+from . import scout as scout_role
+from . import worker as worker_role
+
+
+def _orphans(coll: str, match: dict) -> list[dict]:
+    """Leased work whose lease expired AND whose holder is dead (or gone) — a $lookup into agents."""
+    return list(col(coll).aggregate([
+        {"$match": {**match, "lease_until": {"$lt": now()}}},
+        {"$lookup": {"from": "agents", "localField": "owner", "foreignField": "_id", "as": "holder"}},
+        # holder dead/gone — or alive but it abandoned the work (stopped renewing a full LEASE_S ago,
+        # e.g. it gave up after repeated errors); either way the work must not stay stranded
+        {"$match": {"$or": [{"holder.status": "dead"}, {"holder": {"$size": 0}},
+                            {"lease_until": {"$lt": now() - timedelta(seconds=shared.LEASE_S)}}]}},
+        {"$sort": {"ts": 1}},
+        {"$limit": 5},
+    ]))
+
+
+class NurseState(TypedDict, total=False):
+    kind: str               # "task" | "incident"
+    id: str
+    incident: str
+    prev_owner: str | None
+    generation: int
+    cp_id: str | None
+    resume_at: list[str]
+    skipped: list[str]
+    reconciled: list[dict]
+    takeover_s: float
+
+
+def build_graph(agent: Agent, worker_graph, scout_graph):
+
+    def load_checkpoint(state: NurseState, config) -> dict:
+        if state["kind"] == "task":
+            g, thread = worker_graph, state["id"]
+            task = col("tasks").find_one({"_id": state["id"]})
+            inc = col("incidents").find_one({"_id": task["incident"]}, {"steps": 1})
+            skipped = [s["step_id"] for s in inc.get("steps", [])
+                       if s["step_id"] in task.get("step_ids", []) and s["status"] == "verified"]
+        else:
+            g, thread = scout_graph, f"{state['id']}:scout"
+            inc = col("incidents").find_one({"_id": state["id"]}, {"steps": 1})
+            skipped = [s["step_id"] for s in inc.get("steps", []) if s["status"] == "verified"]
+        snap = g.get_state({"configurable": {"thread_id": thread}})
+        cp_id = snap.config["configurable"].get("checkpoint_id") if snap.values else None
+        resume_at = list(snap.next)
+        prev = col("agents").find_one({"_id": state.get("prev_owner")}) or {}
+        takeover_s = round((now() - prev["last_seen"]).total_seconds(), 2) if prev.get("last_seen") else 0.0
+        where = f"'{resume_at[0]}'" if resume_at else "the start"
+        agent.think(f"Loaded {state.get('prev_owner')}'s checkpoint {str(cp_id)[-8:] if cp_id else '(none)'} for "
+                    f"{state['id']} from MongoDB: resuming at {where}"
+                    + (f"; {', '.join(skipped)} already verified." if skipped else "."),
+                    kind="handoff", incident=state["incident"])
+        return {"cp_id": cp_id, "resume_at": resume_at, "skipped": skipped, "takeover_s": takeover_s}
+
+    def reconcile(state: NurseState, config) -> dict:
+        if state["kind"] != "task":
+            return {"reconciled": []}
+        task = col("tasks").find_one({"_id": state["id"]})
+        inc = col("incidents").find_one({"_id": task["incident"]}, {"steps": 1})
+        out = []
+        for st in inc.get("steps", []):
+            if st["step_id"] not in task["step_ids"] or st["status"] != "sent":
+                continue
+            out.append(worker_role.reconcile_sent(agent, task, state["generation"], st, adopt=True))
+        return {"reconciled": out}
+
+    def record_handoff(state: NurseState, config) -> dict:
+        h = {"from": state.get("prev_owner"), "to": agent.id, "ts": now(), "reason": "owner dead (lease expired)",
+             "kind": state["kind"], "work": state["id"], "checkpoint_id": state.get("cp_id"),
+             "resume_at": state.get("resume_at"), "skipped_steps": state.get("skipped") or [],
+             "reconciled": state.get("reconciled") or [], "takeover_s": state.get("takeover_s")}
+        lease_coll = "tasks" if state["kind"] == "task" else "incidents"
+
+        def fn(s):
+            leases.fence(col(lease_coll), state["id"], agent.id, state["generation"], s)
+            col("incidents").update_one({"_id": state["incident"]}, {"$push": {"handoffs": h}}, session=s)
+        txn(fn)
+        agent.think(f"Took over {state['id']} from {state.get('prev_owner')} after {state.get('takeover_s', 0):.0f}s "
+                    f"(generation {state['generation']}).", kind="handoff", incident=state["incident"])
+        return {}
+
+    g = StateGraph(NurseState)
+    g.add_node("load_checkpoint", load_checkpoint)
+    g.add_node("reconcile", reconcile)
+    g.add_node("record_handoff", record_handoff)
+    g.add_edge(START, "load_checkpoint")
+    g.add_edge("load_checkpoint", "reconcile")
+    g.add_edge("reconcile", "record_handoff")
+    g.add_edge("record_handoff", END)
+    return g.compile(checkpointer=checkpointer())
+
+
+def _live(role: str, **extra) -> bool:
+    cutoff = now() - timedelta(seconds=settings.DEAD_AFTER_S)
+    return col("agents").count_documents({"role": role, "status": {"$ne": "dead"}, "last_seen": {"$gte": cutoff},
+                                          **extra}, limit=1) > 0
+
+
+def run(agent: Agent) -> None:
+    worker_graph = worker_role.build_graph(agent)
+    scout_graph = scout_role.build_graph(agent)
+    graph = build_graph(agent, worker_graph, scout_graph)
+
+    def take_task(t: dict) -> bool:
+        won = leases.takeover(col("tasks"), t["_id"], t.get("owner"), t["generation"], agent.id)
+        if not won:
+            return False  # another nurse got there first
+        agent.hold("tasks", won["_id"], won["generation"])
+        try:
+            agent.set(status="working", target=won.get("system") or "hive", incident=won["incident"],
+                      task=won["_id"], phase="takeover")
+            graph.invoke({"kind": "task", "id": won["_id"], "incident": won["incident"], "prev_owner": t.get("owner"),
+                          "generation": won["generation"]},
+                         {"configurable": {"thread_id": f"nurse:{won['_id']}:{won['generation']}"}}, durability="sync")
+            worker_role.execute(agent, worker_graph, won, resume=True)
+        finally:
+            agent.drop("tasks", won["_id"])
+            agent.rest()
+        return True
+
+    def take_incident(i: dict) -> bool:
+        won = leases.takeover(col("incidents"), i["_id"], i.get("owner"), i["generation"], agent.id)
+        if not won:
+            return False
+        agent.hold("incidents", won["_id"], won["generation"])
+        try:
+            agent.set(status="working", target=won["system"], incident=won["_id"], phase="takeover")
+            graph.invoke({"kind": "incident", "id": won["_id"], "incident": won["_id"], "prev_owner": i.get("owner"),
+                          "generation": won["generation"]},
+                         {"configurable": {"thread_id": f"nurse:{won['_id']}:{won['generation']}"}}, durability="sync")
+            scout_role.drive(agent, scout_graph, won["_id"], won["generation"])
+        finally:
+            agent.drop("incidents", won["_id"])
+            agent.rest()
+        return True
+
+    def tick():
+        # 1. orphaned tasks (worker died mid-task)
+        for t in _orphans("tasks", {"status": "claimed"}):
+            if take_task(t):
+                return
+        # 2. orphaned incidents (scout died mid-incident)
+        for i in _orphans("incidents", {"active": True, "status": {"$nin": ["open", "resolved", "failed"]}}):
+            if take_incident(i):
+                return
+        # 3. open work nobody alive can take (e.g. the only mainframe worker is dead)
+        stale = now() - timedelta(seconds=settings.NURSE_PICKUP_S)
+        # a task whose specialty has no live worker at all needs no grace period beyond a moment
+        orphan_after = now() - timedelta(seconds=min(settings.NURSE_PICKUP_S, 0.5))
+        for t in col("tasks").find({"status": "open", "ts": {"$lt": orphan_after}}).sort("ts", 1).limit(5):
+            if _live("worker", specialty=t["specialty"]):
+                continue
+            won = leases.claim(col("tasks"), {"_id": t["_id"], "status": "open"}, agent.id,
+                               extra_set={"status": "claimed", "claimed_at": now()})
+            if won:
+                agent.think(f"No live {t['specialty']} worker — {agent.id} takes {t['_id']}.", kind="handoff",
+                            incident=t["incident"])
+                worker_role.execute(agent, worker_graph, won)
+                return
+        if not _live("scout"):
+            inc = leases.claim(col("incidents"), {"active": True, "status": "open", "opened_at": {"$lt": stale}},
+                               agent.id, extra_set={"status": "claimed", "claimed_at": now()})
+            if inc:
+                agent.hold("incidents", inc["_id"], inc["generation"])
+                try:
+                    agent.think(f"No live scout — {agent.id} takes {inc['_id']}.", kind="handoff", incident=inc["_id"])
+                    scout_role.drive(agent, scout_graph, inc["_id"], inc["generation"])
+                finally:
+                    agent.drop("incidents", inc["_id"])
+                    agent.rest()
+
+    main_loop(agent, tick, settings.NURSE_POLL_S)
