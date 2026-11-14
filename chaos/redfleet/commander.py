@@ -31,6 +31,7 @@ from common.events import think
 
 from .. import faults
 from . import core, learning
+from . import planner as planner_mod
 from .personas import ARMED, KEYS, PERSONAS, SPOILER, VULN_OF, validate
 
 log = logging.getLogger("chaos.redfleet.commander")
@@ -371,6 +372,14 @@ class Commander:
         if not options:
             return {"pick": None, "hold": "no feasible combo right now"}
         lessons = self._doc().get("lessons") or []
+        brief = None
+        if planner_mod.enabled():   # RED_PLANNER=1: spawn both scouts, get a focus, prefer that focus's combos
+            counts = {"llm_calls": 0, "fallbacks": 0}
+            brief = planner_mod.plan(snap, options, lessons, use_llm=self.cfg.use_llm, counts=counts)
+            self.llm_calls += counts["llm_calls"]
+            if brief:
+                preferred = [o for o in options if o["combo"] in brief["prefer"]]
+                options = preferred + [o for o in options if o["combo"] not in brief["prefer"]]
         pick, planner, rejected = None, "policy", None
         if self.cfg.use_llm and llm.llm_available():
             self.llm_calls += 1
@@ -382,6 +391,8 @@ class Commander:
                 "scenario": snap.get("scenario"),
                 "campaign_menu": [{"combo": o["combo"], "plan": o["title"], "tests": o["tests"],
                                    "steps": o["steps"]} for o in options],
+                **({"planner_brief": {k: brief[k] for k in ("focus", "priority", "prefer", "reason", "scouts")}}
+                   if brief else {}),
             }, default=str)
             choice = core.parse_json(llm.complete(SYSTEM_PROMPT, prompt, max_tokens=400))
             if choice is not None:
@@ -398,6 +409,8 @@ class Commander:
             p = policy_pick(options, lessons)
             pick = {**p, "reason": f"{p['tests']}; scouts say next steps land on "
                                    f"{', '.join((state.get('findings') or {}).get(SCOUT_HIVE, {}).get('pending_step_systems') or []) or 'nothing yet'}"}
+        if brief:
+            pick = {**pick, "planning_id": brief["planning_id"], "priority": brief["priority"], "focus": brief["focus"]}
         return {"pick": pick, "planner": planner}
 
     # ---------------------------------------------------------- ACT
@@ -407,11 +420,19 @@ class Commander:
         steps = [{**s, "status": "queued", "event": None} for s in pick["steps"]]
         camp = {"id": cid, "run_id": snap["run_id"], "combo": pick["combo"], "title": pick["title"],
                 "tests": pick["tests"], "reason": pick["reason"], "planner": state["planner"], "steps": steps,
-                "status": "active", "current": 0, "started_at": now()}
+                "status": "active", "current": 0, "started_at": now(),
+                **{k: pick[k] for k in ("planning_id", "priority", "focus") if pick.get(k)}}
         self._set(campaign=camp, planner=self._label(state["planner"]))
         plan = " -> ".join(f"{s['persona'].removeprefix('red-')}: {s['fault']}" for s in steps)
         self._say(f"Red Commander ({self._label(state['planner'])}) THINK: campaign {pick['combo']}: {plan}. "
                   f"{pick['reason']} {self._counts()}")
+        if camp.get("planning_id"):   # RED_PLANNER: the Planner hands it to the Runner when the Runner decides
+            rids = planner_mod.handoff(camp)
+            if rids is not None:
+                camp.update(handed=True, requests=rids, status="active" if rids else "aborted",
+                            observe_from=now())
+                self._set(campaign=camp)
+                return {}
         for i, s in enumerate(steps):
             self._order(camp, i, "queued")
         self._assign(camp, 0)
@@ -422,7 +443,7 @@ class Commander:
         order = {**{k: s[k] for k in ("fault", "target", "victim", "blame", "to") if s.get(k) is not None},
                  "campaign": camp["id"], "run_id": camp["run_id"], "combo": camp["combo"], "step": i,
                  "of": len(camp["steps"]), "status": status, "reason": f"Commander campaign {camp['combo']}: {camp['reason']}",
-                 "ts": now()}
+                 "ts": now(), **{k: camp[k] for k in ("planning_id", "priority", "focus") if camp.get(k)}}
         if status == "queued":   # a later step never overwrites an earlier one for the same Striker
             world().red_agents.update_one({"_id": s["persona"], "order.status": {"$nin": ["queued", "assigned", "taken"]}},
                                           {"$set": {"order": order}})
@@ -442,6 +463,19 @@ class Commander:
     def _advance(self, state: CmdState) -> CmdState:
         camp = self._doc().get("campaign")
         if not camp or camp.get("status") != "active":
+            return {}
+        if camp.get("handed"):   # the Runner owns the timing: follow its requests
+            status, events = planner_mod.progress(camp)
+            for s, ev in zip(camp["steps"], events):
+                s["event"] = ev or s.get("event")
+            if status != "active":
+                self._say(f"Red Commander OBSERVE: the Runner decided every step of {camp['combo']} "
+                          f"({sum(1 for e in events if e)} landed).", kind="action")
+                return self._close(camp, status)
+            if (now() - camp["started_at"]).total_seconds() > self.step_timeout_s * len(camp["steps"]) + 40:
+                self._say(f"Red Commander: the Runner never fired {camp['combo']}; calling it off.", kind="reject")
+                return self._close(camp, "aborted")
+            self._set(campaign=camp)
             return {}
         i = camp["current"]
         step = camp["steps"][i]
@@ -488,6 +522,9 @@ class Commander:
         camp = self._doc().get("campaign")
         if not camp:
             return {}
+        if camp.get("handed"):   # a Runner fire may land after the last decision: pick up late events
+            for s, ev in zip(camp["steps"], planner_mod.progress(camp)[1]):
+                s["event"] = ev or s.get("event")
         events = [world().chaos_events.find_one({"_id": s["event"]}) for s in camp["steps"] if s.get("event")]
         events = [e for e in events if e]
         evidence = [{"step": i + 1, "fault": e["fault"], "target": e.get("target"), "status": e.get("status"),

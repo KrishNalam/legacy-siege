@@ -247,6 +247,7 @@ def scorecard_pipeline() -> list[dict]:
 
 def chaos_by_run_pipeline() -> list[dict]:
     return [
+        {"$match": {"kind": {"$ne": "decision"}}},   # Red Planner / Runner decisions are not attacks
         {"$group": {"_id": "$run_id", "round": {"$first": "$round"}, "scenario": {"$first": "$scenario"},
                     "events": {"$sum": 1}, "faults": {"$push": "$fault"},
                     "manual": {"$sum": {"$cond": ["$manual", 1, 0]}}, "first_ts": {"$min": "$ts"}}},

@@ -11,6 +11,7 @@ import sys
 import time
 
 from .. import faults
+from .. import decider
 from . import commander, core
 from .personas import PERSONAS
 
@@ -62,6 +63,10 @@ def run_fleet(ids: list[str]) -> None:
     if commander.enabled():   # Commander + 2 Scouts: a thread in this supervisor, no extra process
         cmd = commander.start_thread()
         print("red fleet: Red Commander + Hive/Systems Scouts online", flush=True)
+    runner_loop = None
+    if decider.enabled():   # RUNNER_DECIDES=1: the Runner's own decision loop, a thread here like the Commander
+        runner_loop = decider.start_thread()
+        print("red fleet: Runner decisions online (RUNNER_DECIDES)", flush=True)
     while not stopping:
         time.sleep(1)
         for i in ids:
@@ -74,6 +79,8 @@ def run_fleet(ids: list[str]) -> None:
             launch(i)
     if cmd:
         cmd.stop()
+    if runner_loop:
+        runner_loop.stop()
     deadline = time.monotonic() + 5
     for p in procs.values():
         try:
