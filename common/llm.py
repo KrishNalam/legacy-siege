@@ -141,9 +141,7 @@ def _anthropic():
         if _client is None:
             import anthropic
 
-            # LangSmith wraps the client object in place (no-op when tracing is off), so per-call timeouts are
-            # passed as request options below rather than via with_options() (which would return an unwrapped copy).
-            _client = tracing.wrap_anthropic(anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=0))
+            _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=0)
         return _client
 
 
