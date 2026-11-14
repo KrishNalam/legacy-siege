@@ -176,7 +176,10 @@ class Agent:
 
     def drop(self, coll: str, _id) -> None:
         with self._lock:
-            self._held.pop(f"{coll}/{_id}", None)
+            key = f"{coll}/{_id}"
+            self._held.pop(key, None)
+            self._deadlines.pop(key, None)
+            self._lost.discard(key)
         self.last_busy = time.monotonic()
 
     def check_held(self) -> None:
@@ -184,7 +187,7 @@ class Agent:
         if not settings.lease_deadline_enabled():
             return
         with self._lock:
-            held = list(self._held)
+            held = set(self._held) | self._lost
         for key in held:
             c, ident = key.split('/', 1)
             self.check(c, ident)

@@ -77,3 +77,20 @@ def test_expired_lease_cannot_renew_or_fence(db, monkeypatch):
             txn(lambda session: leases.fence(db.tasks, 'expired', 'old', 1, session))
     finally:
         db.tasks.delete_one({'_id': 'expired'})
+
+
+def test_reaped_lease_blocks_retry_after_heartbeat_clears_held(monkeypatch):
+    monkeypatch.setenv('SWARM_LEASE_DEADLINE', '1')
+    monkeypatch.setattr(leases, 'renew', Mock(return_value=True))
+    a = Agent('worker', 'worker-test')
+    try:
+        a.hold('tasks', 'T', 1)
+        # The resumed heartbeat observes the Undertaker's dead stamp.
+        a._lost.update(a._held)
+        a._held.clear()
+        with pytest.raises(leases.LeaseLost):
+            a.check_held()
+        a.drop('tasks', 'T')
+        a.check_held()
+    finally:
+        a.systems.close()
