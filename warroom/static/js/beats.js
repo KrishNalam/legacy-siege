@@ -30,6 +30,10 @@ export function installBeats(stage, panels, caption) {
     } else if (doc.fault === "agent_kill" && doc.result?.agent && !prev?.result?.agent) {
       stage.strikeAgent(doc.result.agent, "SIGKILL");
       caption(`SIGKILL → ${doc.result.agent}`, "real process killed mid-step · its ticket drops · the lease will expire", C.red);
+    } else if (doc.fault === "agent_kill" && doc.result && !doc.result.ok && !prev?.result) {
+      stage.hunt = null;  // stop the reticle: nobody is going to be killed
+      if (doc.result.how === "gave_up") caption("Kill skipped: no worker mid-step", `gave up after ${Math.round(doc.result.waited_s ?? 0)} s · nobody was killed`, C.ink2);
+      else caption("Kill called off", doc.result.error || "no victim", C.ink2);
     }
   });
 

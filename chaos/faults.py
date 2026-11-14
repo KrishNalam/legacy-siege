@@ -16,6 +16,7 @@ the runner can always record a ``chaos_events`` document).
 """
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import threading
@@ -26,6 +27,8 @@ import httpx
 
 from common import config
 from common.db import col, now
+
+log = logging.getLogger("chaos.faults")
 
 SYSTEM_TARGETS = tuple(config.SYSTEM_IDS)  # ("mainframe", "unix", "portal")
 
@@ -144,7 +147,7 @@ def clear_all() -> dict:
 
 
 # ------------------------------------------------------------------ agent fault: SIGKILL a bee
-BUSY_WORKER = {"role": "worker", "status": "working"}
+DEFAULT_SELECTOR = {"role": "worker", "phase": "step_sent"}
 
 
 def _fresh_cutoff():
@@ -226,8 +229,11 @@ def find_victim(selector: dict, wait_s: float = 30, poll_s: float = 0.25) -> tup
 
     ``{"agent": id}`` targets one bee. Any other keys are a field filter (e.g.
     ``{"role": "worker", "phase": "step_sent"}``) restricted to working agents
-    with a fresh heartbeat. After ``wait_s`` without a match, fall back to any
-    busy worker. Returns ``(agent, how, waited_s)``.
+    with a fresh heartbeat. After ``wait_s`` without a match the kill gives up
+    (``how="gave_up"``) and kills nobody: there is deliberately no fallback to
+    "any busy worker", so a late press can never strike a random bee (e.g. spoil
+    the round-2 timing). An ``{"agent": id}`` selector that never turns up
+    returns ``how="none"``. Returns ``(agent, how, waited_s)``.
 
     A kill belongs to the night it was requested in: if that night ends (a reset) or another one
     starts before a victim turns up, the hunt is called off (``how="cancelled"``). Unlike the
@@ -255,25 +261,34 @@ def find_victim(selector: dict, wait_s: float = 30, poll_s: float = 0.25) -> tup
         time.sleep(poll_s)
         if called_off():
             return None, "cancelled", time.monotonic() - t0
-    if "agent" not in selector and not called_off():
-        for a in _candidates({**BUSY_WORKER, "last_seen": {"$gte": _fresh_cutoff()}}):
-            if _killable(a) is None:
-                return a, "fallback_busy_worker", time.monotonic() - t0
-    return None, "none", time.monotonic() - t0
+    if called_off():
+        return None, "cancelled", time.monotonic() - t0
+    return None, ("none" if "agent" in selector else "gave_up"), time.monotonic() - t0
+
+
+def _skip_reason(selector: dict, waited: float) -> str:
+    what = "worker mid-step" if selector == DEFAULT_SELECTOR else f"agent matching {selector}"
+    return f"kill skipped: no {what} within {waited:.0f}s (gave up, nobody killed)"
 
 
 def kill_agent(params: dict) -> dict:
     try:
-        selector = clean_selector(params.get("selector") or {"role": "worker", "phase": "step_sent"})
+        selector = clean_selector(params.get("selector") or DEFAULT_SELECTOR)
     except ValueError as e:
         return {"ok": False, "error": str(e)}
     wait_s = min(max(float(params.get("wait_s", 30)), 0.0), 60.0)
     poll_s = min(max(float(params.get("poll_s", 0.25)), 0.1), 5.0)   # never a busy loop
     agent, how, waited = find_victim(selector, wait_s, poll_s)
     if agent is None:
-        error = ("called off: the night ended or a new one started before a victim appeared"
-                 if how == "cancelled" else "no live agent matched")
-        return {"ok": False, "error": error, "selector": selector, "waited_s": round(waited, 2)}
+        if how == "cancelled":
+            error = "called off: the night ended or a new one started before a victim appeared"
+        elif how == "gave_up":
+            error = _skip_reason(selector, waited)
+            log.warning("agent_kill %s (selector=%s, waited_s=%.1f)", error, selector, waited)
+        else:
+            error = "no live agent matched"
+        return {"ok": False, "error": error, "how": how, "skipped": True, "selector": selector,
+                "waited_s": round(waited, 2)}
     pid = agent["pid"]
     try:
         os.kill(pid, signal.SIGKILL)   # a real crash: no cleanup, no goodbye heartbeat

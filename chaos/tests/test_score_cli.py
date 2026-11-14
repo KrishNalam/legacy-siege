@@ -46,7 +46,7 @@ def test_cli_commands(systems, capsys):
     assert cli.main(["events", "-n", "5"]) == 0
     assert cli.main(["score"]) == 0
     assert cli.main(["fire", "batch_abort", "portal"]) == 2   # invalid target -> clean error
-    out = capsys.readouterr().out
-    assert "batch_abort" in out and "Scorecard" in out and "no live agent matched" in out
+    out = " ".join(capsys.readouterr().out.split())  # rich wraps long lines at the terminal width
+    assert "batch_abort" in out and "Scorecard" in out and "kill skipped: no worker mid-step" in out
     assert world().chaos_events.count_documents({}) == 4
     assert swarm().stats.find_one({"_id": "current"})["round"] == 1
