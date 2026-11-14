@@ -170,4 +170,4 @@ if __name__ == "__main__":
     ensure()
     if "--reset" in sys.argv:
         reset()
-    print("setup_db ok:", config.MONGODB_URI.split("@")[-1])
+    print("setup_db ok")  # never print connection strings (including credential-bearing query options)
