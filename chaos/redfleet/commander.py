@@ -133,8 +133,8 @@ COMBOS = {
                             "Do they trust read-back over logs while a worker dies mid-step?"),
     "break-then-drift": ("break {s} mid-repair, then rename the unix balance field",
                          "Compound faults: re-plan plus adapt to a changed layout"),
-    "poison-then-break": ("poison the remembered {fc} repair (aimed at {wrong}), then cause {fc} again",
-                          "Memory vs read-back: the Guard must reject the recalled wrong-system repair and re-plan"),
+    "poison-then-break": ("poison the remembered {fc} repair ({wrong}), then cause {fc} again",
+                          "Memory vs evidence: the Hive must reject the recalled poisoned repair and re-plan"),
     "kill-then-exploit": ("SIGKILL a busy worker, then walk in through {vuln}",
                           "An intruder during a takeover: detect, patch, retest"),
 }
@@ -194,8 +194,9 @@ def combos(snap: dict, cfg: core.Settings, findings: dict | None = None) -> list
         again = item("red-saboteur", fault=fc) or item("red-hacker", fault=fc)
         if again:
             who = "red-saboteur" if again["fault"] in PERSONAS["red-saboteur"].faults else "red-hacker"
-            add("poison-then-break", [("red-memory", m), (who, again)], fc=fc,
-                wrong=faults.WRONG_SYSTEM.get(again["target"], "mainframe"))
+            wrong = (f"wrong record {faults.WRONG_RECORD[fc][2]}" if faults.poison_shape(fc) == "wrong_record"
+                     else f"aimed at {faults.WRONG_SYSTEM.get(again['target'], 'mainframe')}")
+            add("poison-then-break", [("red-memory", m), (who, again)], fc=fc, wrong=wrong)
             break
     hack = next((m for m in menus.get("red-hacker", [])), None)
     if hack:
