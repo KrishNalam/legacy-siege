@@ -111,6 +111,14 @@ def eta_text(est: dict) -> str:
     return f"ETA ~{med:.0f} s{spread} (based on {k} past run{'s' if k != 1 else ''})"
 
 
+AREAS = {"red": "chaos", "chaos": "chaos", "gardener": "gardener"}   # everything else = the Hive ("bees")
+
+
+def area_of(role: str) -> str:
+    """War-room box this event belongs to: ``gardener`` | ``chaos`` | ``bees``."""
+    return AREAS.get(role, "bees")
+
+
 def emit(agent: str, role: str, text: str, *, action_type: str, system: str | None = None,
          incident: str | None = None, phase: str = "start", step: int | None = None, of: int | None = None,
          eta: dict | None = None, elapsed_s: float | None = None, outcome: str | None = None) -> None:
@@ -119,13 +127,19 @@ def emit(agent: str, role: str, text: str, *, action_type: str, system: str | No
         return
     done = (step - 1 if phase == "start" else step) if step is not None else None
     pct = round(100.0 * done / of) if done is not None and of else None   # start of step i/n = (i-1)/n done
-    prog = {"actor": agent, "role": role, "action_type": action_type, "system": system, "phase": phase,
+    area = area_of(role)
+    prog = {"area": area, "actor": agent, "role": role, "incident": incident, "action_type": action_type, "system": system, "phase": phase,
             "step": step, "of": of, "pct": pct, "eta_s": (eta or {}).get("median_s"),
             "eta_p90_s": (eta or {}).get("p90_s"), "eta_k": (eta or {}).get("k", 0),
-            "elapsed_s": round(elapsed_s, 2) if elapsed_s is not None else None, "outcome": outcome}
+            "elapsed_s": round(elapsed_s, 2) if elapsed_s is not None else None, "outcome": outcome,
+            "text": text[:280]}
     try:
+        ts = now()
         col("thoughts").insert_one({"agent": agent, "role": role, "incident": incident, "system": system,
-                                    "text": text[:280], "kind": "progress", "progress": prog, "ts": now()})
+                                    "text": text[:280], "kind": "progress", "progress": prog, "ts": ts})
+        # latest state per war-room box (one small doc each, streamed like any stats change)
+        col("stats").update_one({"_id": f"progress:{area}"},
+                                {"$set": {**prog, "ts": ts}, "$inc": {"events": 1}}, upsert=True)
     except Exception:
         log.exception("progress emit failed")
 
