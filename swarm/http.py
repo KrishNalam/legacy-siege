@@ -63,3 +63,6 @@ class Systems:
 
     def version(self, sys: str) -> int:
         return int(self.health(sys).get("version", 1))
+
+    def close(self) -> None:
+        self._c.close()

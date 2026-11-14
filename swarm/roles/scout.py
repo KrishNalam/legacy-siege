@@ -24,7 +24,7 @@ from common import config as shared
 from common.db import col, next_id, now, txn
 from common.events import say as bus
 
-from .. import leases, policy, recall, settings, steps
+from .. import leases, policy, recall, second_opinion, settings, steps
 from ..harness import Agent, checkpointer, main_loop, retrying
 from .. import lessons
 
@@ -265,6 +265,8 @@ def build_graph(agent: Agent):
                 "steps": plan_steps, "status": "fixing", "root_cause_system": state["root"],
                 "fault_class": state["fault_class"], "root_cause": state.get("root_cause"),
                 "metrics.diagnosis_s": state.get("diag_s", 0.0), "metrics.hops": len(state.get("path") or [])}})
+            # Claude's independent second opinion, judged against this plan in a background thread (never awaited)
+            second_opinion.start(agent.id, inc, state, plan_steps, state["root"], state["fault_class"])
             desc = "; ".join(f"{s['op']}{' (needs approval)' if s['destructive'] else ''}" for s in plan_steps)
             say(inc_id, f"Plan, {len(plan_steps)} steps: {desc}.", system=state["root"])
         return {}
