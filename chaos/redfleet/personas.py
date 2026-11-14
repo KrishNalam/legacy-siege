@@ -31,6 +31,11 @@ class Persona:
     menu_fn: Callable[[dict], list[dict]] = field(repr=False)
     policy_fn: Callable[[dict, list[dict]], dict | None] = field(repr=False)
 
+    @property
+    def latent(self) -> bool:
+        """Its attacks land later, at the Hive's next recall (memory poison), not on a running system."""
+        return set(self.faults) <= {"poison_memory"}
+
     def menu(self, snap: dict, cfg: Settings) -> list[dict]:
         allowed = set(cfg.allowed) if cfg.allowed else None
         out = []

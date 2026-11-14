@@ -154,6 +154,13 @@ def test_gate():
     assert "in flight" in gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "firing"}]), c, 0, t)
     assert "cooling" in gate(snap(red_attacks=[{"fault": "a", "ts": recent, "status": "ok"}]), c, 0, t)
     assert "unfold" in gate(snap(night_started=t - timedelta(seconds=10)), c, 25, t)
+    # Memory Striker (latent): plants before a (skipped) night's first incident so the next recall sees it
+    skip, fresh = cfg(skip_scenarios=("bank-night-2",)), t - timedelta(seconds=2)
+    early = snap(scenario="bank-night-2", night_started=fresh, run_incidents=0, poisonable=[{"id": "PB-0001"}])
+    assert gate(early, skip, 30, t, latent=True) is None
+    assert "off limits" in gate(early, skip, 30, t)                                      # not for the others
+    assert "off limits" in gate({**early, "run_incidents": 1}, skip, 30, t, latent=True)  # recall already happened
+    assert "off limits" in gate({**early, "poisonable": []}, skip, 30, t, latent=True)    # nothing to poison
 
 
 # ------------------------------------------------------------------ deterministic playbooks

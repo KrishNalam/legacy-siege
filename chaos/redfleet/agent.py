@@ -100,7 +100,7 @@ class Attacker:
         order = commander.my_order(self.p.id, snap) if commander.enabled() else None
         if order:
             return {"snap": snap, "order": order, "hold": self._order_gate(snap, order)}
-        return {"snap": snap, "hold": ("observing Hive defence" if self._pending else core.gate(snap, self.cfg, self.p.stagger_s))}
+        return {"snap": snap, "hold": ("observing Hive defence" if self._pending else core.gate(snap, self.cfg, self.p.stagger_s, latent=self.p.latent))}
 
     def _order_gate(self, snap: dict, order: dict) -> str | None:
         """A Commander order skips my own cooldown, but never the no-permanent-damage rules."""
