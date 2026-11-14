@@ -894,9 +894,9 @@ function renderOverview() {
     lie: { d: `M${bx - 6} 300 L${lx2 + 12} 300`, cls: `${rejects.length ? "red" : ""} ${lieFresh ? "on" : ""}`, label: rejects.length ? "LIE CAUGHT" : "CHECKS", lx: (bx + lx2) / 2, ly: 292 },
     kill: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y - 6} L${B.chaos.x + B.chaos.w / 2} 92 L${B.bees.x + B.bees.w / 2} 92 L${B.bees.x + B.bees.w / 2} ${B.bees.y - 12}`, cls: `red ${killFresh ? "on" : ""}`, label: "KILLS A BEE", lx: 800, ly: 88 },
     code: { d: `M${B.legacy.x + B.legacy.w / 2} ${gy - 6} L${B.legacy.x + B.legacy.w / 2} ${B.legacy.y + B.legacy.h + 12}`, cls: `${deployed ? "amb" : ""} ${u?.status === "deployed" ? "on" : ""}`, label: deployed ? `NEW CODE V${u.version_after ?? 2}` : "NEW CODE", lx: B.legacy.x + B.legacy.w / 2 + 10, ly: (gy + B.legacy.y + B.legacy.h) / 2 + 4, anchor: "start" },
-    req: { d: `M${bx - 6} ${gy + 22} L${gx2 + 12} ${gy + 22}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "ASKS FOR HELP · REPEATS", lx: (gx2 + bx) / 2, ly: gy + 15 },
-    tools: { d: `M${gx2 + 6} ${gy + 52} L${bx - 12} ${gy + 52}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: "TOOLS + FIXES → SCOUTS", lx: (gx2 + bx) / 2, ly: gy + 45 },
-    pause: { d: `M${gx2 + 6} ${gy + 82} L${bx - 12} ${gy + 82}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: "PAUSE WHILE UPGRADING", lx: (gx2 + bx) / 2, ly: gy + 75 },
+    req: { d: `M${bx - 6} ${gy + 22} L${gx2 + 12} ${gy + 22}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "HELP · REPEATS", lx: (gx2 + bx) / 2, ly: gy + 15 },
+    tools: { d: `M${gx2 + 6} ${gy + 52} L${bx - 12} ${gy + 52}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: "TOOLS → SCOUTS", lx: (gx2 + bx) / 2, ly: gy + 45 },
+    pause: { d: `M${gx2 + 6} ${gy + 82} L${bx - 12} ${gy + 82}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: "PAUSE TO UPGRADE", lx: (gx2 + bx) / 2, ly: gy + 75 },
     prove: { d: `M${cx + 6} ${gy + 56} L${B.gardener.x - 12} ${gy + 56}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? ["REPLAYED:", "NOTHING BROKE"] : ["PROOF:", "REPLAY"], lx: (cx + B.gardener.x) / 2, ly: gy + 34 },
   };
   const mk = (cls) => (cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i");
