@@ -155,15 +155,18 @@ def _victim_reason(fault: str, params: dict) -> str | None:
     return None
 
 
+def _ensure_night(st: dict) -> None:
+    """The Runner's board row, with its per-night counters reset when a new night (or a full reset) starts."""
+    b = world().red_agents
+    b.update_one({"_id": BOARD_ID}, {"$setOnInsert": {"requests": []}}, upsert=True)
+    b.update_one({"_id": BOARD_ID, "night": {"$ne": st["night_key"]}},
+                 {"$set": {"night": st["night_key"], "strikes": 0, "spawns": 0, "last_strike_at": datetime(2000, 1, 1)}})
+
+
 def _reserve(st: dict, caps: Caps, gap_s: float | None = None) -> bool:
     """Atomically take one strike slot for this night (budget + gap), so concurrent Strikers can't both pass."""
     b = world().red_agents
-    b.update_one({"_id": BOARD_ID, "night": {"$ne": st["night_key"]}},
-                 {"$set": {"night": st["night_key"], "strikes": 0, "spawns": 0, "last_strike_at": datetime(2000, 1, 1)}},
-                 upsert=False)
-    b.update_one({"_id": BOARD_ID}, {"$setOnInsert": {"night": st["night_key"], "strikes": 0, "spawns": 0,
-                                                       "last_strike_at": datetime(2000, 1, 1), "requests": []}},
-                 upsert=True)
+    _ensure_night(st)
     q = {"_id": BOARD_ID, "night": st["night_key"], "last_strike_at": {"$lte": now() - timedelta(seconds=caps.gap_s if gap_s is None else gap_s)}}
     if caps.max_per_night:
         q["strikes"] = {"$lt": caps.max_per_night}
@@ -360,6 +363,7 @@ class RunnerLoop:
         if not st["night_running"]:
             return None
         self._reap(st["night_key"])
+        _ensure_night(st)
         if _age(st["night_started"]) < self.caps.first_s:
             return None
         cands = candidates(st, self.caps)
