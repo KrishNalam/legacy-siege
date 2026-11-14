@@ -12,6 +12,8 @@ import sys
 import time
 from pathlib import Path
 
+from common import config  # load .env before constructing child commands
+
 ROOT = Path(__file__).resolve().parent
 PY = sys.executable
 LOGS = ROOT / "logs"
@@ -35,8 +37,8 @@ def main() -> None:
     restarts: dict[str, list[float]] = {name: [] for name, _ in PROCS}
 
     def launch(name: str, cmd: list[str]) -> None:
-        log = open(LOGS / f"{name}.log", "a")
-        p = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        with open(LOGS / f"{name}.log", "a") as log:
+            p = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         running[name] = p
         print(f"started {name} pid={p.pid} (logs/{name}.log)", flush=True)
 
