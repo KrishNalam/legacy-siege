@@ -153,7 +153,7 @@ export class Stage {
     this.droneCharge[i] = 1; this.shipRage = 1;
     const target = ev.fault === "agent_kill" ? null : this.posOfSystem(ev.target);
     if (!target) { this.hunt = { t0: this.t, until: this.t + 30, ev }; return; }
-    const lie = ev.fault === "lying_success" || ev.fault === "slow_apply";
+    const lie = ev.fault === "lying_success" || ev.fault === "slow_apply" || ev.fault === "false_log";
     this.addBolt(i, target, lie ? "#ff4fd8" : C.red);
     this.shake[ev.target] = this.t;
     this.float(target.x, BUILDINGS[ev.target].y + BUILDINGS[ev.target].h * 0.62, ev.fault + (ev.params?.count ? ` ×${ev.params.count}` : ""), lie ? "#ff9cf0" : "#ffb3ba", 17);

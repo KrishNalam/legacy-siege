@@ -156,6 +156,9 @@ def ensure() -> None:
 
 
 def reset() -> None:
+    from chaos import faults
+    faults.thaw_overdue(all_=True)
+    faults.clear_planted_memory()
     w, s = world(), swarm()
     for n in ["systems", "system_state", "system_logs", "op_receipts", "chaos_events", "runs"]:
         w[n].delete_many({})

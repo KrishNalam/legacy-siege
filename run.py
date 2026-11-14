@@ -27,6 +27,9 @@ PROCS = [
     ("swarm", [PY, "-m", "swarm.supervisor"]),
     ("gardener", [PY, "-m", "gardener.main"]),
 ]
+# Red fleet (AI attacker on top of the seeded chaos): opt-in, off by default.
+if os.environ.get("RED_FLEET", "").strip().lower() in ("1", "true", "yes", "on"):
+    PROCS.append(("redfleet", [PY, "-m", "chaos.redfleet"]))
 
 
 def group_alive(pgid: int) -> bool:

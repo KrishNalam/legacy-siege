@@ -24,10 +24,14 @@ export function installBeats(stage, panels, caption) {
     if (panels.quiet) panels.renderIncident();
     if (m.op === "insert") {
       stage.strike(doc);
-      if (doc.fault === "agent_kill" && doc.params?.selector?.agent) caption(`Chaos: SIGKILL ${doc.params.selector.agent}`, "a real process kill · no warning to the swarm", C.red);
-      else if (doc.fault === "agent_kill") caption("Chaos: agent kill armed", "SIGKILL the next worker that sends a step", C.red);
-      else if (doc.fault === "schema_drift") caption(`Chaos: vendor patch on ${doc.target}`, "a field in the xfer manifest is silently renamed · unix still says healthy", C.red);
-      else if (doc.fault === "lying_success") caption(`Chaos: ${doc.target} will lie`, `next ${doc.params?.count ?? 1} op returns success without applying`, "#ff4fd8");
+      const who = doc.red?.persona ? `Red ${doc.red.persona}` : "Chaos";  // Red fleet attackers sign their strikes
+      if (doc.fault === "agent_kill" && doc.params?.selector?.agent) caption(`${who}: SIGKILL ${doc.params.selector.agent}`, "a real process kill · no warning to the swarm", C.red);
+      else if (doc.fault === "agent_kill") caption(`${who}: agent kill armed`, "SIGKILL the next worker that sends a step", C.red);
+      else if (doc.fault === "schema_drift") caption(`${who}: vendor patch on ${doc.target}`, "a field in the xfer manifest is silently renamed · unix still says healthy", C.red);
+      else if (doc.fault === "lying_success") caption(`${who}: ${doc.target} will lie`, `next ${doc.params?.count ?? 1} op returns success without applying`, "#ff4fd8");
+      else if (doc.fault === "false_log") caption(`${who}: false log on ${doc.target}`, `planted lines blame ${doc.params?.blame || "another system"} · read-back must win over logs`, "#ff4fd8");
+      else if (doc.fault === "credential_exploit") caption(`${who}: intruder on ${doc.target}`, "factory-default OPERATOR password · ledger tampered", C.red);
+      else if (doc.red?.persona) caption(`${who}: ${doc.fault} → ${doc.target}`, doc.red.reason || "", C.red);
       else caption(`Chaos strikes: ${doc.fault}`, `→ ${doc.target}${doc.manual ? " (manual)" : doc.scenario ? ` · ${doc.scenario}` : ""}`, C.red);
     } else if (doc.fault === "agent_kill" && doc.result?.agent && !prev?.result?.agent) {
       stage.strikeAgent(doc.result.agent, "SIGKILL");

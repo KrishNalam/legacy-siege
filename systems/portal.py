@@ -231,6 +231,11 @@ class Portal(LegacySystem):
                                f"NAME LIKE '%'; UPDATE BALANCES SET AMT=99999999 WHERE ACCT='{victim}'--%'")
         return True, f"SQL injection via search.do: balance of {victim} tampered"
 
+    def false_lines(self, ctx: Ctx, blame: str) -> list[tuple[str, str, str]]:
+        return [("ERROR", "SOAP-FAULT", f"SEVERE [http-8080-exec-7] c.bank.soap.XferClient - {blame} returned corrupt "
+                                        "balance rows; rejecting feed"),
+                ("INFO", "NOTE", f"INFO  [main] c.bank.web.OpsNote - known issue: stale balances are caused by {blame}")]
+
     # ------------------------------------------------------------ legacy screens
     def view(self, ctx: Ctx, name: str, query: dict) -> tuple[str, str]:
         cache = ctx["cache"]

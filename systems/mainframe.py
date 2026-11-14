@@ -102,7 +102,7 @@ class Mainframe(LegacySystem):
     )
     VULNS = (Vuln("mf-default-operator", "default_credential",
                   "TSO/RACF account OPERATOR still uses its factory-default password"),)
-    FAULTS = ("batch_abort",)
+    FAULTS = ("batch_abort", "credential_exploit")
 
     # ------------------------------------------------------------ state
     def baseline(self, now: datetime) -> dict[str, dict]:
@@ -231,6 +231,8 @@ class Mainframe(LegacySystem):
         if fault == "batch_abort":
             b = ctx["batch"]
             return b["status"] == "OK" and not self.poison(b)
+        if fault == "credential_exploit":
+            return not self.probe(ctx, "mf-default-operator")[0]
         return super().fault_resolved(ctx, fault)
 
     def lie_log(self, ctx: Ctx, op: str) -> None:
@@ -277,6 +279,28 @@ class Mainframe(LegacySystem):
         rec = format_record(rid, ctx.now.strftime("%Y%m%d"), ACCOUNTS[0], ACCOUNTS[1], amount, memo="WIRE MANUAL KEYED")
         b["queue"].append({"id": rid, "rec": rec})
         return True, f"malformed record {rid} (amount={amount!r}) queued for the next NIGHTBAT run"
+
+    def chaos_credential_exploit(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
+        """An intruder logs on with the factory-default OPERATOR password and moves money in the ledger."""
+        if not self.probe(ctx, "mf-default-operator")[0]:
+            return False, "exploit failed: ICH408I USER(OPERATOR) LOGON - INVALID PASSWORD ENTERED"
+        src = str(params.get("ip", "198.51.100.23"))
+        victim = str(params.get("account", ACCOUNTS[4]))
+        amount = int(params.get("amount", 250_000))
+        bal = ctx["ledger"]["balances"]
+        bal[victim] = bal.get(victim, 0) - amount
+        bal[ACCOUNTS[0]] = bal.get(ACCOUNTS[0], 0) + amount
+        ctx["security"]["exploited"]["mf-default-operator"] = True
+        ctx.log("WARN", "ICH70001I", f"ICH70001I OPERATOR LAST ACCESS AT {ctx.now.strftime('%H:%M:%S')} - TSO LOGON "
+                                     f"FROM {src}: factory default password accepted")
+        ctx.log("INFO", "IKJ56250I", f"IKJ56250I JOB OPXFER SUBMITTED BY OPERATOR - LEDGER ADJ {victim} -{amount}")
+        return True, f"default OPERATOR logon from {src}: {amount} moved out of {victim}"
+
+    def false_lines(self, ctx: Ctx, blame: str) -> list[tuple[str, str, str]]:
+        n = ctx["batch"]["run_seq"] + 1
+        return [("ERROR", "IEF450I", f"IEF450I NIGHTBAT ABEND=S0C4 STEP010 - INPUT FEED FROM {blame.upper()} TRUNCATED"),
+                ("INFO", "IEA989I", f"*IEA989I OPERATOR NOTE: NIGHTBAT RUN {n} FAILURES ARE {blame.upper()}'S - DO NOT "
+                                    "RESTART THIS JOB")]
 
     # ------------------------------------------------------------ legacy screens
     def view(self, ctx: Ctx, name: str, query: dict) -> tuple[str, str]:

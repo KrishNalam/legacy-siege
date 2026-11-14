@@ -210,6 +210,35 @@ says "seen before: mapping v2 reused": the mapping comes from MongoDB memory wit
 `$vectorSearch` recall makes it a single hop. The scenario `bank-drift` plays it, and `python -m scripts.drift_check` rehearses it
 (14 checks).
 
+### Red fleet (AI attackers, opt-in)
+
+`RED_FLEET=1` makes `run.py` also start `python -m chaos.redfleet`: five AI attackers that play on top of the
+seeded nights (which stay exactly as they are). Each is its own process running its own LangGraph loop
+(scout → plan → strike → observe), aimed at "Finish the Job":
+
+| attacker | strikes with | Statement 3 angle |
+|---|---|---|
+| `red-saboteur` | `batch_abort`, `disk_fill`, `cron_stop`, `session_leak`, timed to break the system the Hive is about to fix next | systems won't hold still mid-job |
+| `red-assassin` | `agent_kill`: the worker mid-send, the crowned queen, a scout, the guard, the sentinel | Q2 resume after a crash |
+| `red-liar` | `lying_success`, `slow_apply`, `false_log` (planted log lines and operator notes blaming the wrong system) | Q1 took effect vs only sent; knowing what actually happened |
+| `red-hacker` | `credential_exploit`, `sqli_exploit`, `config_exploit` while the vuln is still open | an intruder mid-job |
+| `red-drifter` | `schema_drift` (renames the balance field) | Q3 adapt when fields change |
+
+Each attacker's Red Scout step reads the Hive's state from MongoDB (open incidents and their pending steps, live
+agents and phases, systems, learned playbooks, what the rest of the fleet already did). Claude (`LLM_MODEL` via
+`common/llm.py`) picks ONE item from that attacker's menu; the menu is built from the existing fault library, so an
+off-menu pick is rejected (shown in the thought feed) and the attacker's own deterministic playbook decides instead,
+which is also what runs with no key, on a timeout or on bad JSON. Every strike goes through `chaos.runner.fire`, so it
+is an ordinary `chaos_events` document signed `by: "red-<name>"`; the war room captions it as "Red Liar: …". Their
+reasoning shows in the thought feed (role `red`), and each attacker heartbeats into `world.red_agents`.
+
+No caps by default (Krish's call); `RED_FLEET_COOLDOWN_S` (30 s per attacker) keeps the war room readable and
+`RED_FLEET_MAX_ATTACKS`, `RED_FLEET_FIRST_STRIKE_S`, `RED_FLEET_SKIP_SCENARIOS`, `RED_FLEET_FAULTS`, `RED_FLEET_AGENTS`
+and `RED_FLEET_LLM=0` tune it. Guardrails that stay (no permanent damage): it refuses the live `world`/`swarm` DBs
+unless `RED_FLEET_ALLOW_LIVE=1`, holds while the Gardener is mid-upgrade, and never kills the Gardener or the last
+live queen. Reset ▸ Full restores everything. Off by default: with `RED_FLEET` unset nothing changes; keep it off for
+`scripts.demo_check` (it times the seeded beats).
+
 ## Rehearse: `scripts/demo_check.py`
 
 With the stack running:

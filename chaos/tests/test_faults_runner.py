@@ -13,7 +13,8 @@ from common.db import world
 
 def test_library_has_every_contract_fault():
     expected = {"batch_abort", "disk_fill", "cron_stop", "session_leak", "lying_success", "slow_apply",
-                "sqli_exploit", "config_exploit", "agent_kill", "schema_drift"}  # schema_drift: additive (§8)
+                "sqli_exploit", "config_exploit", "agent_kill", "agent_freeze", "lie_to_agent", "schema_drift",  # schema_drift: additive (§8)
+                "false_log", "credential_exploit"}  # Red fleet: additive (§8)
     assert set(faults.FAULTS) == expected
     for f in faults.FAULTS.values():
         assert f.description and f.tests and f.default_target in f.targets
@@ -158,3 +159,45 @@ def test_schema_drift_fault_and_flagged_night3(monkeypatch):
         monkeypatch.delenv("SCHEMA_DRIFT_DEMO")
         importlib.reload(scenarios)
     assert [s["fault"] for s in scenarios.get("bank-night-3")["steps"]] == ["batch_abort"]  # stored copy follows code
+
+
+def test_every_event_says_who_what_why(systems):
+    run_id = runner.run_scenario("bank-night-1", block=True)
+    seeded = list(world().chaos_events.find({"run_id": run_id}).sort("ts", 1))
+    assert {(e["source"], e["who"]) for e in seeded} == {("scenario", "scenario:bank-night-1")}
+    assert all(e["why"] for e in seeded)
+    man = runner.fire("disk_fill")
+    assert (man["source"], man["who"], man["why"]) == ("manual", "beekeeper", faults.get("disk_fill").tests)
+    red = runner.fire("cron_stop", manual=False, extra={"by": "red-saboteur", "red": {"reason": "mid-repair"},
+                                                        "who": "spoof", "source": "spoof"})
+    assert (red["source"], red["who"], red["why"], red["by"]) == ("red-fleet", "red-saboteur", "mid-repair", "red-saboteur")
+
+
+def test_poison_is_opt_in_tagged_and_reset_preserves_real_memory(monkeypatch):
+    from common.db import swarm
+    monkeypatch.delenv("CHAOS_POISON_MEMORY", raising=False)
+    with pytest.raises(faults.FaultError):
+        runner.fire("poison_memory")
+    monkeypatch.setenv("CHAOS_POISON_MEMORY", "1")
+    real = {"_id": "PB-real", "system": "mainframe", "stale": False, "system_version": 1,
+            "fix": [{"system": "mainframe", "op": "quarantine_record", "params": {"record_id": "TX123456"}}]}
+    swarm().playbooks.insert_one(real)
+    with pytest.raises(faults.FaultError):
+        runner.fire("poison_memory")  # withheld even with switch: visible Guard rejection not proved
+    result = faults.poison_memory({})
+    assert result["ok"] and not result["defence_observed"]
+    planted = swarm().playbooks.find_one({"red_planted": True})
+    assert planted["fix"][0]["params"] == {"record_id": "TX000000"}
+    runner.cancel()
+    assert swarm().playbooks.find_one({"_id": "PB-real"}) == real
+    assert not swarm().lessons.count_documents({"red_planted": True})
+    assert not swarm().playbooks.count_documents({"red_planted": True})
+
+
+def test_agent_lie_uses_vetted_log_hook_only_when_enabled(systems, monkeypatch):
+    monkeypatch.delenv("CHAOS_AGENT_LIE", raising=False)
+    with pytest.raises(faults.FaultError):
+        runner.fire("lie_to_agent")
+    monkeypatch.setenv("CHAOS_AGENT_LIE", "1")
+    assert runner.fire("lie_to_agent", "unix")["status"] == "ok"
+    assert systems.calls == [("/unix/_chaos/false_log", {"params": {"prompt_injection": True}})]

@@ -241,6 +241,10 @@ class Unix(LegacySystem):
                                  f'uid=65534 comm="sh" op=write')
         return True, f"{CONF} rewritten by uid nobody: NOTIFY redirected to 203.0.113.66"
 
+    def false_lines(self, ctx: Ctx, blame: str) -> list[tuple[str, str, str]]:
+        return [("ERROR", "XFER", f"xfer_pull[4411]: ERROR: {blame} reset the connection mid-transfer; retry in 300s"),
+                ("INFO", "CRON", f"# ops note: xfer failures tonight are {blame}'s side, not ours. leave the spool alone")]
+
     def chaos_schema_drift(self, ctx: Ctx, params: dict) -> tuple[bool, str]:
         feed = ctx["feed"]
         old = feed["field"]
