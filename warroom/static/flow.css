@@ -71,7 +71,6 @@ button { font: inherit; }
 .node .who { margin-top: auto; display: flex; align-items: center; gap: 8px; font-size: 17px; font-weight: 700; color: var(--c, var(--ink2)); }
 .node .who svg { width: 26px; height: 26px; flex: none; }
 .node .act { font-size: 16px; color: var(--ink2); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.6em; }
-.node .clamp3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .node .k .ic { width: 24px; height: 24px; flex: none; }
 .node.idle { border-style: dashed; }
 .node.active { opacity: 1; border-color: var(--amber); background: #1d1708; box-shadow: 0 0 0 0 rgba(255,182,39,.5); animation: nodepulse 1.6s infinite; }
@@ -84,7 +83,7 @@ button { font: inherit; }
 .node.appear { animation: popin .5s cubic-bezier(.2,1.5,.4,1); }
 @keyframes popin { from { transform: scale(.85); opacity: 0; } }
 
-.flag { position: absolute; top: -26px; right: 16px; font-family: "Chakra Petch", Inter, sans-serif; font-weight: 700; font-size: 22px; padding: 4px 14px; border-radius: 10px; color: #fff; background: var(--red); border: 3px solid #ff9a9d; transform: rotate(3deg); box-shadow: 0 6px 20px rgba(255,90,95,.5); animation: stampin .4s cubic-bezier(.2,1.6,.4,1); white-space: nowrap; }
+.flag { position: absolute; top: -34px; right: 16px; font-family: "Chakra Petch", Inter, sans-serif; font-weight: 700; font-size: 22px; padding: 4px 14px; border-radius: 10px; color: #fff; background: var(--red); border: 3px solid #ff9a9d; transform: rotate(3deg); box-shadow: 0 6px 20px rgba(255,90,95,.5); animation: stampin .4s cubic-bezier(.2,1.6,.4,1); white-space: nowrap; }
 .flag.green { background: #0f7a52; border-color: var(--green); box-shadow: 0 6px 20px rgba(52,227,154,.4); }
 .flag.gold { background: #8a6a12; border-color: var(--honey); color: #fff; }
 .flag.still, .lied.still { animation: none; }
@@ -93,7 +92,7 @@ button { font: inherit; }
 /* the cascade node: three systems in a row */
 .syss { display: flex; align-items: stretch; gap: 0; margin-top: 4px; }
 .sys { position: relative; flex: 1; border-radius: 14px; border: 3px solid #2a3752; background: #0b1120; padding: 10px 10px 16px; min-width: 0; }
-.sys .sn { font-size: 17px; letter-spacing: -.01em; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sys .sn { font-size: 17px; letter-spacing: -.01em; font-weight: 800; overflow-wrap: anywhere; }
 .sys .ss { font-family: "Chakra Petch", Inter, sans-serif; font-weight: 700; font-size: 18px; margin-top: 2px; white-space: nowrap; }
 .sys .sc { font-size: 16px; color: var(--ink2); line-height: 1.25; margin-top: 4px; min-height: 2.5em; }
 .sys.ok { border-color: #1f5b44; } .sys.ok .ss { color: var(--green); }
@@ -108,7 +107,7 @@ button { font: inherit; }
 .sarrow.on { color: var(--blue); }
 
 .ticks { display: flex; flex-direction: column; gap: 6px; }
-.tick { display: grid; grid-template-columns: 26px 1fr; gap: 6px; font-size: 18px; line-height: 1.2; align-items: baseline; }
+.tick { display: grid; grid-template-columns: 24px 1fr; gap: 6px; font-size: 17px; line-height: 1.2; align-items: baseline; }
 .tick .m { font-weight: 800; text-align: center; }
 .tick .m.ok { color: var(--green); } .tick .m.no { color: var(--red); } .tick .m.wait { color: var(--dim); }
 .tick .sub { color: var(--ink2); font-size: 15px; display: block; }
@@ -122,7 +121,7 @@ button { font: inherit; }
 /* ------------------------------------------------------------------ NOW caption */
 .now { display: flex; align-items: center; gap: 1rem; margin: 0 1.2rem 1rem; padding: .8rem 1.2rem; border-radius: 14px; background: linear-gradient(90deg, #17213a, #0f1625); border-left: 6px solid var(--honey); }
 .now-k { font-weight: 800; color: var(--honey); letter-spacing: .12em; font-size: .95rem; }
-.now-t { font-size: 1.75rem; font-weight: 700; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.now-t { font-size: 1.75rem; font-weight: 700; line-height: 1.2; }
 .now-t b { color: var(--red); } .now-t .g { color: var(--green); } .now-t .a { color: var(--amber); }
 
 /* ------------------------------------------------------------------ approval, toast, details */

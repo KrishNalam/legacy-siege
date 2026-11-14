@@ -308,6 +308,11 @@ const driftMappings = new Map();
 const SHORT_OPS = { quarantine_record: "Set aside the bad record", restart_batch: "Restart the batch", rerun_transfer: "Re-send the files",
   refresh_cache: "Refresh balances", map_field: "Use the new field name" };
 const sop = (o) => SHORT_OPS[o] || Op(o);
+const firstSentence = (t) => String(t).split(/(?<=[.;!?])\s/)[0];
+const trimWords = (t, n) => (t.length <= n ? t : `${t.slice(0, n).replace(/\s+\S*$/, "")}…`);
+// the second opinion's named guardrails (W2) in plain words
+const RULE_WORDS = { P1: "not an allowed step", P2: "wrong order", P3: "too risky", P4: "not needed", P5: "wrong system", P6: "needs a human OK" };
+const ruleWords = (v) => RULE_WORDS[String(v.rule || "").slice(0, 2)] || trimWords(firstSentence(v.reason || "not safe"), 60);
 
 // Build the whole diagram model from MongoDB state. Every node: {id, state: idle|active|done|bad|dead|ghost, c, k, num, html}
 function model() {
@@ -320,7 +325,8 @@ function model() {
   const SHORT = { lying_success: (e) => `Rigged the ${sn(e.target)} to lie`, batch_abort: (e) => `Corrupted a record in the ${sn(e.target)}’s batch`,
     schema_drift: (e) => `Renamed a data field on ${sn(e.target)}` };
   const sysAttacks = [...state.chaos.values()].filter((e) => e.run_id === rid && e.fault !== "agent_kill").sort((a, b) => ts(a.ts) - ts(b.ts))
-    .map((e) => ({ text: esc(SHORT[e.fault] ? SHORT[e.fault](e) : (ATTACK[e.fault] ? ATTACK[e.fault](e) : `${e.fault} on ${sn(e.target)}`)) }));
+    .map((e) => ({ text: esc(SHORT[e.fault] ? SHORT[e.fault](e) : (ATTACK[e.fault] ? ATTACK[e.fault](e) : `${e.fault} on ${sn(e.target)}`)) }))
+    .filter((l, i, arr) => arr.findIndex((x) => x.text === l.text) === i);
   node("attack", { num: 1, k: "Attack", c: C.red, state: attacks.length ? "done" : "idle",
     html: attacks.length ? `<div class="ticks">${(sysAttacks.length ? sysAttacks.slice(-3) : attacks.slice(-1)).map((l) => `<div class="tick"><span class="m no">!</span><span>${l.text}</span></div>`).join("")}</div>`
       : `<div class="b dim">Press Start: we attack the bank.</div>`,
@@ -367,16 +373,16 @@ function model() {
   const ai = inc?.ai, steps = inc?.steps || [];
   if (ai) {
     const status = !ai.status ? "done" : ai.status;
-    const ops = (ai.proposed_ops || []).map((o) => esc(op(o.op))).slice(0, 3).join(" · ");
+    const ops = (ai.proposed_ops || []).map((o) => esc(sop(o.op))).slice(0, 3).join(" · ");
     node("ai", { num: 4, k: ai.kind === "schema_mapping" ? "AI suggests a mapping" : "AI suggests", c: C.violet,
       state: status === "thinking" ? "active" : status === "done" ? "done" : "ghost",
       html: status === "thinking" ? `<div class="h">Thinking…</div><div class="b dim">Claude reads the evidence the bees gathered.</div>`
-        : status === "done" ? `<div class="b clamp3">“${esc(ai.hypothesis || "")}”</div>${ops ? `<div class="b dim" style="font-size:17px">Try: ${ops}</div>` : ""}`
+        : status === "done" ? `<div class="b" style="font-size:18px">“${esc(trimWords(firstSentence(ai.hypothesis || ""), 95))}”</div>${ops ? `<div class="b dim" style="font-size:16px">Try: ${ops}</div>` : ""}`
         : `<div class="h">No answer</div><div class="b dim">The checker decides anyway.</div>`,
       who: `${AI}<span>Claude (AI second opinion)</span>` });
   } else {
     node("ai", { num: 4, k: "Plan the fix", c: C.violet, state: steps.length ? "done" : "idle",
-      html: steps.length ? `<div class="h">${steps.length} steps</div><div class="b clamp3">${steps.map((s) => esc(sop(s.op))).join(" → ")}</div>`
+      html: steps.length ? `<div class="h">${steps.length} steps</div><div class="b" style="font-size:18px">${steps.slice(0, 5).map((s) => esc(sop(s.op))).join(" → ")}</div>`
         : `<div class="b dim">The Scout plans the steps. Claude’s second opinion shows here when it is on.</div>`,
       who: `${BEE(C.blue)}<span>Scout bee</span>` });
   }
@@ -396,7 +402,7 @@ function model() {
   node("check", { num: 5, k: "Checker verifies", c: C.green,
     state: !steps.length ? "idle" : allOk ? "done" : lieNow && live ? "bad" : "active",
     flag: lieNow ? '<div class="flag">CAUGHT A LIE</div>' : blocked.length ? `<div class="flag">BLOCKED ${blocked.length} AI STEP${blocked.length === 1 ? "" : "S"}</div>` : "",
-    html: steps.length ? `<div class="ticks">${steps.slice(0, 4).map(tick).join("")}</div>${blocked.length ? `<div class="b" style="font-size:16px;color:var(--red)">Blocked: ${esc(op(blocked[0].op))}. ${esc(blocked[0].reason || "")}</div>` : ""}`
+    html: steps.length ? `<div class="ticks">${steps.slice(0, 4).map(tick).join("")}</div>${blocked.length ? `<div class="b" style="font-size:16px;color:var(--red)">Blocked the AI’s “${esc(sop(blocked[0].op).toLowerCase())}”: ${esc(ruleWords(blocked[0]))}</div>` : ""}`
       : `<div class="b dim">Reads every system back. A “done” only counts if it’s true.</div>`,
     who: `${BEE(C.green)}<span>Guard bee · the checker</span>` });
   // 6 · fixed
@@ -408,7 +414,7 @@ function model() {
   // 7 · remembered in MongoDB
   const saved = inc?.status === "resolved";
   node("memory", { num: 7, k: "Memory", c: C.honey, state: saved ? "done" : "idle",
-    html: `<div class="h" style="font-size:24px">${saved ? "Saved in MongoDB" : "Remember"}</div><div class="b dim" style="font-size:17px">${saved ? "The fix becomes a lesson every bee can recall." : "Each fix is saved for next time."}</div>`,
+    html: `<div class="h" style="font-size:24px">${saved ? "Saved in MongoDB" : "Remember"}</div><div class="b dim" style="font-size:17px">${saved ? "Any bee can recall it." : "Each fix is saved."}</div>`,
     who: `${DB}<span>MongoDB</span>` });
   // 8 · next night: recalled, faster
   const r = rounds(), liveR2 = [...state.incidents.values()].find((i) => i.active && i.round === 2);
@@ -420,9 +426,9 @@ function model() {
   // permanent fix (Gardener), only once it starts
   const u = latestUpgrade();
   if (u && u.status !== "rejected") {
-    const H = { requested: "Writing a code fix", planning: "Writing a code fix", testing: "Testing the fix", awaiting_approval: "Waiting for your OK", deploying: "Installing it", deployed: "Installed · proving it", proven: "Fixed for good" };
+    const H = { requested: "Writing a code fix", planning: "Writing a code fix", testing: "Testing the fix", awaiting_approval: "Waiting for your OK", deploying: "Installing it", deployed: "Proving it", proven: "Fixed for good" };
     node("upgrade", { k: "Permanent fix", c: C.green, state: u.status === "proven" ? "done" : "active",
-      html: `<div class="h" style="font-size:24px">${H[u.status] || "Code fix"}</div><div class="b dim" style="font-size:17px">${u.status === "proven" ? `${esc(sn(u.system))} v${u.version_before ?? 1} → v${u.version_after ?? 2}: the attack came back, nothing broke.` : "Same failure twice → the Gardener rewrites the old code."}</div>`,
+      html: `<div class="h" style="font-size:24px">${H[u.status] || "Code fix"}</div><div class="b dim" style="font-size:17px">${u.status === "proven" ? `${esc(sn(u.system))} v${u.version_before ?? 1} → v${u.version_after ?? 2}: the attack came back, nothing broke.` : "Same failure twice → new code."}</div>`,
       who: `${BEE("#a6f0a0")}<span>Gardener bee</span>` });
   }
   // kill branch: a killed bee, and who took over
@@ -450,7 +456,7 @@ function model() {
   const driftFired = [...state.chaos.values()].some((e) => e.fault === "schema_drift" && e.run_id === rid) || driftInc;
   if (driftFired) {
     const mapStep = (driftInc?.steps || []).find((s) => s.op === "map_field");
-    const learned = [...state.thoughts].reverse().find((t) => /mapping learned/.test(t.text || "") && ts(t.ts) >= since);
+    const learned = [...state.thoughts].reverse().find((t) => /mapping learned/.test(t.text || "") && (t.incident === driftInc?._id || ts(t.ts) >= since));
     const mm = (learned?.text || driftInc?.root_cause || "").match(/(\w+) → (\w+)/) || [];
     const from = mm[1] || [...driftMappings.values()].pop()?.previous, to = mm[2] || mapStep?.params?.source || [...driftMappings.values()].pop()?.source;
     node("d1", { k: "Field renamed", c: C.violet, state: "done", html: `<div class="b">A vendor patch renamed a data field on Unix. It still says it’s fine.</div>` });
@@ -529,7 +535,7 @@ function renderFlow() {
     const flagKey = `${n.id}|${n.flag || ""}`;
     const flag = n.flag && flagsShown.has(flagKey) ? n.flag.replace('class="flag', 'class="flag still') : (n.flag || "");
     const body = `<div class="k">${n.num ? `<span class="num">${n.num}</span>` : ""}${ICONS[n.id] || ""}<span>${esc(n.k)}</span></div>
-      ${n.html}${n.act != null ? `<div class="act">${n.act}</div>` : ""}${n.who ? `<div class="who">${n.who}</div>` : ""}`;
+      ${n.html}${n.act != null ? `<div class="act">${n.act}</div>` : ""}${n.who && !["idle", "ghost"].includes(n.state) ? `<div class="who">${n.who}</div>` : ""}`;
     const key = `${n.flag || ""}${body}`;
     if (el.dataset.key !== key) {
       const lieOld = new Set([...el.querySelectorAll(".lied")].map((x) => x.parentElement?.querySelector(".sn")?.textContent));
