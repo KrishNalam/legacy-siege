@@ -20,7 +20,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import snapshot
+from . import autoplay, snapshot
 from .api import router
 from .stream import Hub
 
@@ -33,9 +33,12 @@ async def lifespan(app: FastAPI):
     hub = Hub()
     hub.start()
     app.state.hub = hub
+    app.state.autoplay = autoplay.start_if_enabled()  # DEMO_AUTOPLAY=1 only
     try:
         yield
     finally:
+        if app.state.autoplay:
+            app.state.autoplay.stop.set()
         await hub.stop()
 
 

@@ -23,6 +23,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # also runnable as a plain script
 from common import config  # noqa: E402
+from common.config import env_float  # noqa: E402
 from common.db import swarm, world  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -69,10 +70,11 @@ def md5(p: Path) -> str:
 
 # ---------------------------------------------------------------------------------------------- driver
 class Demo:
-    def __init__(self, base: str, approve_delay: float, report: Report):
+    def __init__(self, base: str, approve_delay: float, report: Report, autoplay: bool = False):
         self.http = httpx.Client(base_url=base, timeout=60)  # a full reset on Atlas can take ~10 s
         self.sys_http = httpx.Client(base_url=config.SYSTEMS_URL, timeout=10)
         self.approve_delay = approve_delay
+        self.autoplay = autoplay  # DEMO_AUTOPLAY stack: click only Night 1, its approval and the kill
         self.r = report
         self.s, self.w = swarm(), world()
 
@@ -144,11 +146,23 @@ class Demo:
                           f"{'patched' if st.get('validation_enabled') else 'original'}", secs)
 
     # ------------------------------------------------------------------------------------------ a night
+    def start(self, scenario: str) -> dict:
+        """POST the scenario, or with autoplay wait for the war room to start it by itself."""
+        if not self.autoplay or scenario == "bank-night-1":
+            log(f"POST /api/scenario/{scenario}")
+            return self.post(f"/api/scenario/{scenario}")
+        cur, secs = self.wait("autoplay start", lambda: self.s.stats.find_one(
+            {"_id": "current", "scenario": scenario}), 180)
+        if not cur:
+            raise RuntimeError(f"autoplay never started {scenario}")
+        log(f"autoplay started {scenario} as {cur['run_id']} (waited {secs:.1f}s)")
+        return cur
+
     def play_night(self, scenario: str, kill: bool, timeout: float) -> dict:
         """Start a scenario and service it until its incident closes. Returns observations."""
-        log(f"POST /api/scenario/{scenario}")
-        out = self.post(f"/api/scenario/{scenario}")
+        out = self.start(scenario)
         run_id, t0 = out["run_id"], time.monotonic()
+        manual = not self.autoplay or scenario == "bank-night-1"  # autoplay approves the later ones itself
         obs = {"run_id": run_id, "round": out.get("round"), "cascade_at": None, "max_active": 0,
                "approvals": {}, "kill_fired_at": None, "kill_wall": None, "incident": None, "closed_after": None}
         approved: set[str] = set()
@@ -166,7 +180,7 @@ class Demo:
                 a = obs["approvals"].setdefault(apr["_id"], {"seen_at": time.monotonic(), "doc": apr})
                 led = self.s.ledger.find_one({"action_id": apr.get("action_id")})
                 a["ledger_before_approval"] = led is not None and led.get("status") != "planned"
-                if time.monotonic() - a["seen_at"] >= self.approve_delay and apr["_id"] not in approved:
+                if manual and time.monotonic() - a["seen_at"] >= self.approve_delay and apr["_id"] not in approved:
                     approved.add(apr["_id"])
                     self.approve(apr["_id"])
                     step = apr.get("step_id", "")
@@ -180,6 +194,8 @@ class Demo:
                 obs["incident"] = inc["_id"]
                 if inc["status"] in ("resolved", "failed") and not inc.get("active"):
                     obs["closed_after"] = time.monotonic() - t0
+                    # autoplay may start the next night while this one's checks run: freeze the estate now
+                    obs["systems_at_close"] = {d["_id"]: d["status"] for d in self.w.systems.find()}
                     log(f"{inc['_id']} {inc['status']} after {obs['closed_after']:.1f}s")
                     break
             time.sleep(0.5)
@@ -330,7 +346,8 @@ class Demo:
 
     def check_resolved(self, inc: dict, obs: dict, tag: str) -> None:
         inc = self.s.incidents.find_one({"_id": inc["_id"]})
-        systems = {d["_id"]: d["status"] for d in self.w.systems.find()}
+        systems = obs.get("systems_at_close") if self.autoplay and obs.get("systems_at_close") else \
+            {d["_id"]: d["status"] for d in self.w.systems.find()}
         m = inc.get("metrics") or {}
         self.r.add(f"{tag} incident resolved, estate green",
                    inc["status"] == "resolved" and all(v == "up" for v in systems.values()),
@@ -346,9 +363,10 @@ class Demo:
 
     def night2(self, n1: dict, timeout: float) -> dict | None:
         log("=== NIGHT 2: same fault, the hive remembers ($vectorSearch) ===")
-        out = self.post("/api/reset", {"mode": "next_round"})
-        log(f"POST /api/reset {{mode: next_round}} → closed {out.get('closed_incidents')} incidents")
-        self.wait("estate green", lambda: all(d["status"] == "up" for d in self.w.systems.find()), 20)
+        if not self.autoplay:  # autoplay does the next_round reset itself
+            out = self.post("/api/reset", {"mode": "next_round"})
+            log(f"POST /api/reset {{mode: next_round}} → closed {out.get('closed_incidents')} incidents")
+            self.wait("estate green", lambda: all(d["status"] == "up" for d in self.w.systems.find()), 20)
         obs = self.play_night("bank-night-2", kill=False, timeout=timeout)
         incs = list(self.s.incidents.find({"run_id": obs["run_id"]}))
         if len(incs) != 1:
@@ -394,6 +412,11 @@ class Demo:
                 break
             if doc["status"] == "deployed" and (doc.get("prove") or {}).get("incident_opened"):
                 break
+            if self.autoplay:  # the war room auto-approves; just record that it did
+                approved = approved or self.s.approvals.find_one(
+                    {"kind": "upgrade", "upgrade": upg["_id"], "status": "approved", "decided_by": "autoplay"})
+                time.sleep(0.5)
+                continue
             apr = self.s.approvals.find_one({"kind": "upgrade", "upgrade": upg["_id"], "status": "pending"})
             if apr and not approved:
                 time.sleep(self.approve_delay)
@@ -432,7 +455,7 @@ class Demo:
 
     def night3(self, watch_s: float) -> None:
         log("=== NIGHT 3: the same attack after the upgrade ===")
-        out = self.post("/api/scenario/bank-night-3")
+        out = self.start("bank-night-3")
         run_id, t0 = out["run_id"], time.monotonic()
         max_active, worst = 0, {}
         while time.monotonic() - t0 < watch_s:
@@ -470,11 +493,15 @@ def main() -> int:
     ap.add_argument("--keep", action="store_true", help="don't full-reset (Gardener revert) at the end")
     ap.add_argument("--approve-delay", type=float, default=1.5, help="seconds a pending approval stays on screen")
     ap.add_argument("--night-timeout", type=float, default=240)
-    ap.add_argument("--night3-watch", type=float, default=25)
+    ap.add_argument("--night3-watch", type=float, default=env_float("NIGHT3_WATCH_S", 25),
+                    help="seconds to watch night 3 for incidents (env NIGHT3_WATCH_S)")
+    ap.add_argument("--autoplay", action="store_true", default=config.DEMO_AUTOPLAY,
+                    help="the stack runs with DEMO_AUTOPLAY=1: don't click Night 2/3, next round or later approvals")
     a = ap.parse_args()
     rep = Report()
-    d = Demo(a.base, a.approve_delay, rep)
-    log(f"demo_check against {a.base} (systems {config.SYSTEMS_URL}, db {config.WORLD_DB}/{config.SWARM_DB})")
+    d = Demo(a.base, a.approve_delay, rep, autoplay=a.autoplay)
+    log(f"demo_check against {a.base} (systems {config.SYSTEMS_URL}, db {config.WORLD_DB}/{config.SWARM_DB})"
+        + (" [autoplay]" if a.autoplay else ""))
     try:
         if d.preflight(reset=not a.no_reset):
             n1 = d.night1(a.night_timeout)
