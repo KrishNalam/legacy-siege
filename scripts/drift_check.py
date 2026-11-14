@@ -4,7 +4,7 @@
     .venv/bin/python -m scripts.drift_check --once --keep       # one drift, leave it on screen
     .venv/bin/python -m scripts.drift_check --base http://127.0.0.1:8740
 
-Separate from scripts.demo_check on purpose: the four scored beats are untouched. Beats checked:
+Also reused by scripts.demo_check --drift; the default demo stays unchanged. Beats checked:
   a. bank-drift renames unix's manifest field balance -> acct_bal; unix stays UP, the portal degrades blaming unix
   b. one incident; the walk portal -> unix finds schema_drift on unix (MongoDB $jsonSchema + field diff)
   c. map_field + refresh_cache verified by guard-1 with read-back evidence (values line up)

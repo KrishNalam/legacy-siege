@@ -2,6 +2,7 @@
 
     .venv/bin/python -m scripts.demo_check                 # full reset, nights 1-3, Gardener, reset again
     .venv/bin/python -m scripts.demo_check --no-reset      # start from the current state
+    .venv/bin/python -m scripts.demo_check --drift         # also check schema adaptation and repeat memory
     .venv/bin/python -m scripts.demo_check --keep          # leave the upgraded estate (no final reset)
     .venv/bin/python -m scripts.demo_check --base http://127.0.0.1:8700 --approve-delay 2
 
