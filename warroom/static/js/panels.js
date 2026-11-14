@@ -42,6 +42,9 @@ export class Panels {
   bindTopbar() {
     document.querySelectorAll("[data-scn]").forEach((b) => b.addEventListener("click", () => this.act(b, () => api("POST", `/api/scenario/${b.dataset.scn}`))));
     $("#btn-kill").addEventListener("click", (e) => this.act(e.currentTarget, () => api("POST", "/api/kill", { selector: { role: "worker", phase: "step_sent" } })));
+    // the queen wearing the crown right now (queen-1 at boot; queen-2 after a failover), so a second press is a real test too
+    const crowned = () => [...state.agents.values()].find((a) => a.role === "queen" && !["dead", "standby"].includes(a.status))?._id || "queen-1";
+    $("#btn-kill-queen").addEventListener("click", (e) => this.act(e.currentTarget, () => api("POST", "/api/kill", { selector: { agent: crowned() } })));
     const faults = {
       batch_abort: ["mainframe"], lying_success: ["mainframe", "unix", "portal"], slow_apply: ["mainframe", "unix", "portal"],
       disk_fill: ["unix"], cron_stop: ["unix"], session_leak: ["portal"], sqli_exploit: ["portal"], config_exploit: ["unix"],
