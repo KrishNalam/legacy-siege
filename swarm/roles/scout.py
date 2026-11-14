@@ -194,7 +194,9 @@ def build_graph(agent: Agent):
         inc = inc_doc(inc_id)
         path = list(state.get("path") or [])
         n = len(path) + 1
-        task_id = f"{inc_id}-d{n}"
+        # The recall confirm read gets its own id: if the remembered fault doesn't fit, the chain walk starts
+        # again at hop 1 and must not pick up the confirm task's findings (another system's) as its own.
+        task_id = f"{inc_id}-{'c' if mode == 'confirm' else 'd'}{n}"
         new_task(inc, task_id, "diagnose", policy.SPECIALTY[sys], system=sys, mode=mode)
         agent.set(target=sys, phase="diagnosing")
         if mode == "confirm":  # recall path: one quick confirmatory read, no deliberation pause
