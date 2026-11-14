@@ -443,3 +443,7 @@ main > .l { z-index: 5; }
 .big .bt, .big .bh .dim { white-space: nowrap; }
 /* ledger 61: the Chaos subtitle sits under its title instead of colliding with it */
 .big.chaos .bh { flex-direction: column; align-items: flex-start; gap: 2px; }
+
+/* Krish ledger 63: no line numbers on the header rows */
+.l.nonum::before { content: none; }
+.l.nonum { counter-increment: none; }

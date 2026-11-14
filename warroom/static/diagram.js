@@ -709,9 +709,9 @@ function rosterRowsHtml(n = 5) {
 // CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES (the swarm), THE GARDENER below Legacy pointing up into it: a separate
 // system OUTSIDE the swarm; help/repeats, pause and tools/known fixes are arrows across the swarm boundary.
 const BOXR = {
-  // Chaos | (Legacy over Gardener) | Bees; Legacy + gap + Gardener = the Bees' height. The MongoDB spine runs below.
-  chaos: { x: 40, y: 104, w: 340, h: 600 }, legacy: { x: 500, y: 104, w: 560, h: 360 },
-  bees: { x: 1220, y: 104, w: 340, h: 600 }, gardener: { x: 500, y: 514, w: 560, h: 190 },
+  // Chaos | (Legacy over Gardener) | Bees; Legacy + Gardener sized to their content (Krish ledger 63). The MongoDB spine runs below.
+  chaos: { x: 40, y: 104, w: 340, h: 600 }, legacy: { x: 500, y: 104, w: 560, h: 220 },
+  bees: { x: 1220, y: 104, w: 340, h: 600 }, gardener: { x: 500, y: 374, w: 560, h: 96 },
 };
 const FULL = { x: 0, y: 84, w: 1600, h: 760 };
 const ZOOMS = ["overview", "chaos", "legacy", "bees", "gardener"];
@@ -891,13 +891,13 @@ function renderOverview() {
   const WIRES = {
     atk: { d: `M${cx + 6} 250 L${lx1 - 12} 250`, cls: `red ${atkNow ? "on" : ""}`, label: "ATTACKS", lx: (cx + lx1) / 2, ly: 242 },
     fix: { d: `M${bx - 6} 250 L${lx2 + 12} 250`, cls: `${fixNow ? "grn on" : live ? "on" : ""}`, label: "WATCH + FIX", lx: (bx + lx2) / 2, ly: 242 },
-    lie: { d: `M${bx - 6} 330 L${lx2 + 12} 330`, cls: `${rejects.length ? "red" : ""} ${lieFresh ? "on" : ""}`, label: rejects.length ? "LIE CAUGHT" : "CHECKS", lx: (bx + lx2) / 2, ly: 322 },
+    lie: { d: `M${bx - 6} 300 L${lx2 + 12} 300`, cls: `${rejects.length ? "red" : ""} ${lieFresh ? "on" : ""}`, label: rejects.length ? "LIE CAUGHT" : "CHECKS", lx: (bx + lx2) / 2, ly: 292 },
     kill: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y - 6} L${B.chaos.x + B.chaos.w / 2} 92 L${B.bees.x + B.bees.w / 2} 92 L${B.bees.x + B.bees.w / 2} ${B.bees.y - 12}`, cls: `red ${killFresh ? "on" : ""}`, label: "KILLS A BEE", lx: 800, ly: 88 },
     code: { d: `M${B.legacy.x + B.legacy.w / 2} ${gy - 6} L${B.legacy.x + B.legacy.w / 2} ${B.legacy.y + B.legacy.h + 12}`, cls: `${deployed ? "amb" : ""} ${u?.status === "deployed" ? "on" : ""}`, label: deployed ? `NEW CODE V${u.version_after ?? 2}` : "NEW CODE", lx: B.legacy.x + B.legacy.w / 2 + 10, ly: (gy + B.legacy.y + B.legacy.h) / 2 + 4, anchor: "start" },
-    req: { d: `M${bx - 6} ${gy + 42} L${gx2 + 12} ${gy + 42}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: ["ASKS FOR HELP", "· REPEATS"], lx: (gx2 + bx) / 2, ly: gy + 20 },
-    tools: { d: `M${gx2 + 6} ${gy + 100} L${bx - 12} ${gy + 100}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: ["TOOLS + FIXES", "→ SCOUTS"], lx: (gx2 + bx) / 2, ly: gy + 78 },
-    pause: { d: `M${gx2 + 6} ${gy + 158} L${bx - 12} ${gy + 158}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: ["PAUSE WHILE", "UPGRADING"], lx: (gx2 + bx) / 2, ly: gy + 136 },
-    prove: { d: `M${cx + 6} ${gy + 100} L${B.gardener.x - 12} ${gy + 100}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? ["REPLAYED:", "NOTHING BROKE"] : ["PROOF:", "REPLAY"], lx: (cx + B.gardener.x) / 2, ly: gy + 78 },
+    req: { d: `M${bx - 6} ${gy + 22} L${gx2 + 12} ${gy + 22}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "ASKS FOR HELP · REPEATS", lx: (gx2 + bx) / 2, ly: gy + 15 },
+    tools: { d: `M${gx2 + 6} ${gy + 52} L${bx - 12} ${gy + 52}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: "TOOLS + FIXES → SCOUTS", lx: (gx2 + bx) / 2, ly: gy + 45 },
+    pause: { d: `M${gx2 + 6} ${gy + 82} L${bx - 12} ${gy + 82}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: "PAUSE WHILE UPGRADING", lx: (gx2 + bx) / 2, ly: gy + 75 },
+    prove: { d: `M${cx + 6} ${gy + 56} L${B.gardener.x - 12} ${gy + 56}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? ["REPLAYED:", "NOTHING BROKE"] : ["PROOF:", "REPLAY"], lx: (cx + B.gardener.x) / 2, ly: gy + 34 },
   };
   const mk = (cls) => (cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i");
   const W = [{ k: "defs", html: `<defs>${[["r", "var(--red)"], ["a", "var(--amber)"], ["g", "var(--green)"], ["i", "var(--faint)"]].map(([n, c]) => `<marker id="ah-${n}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("")}</defs>` }];
@@ -1118,11 +1118,12 @@ function renderDiagram() {
   const rid = runId();
   $("#ex-title").textContent = TITLE[zoom];
   $("#z-back").hidden = zoom === "overview";
+  $("#row2").style.visibility = zoom === "overview" ? "hidden" : ""; // Krish ledger 63: no empty row 2
   const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener"); // swarm only
   $("#ex-a-l").textContent = ""; // Krish ledger 62: no AGENTS ALIVE
   const t0 = runStartedAt();
   const el = rid && t0 ? Math.max(0, Math.floor((serverNow() - t0) / 1000)) : null;
-  $("#clock").textContent = rid ? `NIGHT ${state.current?.round ?? "?"} · T+${el != null ? `${String(Math.floor(el / 60)).padStart(2, "0")}:${String(el % 60).padStart(2, "0")}` : "—"}` : "NO NIGHT RUNNING";
+  $("#clock").textContent = rid ? `NIGHT ${state.current?.round ?? "?"} · T+${el != null ? `${String(Math.floor(el / 60)).padStart(2, "0")}:${String(el % 60).padStart(2, "0")}` : "—"}` : "";
   const tog = $("#vtog"); tog.hidden = zoom === "overview";
   for (const b of tog.querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === mode);
   if (zooming) return;

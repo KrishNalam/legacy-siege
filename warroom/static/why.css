@@ -17,7 +17,7 @@ em { font-style: normal; }
 .dim { color: var(--muted); }
 
 /* each section is one 1600 × 900 sheet, scaled to fit (why.html sets the transform) */
-.s { position: relative; overflow: hidden; scroll-snap-align: start; background: #000; height: 100vh; }
+.s { position: relative; overflow: hidden; scroll-snap-align: start; background: var(--paper); height: 100vh; }
 .f { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; background: var(--paper); counter-reset: ln; }
 .f > * { position: absolute; }
 
