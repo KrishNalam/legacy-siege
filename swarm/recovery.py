@@ -30,6 +30,7 @@ def enabled() -> bool:
 ROUNDS = int(_f("RECOVERY_ROUNDS", 2))          # fresh attempt budgets before escalating to the Beekeeper
 BACKOFF_S = _f("RECOVERY_BACKOFF_S", 3.0)       # base backoff, doubled each round: let late ops land / lies drain
 BACKOFF_MAX_S = _f("RECOVERY_BACKOFF_MAX_S", 20.0)
+HEALTH_GRACE_S = _f("RECOVERY_HEALTH_GRACE_S", 8.0)  # steps verified but a system still down this long: re-diagnose
 
 
 def backoff_s(rnd: int) -> float:

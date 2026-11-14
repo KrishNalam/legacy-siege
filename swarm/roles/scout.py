@@ -414,22 +414,9 @@ def build_graph(agent: Agent):
             kind="action", system=sys, pause=False)
         agent.nap(wait_s)
         agent.check("incidents", inc_id)
-        since = (inc.get("opened_at") or now()).isoformat()
-        f = recovery.rediagnose(sysc, sys, since=since)
-        replanned = recovery.replan_steps(inc.get("steps") or [], inc_id, f, now()) if f else None
-        if replanned:  # a second fault landed mid-repair: fix it first, then redo the unverified steps
-            new_steps, added = replanned
-            fenced(config, inc_id, {"$set": {"steps": new_steps, "recovery_rounds": rnd, "status": "fixing"},
-                                    "$push": {"recoveries": {
-                                        "round": rnd, "step_ids": [s["step_id"] for s in todo], "attempts_used": used,
-                                        "replan": {"system": f["system"], "fault_class": f["fault_class"],
-                                                   "facts": f.get("facts") or [],
-                                                   "added": [s["step_id"] for s in added]},
-                                        "reason": recovery.why_failed(todo), "ts": now()}}})
-            say(inc_id, f"Re-diagnosis found a new fault on {f['system']}: {f.get('root_cause') or f['fault_class']}. "
-                        f"Re-planning: {', '.join(policy.fmt_op(s) for s in added)} first, then the "
-                        f"{len(todo)} unverified step(s) again.", kind="action", system=f["system"], pause=False)
-            return {"outcome": "await"}
+        out = replan_after_new_fault(config, inc, [sys], todo)
+        if out:  # a second fault landed mid-repair: fix it first, then redo the unverified steps
+            return out
         try:
             h = sysc.health(sys)
             say(inc_id, f"Re-read {sys}: /health {h.get('status')}"
@@ -451,6 +438,35 @@ def build_graph(agent: Agent):
             "round": rnd, "step_ids": [s["step_id"] for s in todo], "attempts_used": used, "task": task_id,
             "reason": recovery.why_failed(todo), "ts": now()}}}, array_filters=filters)
         return {"outcome": "await"}
+
+    def replan_after_new_fault(config, inc: dict, systems: list[str], todo: list[dict] | None = None) -> dict | None:
+        """Re-diagnose `systems`; if one shows a fault the plan doesn't cover, put its remediation in front of the
+        unverified steps (one recovery round). None when nothing new is wrong."""
+        inc_id, rnd = inc["_id"], inc.get("recovery_rounds", 0) + 1
+        since = (inc.get("opened_at") or now()).isoformat()
+        for sys in systems:
+            f = recovery.rediagnose(sysc, sys, since=since)
+            replanned = recovery.replan_steps(inc.get("steps") or [], inc_id, f, now()) if f else None
+            if not replanned:
+                continue
+            new_steps, added = replanned
+            todo = todo or []
+            fenced(config, inc_id, {"$set": {"steps": new_steps, "recovery_rounds": rnd, "status": "fixing"},
+                                    "$push": {"recoveries": {
+                                        "round": rnd, "step_ids": [s["step_id"] for s in todo],
+                                        "attempts_used": sum(len(s.get("attempts") or []) for s in todo),
+                                        "replan": {"system": f["system"], "fault_class": f["fault_class"],
+                                                   "facts": f.get("facts") or [],
+                                                   "added": [s["step_id"] for s in added]},
+                                        "reason": recovery.why_failed(todo) if todo else f"{sys} still unhealthy",
+                                        "ts": now()}}})
+            say(inc_id, f"Recovery {rnd}/{recovery.ROUNDS}: re-diagnosis found a new fault on {f['system']}: "
+                        f"{f.get('root_cause') or f['fault_class']}. Re-planning: "
+                        f"{', '.join(policy.fmt_op(s) for s in added)} first"
+                        + (f", then the {len(todo)} unverified step(s) again." if todo else "."),
+                kind="action", system=f["system"], pause=False)
+            return {"outcome": "await"}
+        return None
 
     def approve(state: ScoutState, config) -> dict:
         inc_id = state["incident"]
@@ -500,12 +516,20 @@ def build_graph(agent: Agent):
         watch = sorted(set(inc.get("affected") or []) | {state["root"]}, key=policy.rank)
         verified = "Current plan" if inc.get("memory_replanned") else "Every step"
         say(inc_id, f"{verified} verified by the Guard. Waiting for {', '.join(watch)} to report healthy.")
-        deadline, health = time.monotonic() + settings.RESOLVE_TIMEOUT_S, {}
+        t0 = time.monotonic()
+        deadline, health, next_look = t0 + settings.RESOLVE_TIMEOUT_S, {}, t0 + recovery.HEALTH_GRACE_S
         while time.monotonic() < deadline:
             agent.check("incidents", inc_id)
             health = {s: sysc.health(s).get("status") for s in watch}
             if all(v == "up" for v in health.values()):
                 break
+            if recovery.enabled() and inc.get("recovery_rounds", 0) < recovery.ROUNDS and time.monotonic() >= next_look:
+                # SWARM_RECOVERY: every step verified, yet a system stays down: something new hit it (a re-struck
+                # fault, a second attack). Re-diagnose and fix that instead of waiting out the timeout.
+                next_look = time.monotonic() + recovery.HEALTH_GRACE_S
+                out = replan_after_new_fault(config, inc, [s for s, v in health.items() if v != "up"])
+                if out:
+                    return out
             agent.nap(settings.POLL_S)
         else:
             return escalate(config, inc_id, f"steps verified but health still {health}")
@@ -560,7 +584,8 @@ def build_graph(agent: Agent):
                             ["resolve", "await_group", "approve", END])
     g.add_conditional_edges("approve", lambda s: END if failed(s) else "dispatch", ["dispatch", END])
     g.add_edge("await_group", "dispatch")
-    g.add_edge("resolve", END)
+    g.add_conditional_edges("resolve", lambda s: "dispatch" if s.get("outcome") == "await" else END,
+                            ["dispatch", END])
     return g.compile(checkpointer=checkpointer())
 
 
