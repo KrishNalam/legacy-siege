@@ -169,7 +169,7 @@ def _play(run_id: str, scn: dict, stop: threading.Event, on_event=None) -> None:
             if stop.is_set():
                 break
             if decider.enabled():
-                decider.seeded_step(step, scn["_id"])
+                decider.seeded_step(step, scn["_id"], run_id)
             ev = fire(step["fault"], step["target"], step.get("params"), manual=False, run_id=run_id,
                       who=f"scenario:{scn['_id']}", why=step.get("why"))
             _runs().update_one({"_id": run_id}, {"$inc": {"steps_fired": 1}})

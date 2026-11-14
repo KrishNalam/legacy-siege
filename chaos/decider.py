@@ -225,10 +225,14 @@ def refused(decision: dict, fault: str, target: str | None, params: dict | None)
             "runner_decision": decision["_id"]}
 
 
-def seeded_step(step: dict, scenario: str) -> dict:
+def seeded_step(step: dict, scenario: str, run_id: str | None = None) -> dict:
     """Seeded scenario steps are the demo contract: always executed on schedule, but the decision is logged."""
+    st = state()
+    if run_id:   # the war room announces a new night after its first step fires: tag the run being played
+        run = world().runs.find_one({"_id": run_id}) or {}
+        st = {**st, "run_id": run_id, "round": run.get("round"), "scenario": run.get("scenario")}
     return record("execute", "seeded", f"scheduled step t={step.get('t')} of {scenario}: seeded drills are never held",
-                  {"fault": step["fault"], "target": step.get("target"), "by": f"scenario:{scenario}"})
+                  {"fault": step["fault"], "target": step.get("target"), "by": f"scenario:{scenario}"}, st)
 
 
 # ------------------------------------------------------------------ requests (Planner / Commander -> Runner)
