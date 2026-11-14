@@ -17,7 +17,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from common import config
+from common import comms, config
 from common.db import col, now
 from common.events import say
 
@@ -136,9 +136,9 @@ def run(agent: Agent) -> None:
             return
         if scale.enabled():
             repair_assignments()
-        for inc in col("incidents").find({"active": True, "status": "open", "assigned_to": None}):
-            if inc["_id"] in handled:
-                continue
+        for inc in unassigned_by_priority([i for i in col("incidents").find({"active": True, "status": "open",
+                                                                              "assigned_to": None})
+                                           if i["_id"] not in handled]):
             handled.add(inc["_id"])
             graph.invoke({"incident": inc["_id"]}, {"configurable": {"thread_id": f"{inc['_id']}:queen"}},
                          durability="exit")
@@ -157,5 +157,24 @@ def run(agent: Agent) -> None:
         if text != last_status["text"]:
             last_status["text"] = text
             say(agent.id, "beekeeper", "status", text)
+
+    def unassigned_by_priority(incs: list[dict]) -> list[dict]:
+        """SWARM_COMMS=1 and several waiting: highest priority first (customer-facing, then the prioritised
+        feed's top priority for each, then oldest). Otherwise the natural order, unchanged."""
+        if not comms.enabled() or len(incs) < 2:
+            return incs
+        since = min(i.get("opened_at") or now() for i in incs) - timedelta(seconds=60)
+        feed = list(col("messages").find({"comms_processed": True, "merged_into": {"$exists": False},
+                                          "ts": {"$gte": since}}, {"incident": 1, "system": 1, "priority": 1})
+                    .sort("priority", -1).limit(500))
+        best = comms.feed_priorities(feed, incs)
+        ranked = sorted(incs, key=lambda i: comms.incident_rank(i, best[i["_id"]]))
+        if [i["_id"] for i in ranked] != sorted(i["_id"] for i in incs):
+            first = ranked[0]
+            why = "customer-facing" if comms.customer_facing(first) else f"feed priority {best[first['_id']]}"
+            agent.think(f"{len(ranked)} incidents waiting — {first['_id']} first ({why}), then "
+                        f"{', '.join(i['_id'] for i in ranked[1:])}.", kind="action", incident=first["_id"],
+                        system=first.get("system"), pause=False)
+        return ranked
 
     main_loop(agent, tick, settings.POLL_S)
