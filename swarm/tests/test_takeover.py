@@ -80,6 +80,14 @@ def test_sigkill_scout_while_awaiting_approval_nurse_resumes_scout_graph(hive, f
                     "incident awaiting approval")
     scout = col("agents").find_one({"_id": inc0["owner"]})
     assert scout["role"] == "scout"
+    # The incident status is written before LangGraph persists the interrupt. Kill only
+    # once the durable checkpoint confirms the exact resume point asserted below.
+    from types import SimpleNamespace
+    from swarm.roles.scout import build_graph, scout_config
+    graph = build_graph(SimpleNamespace(systems=None))
+    config = scout_config(inc0["_id"], scout["_id"], inc0["generation"])
+    wait_for(lambda: any(t.interrupts for t in graph.get_state(config).tasks),
+             30, .1, "durable approval interrupt")
     os.kill(scout["pid"], signal.SIGKILL)
 
     inc = run_until_resolved(2, timeout=120)

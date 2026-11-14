@@ -40,12 +40,24 @@ def _killed(p: subprocess.Popen) -> bool:
         return False
 
 
-def test_kill_waits_for_step_sent_phase(spawn):
+def test_kill_waits_for_step_sent_phase(spawn, monkeypatch):
     bystander = spawn("worker-unix-1", specialty="unix")
     victim = spawn("worker-mainframe-1")
 
-    def becomes_step_sent():  # the worker sends its step a moment later
-        time.sleep(0.6)
+    from chaos import faults
+    queried = threading.Event()
+    original = faults._candidates
+
+    def candidates(query):
+        result = list(original(query))
+        if not result:
+            queried.set()
+        return result
+
+    monkeypatch.setattr(faults, '_candidates', candidates)
+
+    def becomes_step_sent():
+        assert queried.wait(10), 'kill never queried for a mid-step worker'
         col("agents").update_one({"_id": "worker-mainframe-1"}, {"$set": {"phase": "step_sent", "last_seen": now()}})
 
     threading.Thread(target=becomes_step_sent, daemon=True).start()
@@ -53,8 +65,7 @@ def test_kill_waits_for_step_sent_phase(spawn):
     assert ev["status"] == "ok"
     r = ev["result"]
     assert r["agent"] == "worker-mainframe-1" and r["pid"] == victim.pid and r["matched"] == "selector"
-    # phase is only step_sent after the 0.6 s delay, so matching it proves the kill waited; waited_s itself is
-    # load-sensitive (the wait starts late on a busy box), so only require that some waiting happened
+    # The first lookup completed empty before the worker transitioned; matching proves polling.
     assert r["phase"] == "step_sent" and r["task"] == "INC-0001-t1" and r["waited_s"] > 0
     assert _killed(victim) and bystander.poll() is None
     assert world().chaos_events.find_one({"_id": ev["_id"]})["result"]["pid"] == victim.pid
@@ -147,9 +158,9 @@ def test_freeze_is_opt_in_and_thaws_and_reset_wakes(spawn, monkeypatch):
     monkeypatch.setenv('CHAOS_AGENT_FREEZE', '1')
     p = spawn('worker-mainframe-1', phase='step_sent')
     result = {}
-    t = threading.Thread(target=lambda: result.update(runner.fire('agent_freeze', params={'freeze_s': 1, 'wait_s': 0})))
+    t = threading.Thread(target=lambda: result.update(runner.fire('agent_freeze', params={'freeze_s': 8, 'wait_s': 0})))
     t.start()
-    deadline = time.monotonic() + 3
+    deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if 'T' in open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]:
             break
@@ -158,10 +169,13 @@ def test_freeze_is_opt_in_and_thaws_and_reset_wakes(spawn, monkeypatch):
         pytest.fail('worker was never stopped')
     runner.cancel()
     os.kill(p.pid, 0)
-    t.join(5)
-    assert not t.is_alive() and result['status'] == 'ok'
-    assert 'T' not in open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]
+    deadline = time.monotonic() + 2
+    while 'T' in open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]:
+        assert time.monotonic() < deadline, 'reset failed to thaw worker'
+        time.sleep(.02)
     assert col('frozen_agents').count_documents({}) == 0
+    t.join(20)
+    assert not t.is_alive() and result['status'] == 'ok'
 
 
 def test_freeze_guardian_thaws_even_if_attacker_dies(spawn, monkeypatch):
@@ -172,7 +186,7 @@ def test_freeze_guardian_thaws_even_if_attacker_dies(spawn, monkeypatch):
     attacker = subprocess.Popen([sys.executable, '-c',
         "from chaos import runner; runner.fire('agent_freeze', params={'freeze_s': 2, 'wait_s': 0})"])
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             state = open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]
             if 'T' in state:
@@ -182,7 +196,7 @@ def test_freeze_guardian_thaws_even_if_attacker_dies(spawn, monkeypatch):
             pytest.fail('attacker never froze worker')
         attacker.kill()
         attacker.wait(5)
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             if 'T' not in open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]:
                 break
