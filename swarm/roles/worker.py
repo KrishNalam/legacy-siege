@@ -129,6 +129,8 @@ def build_graph(agent: Agent):
             if step["status"] == "sent" and step.get("response") is None:
                 reconcile_sent(agent, task, gen, step)
             return {}
+        from .. import platform
+        platform.used(agent, task['incident'], step)
         n = len(step.get("attempts") or []) + 1
         if (n > 1 and step["status"] == "failed" and step.get("action_id") and recovery.enabled()
                 and step.get("resubmitted") != step["action_id"]):  # once per attempt: never a resubmit loop

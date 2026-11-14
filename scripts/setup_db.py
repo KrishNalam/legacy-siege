@@ -216,6 +216,16 @@ def ensure() -> None:
     if config.MONGO_SPINE:
         ensure_spine(s)
 
+    from swarm.platform import enabled as platform_enabled
+    if platform_enabled():
+        _ensure(s, "tools")
+        _ensure(s, "tool_runs")
+        _ensure(s, "platform_signals")
+        _ensure(s, "gardener_requests")
+        s.gardener_requests.create_index([("status", ASCENDING), ("ts", ASCENDING)], name="open_requests")
+        s.tools.create_index([("status", ASCENDING), ("fault_class", ASCENDING)])
+        s.tool_runs.create_index([("incident", ASCENDING)])
+
     # Atlas Vector Search over playbooks ("honey"), pre-filterable by system/class/staleness
     existing = {i["name"] for i in s.playbooks.list_search_indexes()}
     if "playbook_vec" not in existing:
@@ -255,6 +265,10 @@ def reset() -> None:
             s[n].delete_many({})
         except OperationFailure:
             pass
+    s.gardener_requests.delete_many({"kind": "tool"})
+    s.platform_signals.delete_many({})
+    s.tools.delete_many({})
+    s.tool_runs.delete_many({})
     s.gardener_notes.delete_many({})
     s.gardener_requests.delete_many({})
     s.lessons.delete_many({})  # failure memory goes with the playbooks on a full reset (kept on next_round)

@@ -331,3 +331,26 @@ warroom/     server (FastAPI + /ws), stream (change streams), api (buttons), sta
 scripts/     setup_db (collections, validators, indexes, vector index), atlas_check, demo_check
 CONTRACTS.md the frozen interface between workstreams    docs/design-doc.txt  the original design
 ```
+
+### Platform engineers (opt-in)
+
+`PLATFORM_ENGINEERS=1` adds one `platform-1` Sentinel-type agent (role `sentinel`, subtype `platform`) to the existing supervisor, including
+`SWARM_DYNAMIC=1`. Default off retains the existing roster and behavior. Repeated Guard
+failures (W11 lessons, captured automatically with this switch) or repeated verified steps
+that take at least 10 seconds produce reusable tools for batch aborts, full spools, and stopped cron.
+`swarm.tools` stores evidence, operation templates, version preconditions, proposer (`claude`
+or `policy`), uses, successes, failures and success rate; `swarm.tool_runs` audits each incident use.
+Claude may name/explain a tool, but its operation list must exactly match the deterministic
+whitelist, including parameters, order and approval flags. Failure or timeout uses policy.
+Scouts bind record IDs from today's diagnosis; Workers execute the resulting normal leased
+steps, with destructive approvals and independent Guard read-back for every operation.
+A rejected tool is retired permanently for that system version; normal policy retries continue.
+Full reset clears tools; next-round reset keeps them, and version mismatches prevent reuse.
+The thought feed narrates tool creation, selection, use and retirement. Reported savings are
+plan assembly decisions reused; no operations or verification steps are skipped.
+Platform Sentinels deliver the catalogue to Scouts via `swarm.messages` (`to:scouts`,
+`kind:tool`); Scouts keep a change-stream receiver active during Worker/approval waits
+and pass matching refs in `tasks.tool_ids`. New Scouts also receive a current snapshot.
+Gardener delivery uses W19's `swarm.gardener_requests`, `kind:tool`, `status:open`,
+with the same `payload:{tool_id,version,status,ops,preconditions,...}` envelope; W23 owns
+consuming that request in the upgrade pipeline. Delivery never authorizes a stale or retired tool.
