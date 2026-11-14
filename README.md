@@ -4,6 +4,8 @@
 Monkey attacks the systems and the agents themselves. MongoDB is the spine: every piece of state lives
 in MongoDB, and every process can be killed.**
 
+Design doc: https://claude.ai/artifact/TYfnA6aTSG99oMb9t1nzpr
+
 - **Red, the Fleet** (`chaos/`): a seeded Chaos Monkey. It fires faults at three interconnected legacy
   systems (an IBM-style mainframe batch, a Unix file-transfer box and a web portal) and sends a real
   `SIGKILL` to agent processes.
