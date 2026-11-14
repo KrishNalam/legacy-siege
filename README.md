@@ -264,6 +264,15 @@ With W16's defence on (`SWARM_RECOVERY=1 FAILURE_MEMORY=1`) the next recall pick
 ("Rejected memory RED-POISON:PB-0001 … retiring it"), and the Hive re-plans and learns a clean playbook. Batch-abort and
 schema-drift repairs are never poisoned (the Hive re-derives those from today's facts anyway).
 
+**Red Planner (`RED_PLANNER=1`, off by default, needs `RED_COMMANDER=1` + `RED_FLEET=1`).** Before each campaign
+the Planner spawns two one-shot scouts: a Swarm Scout studies the Blue Hive (who is busy or mid-send, free Nurses,
+open incidents, what it just learned) and a Legacy Scout studies the estate (weak or lying systems, open vulns).
+From both reports it picks a focus (guard, nurse, memory, intrusion or compound) and a priority, with Claude or,
+with no key, by rules. The Commander plans with that brief and prefers its combos. With `RUNNER_DECIDES=1` the
+Planner hands the campaign to the Runner (`decider.propose`, one request per step) and the Runner decides when each
+step fires. Every Planner decision (spawn, brief, propose, handoff) is logged in `chaos_events` as `kind:"decision"`,
+`by:"red-planner"`.
+
 **Runner decisions (`RUNNER_DECIDES=1`, off by default).** The Runner stops being a dumb door. Every Red fire
 (Strikers, Commander steps, Planner requests) is admitted first: `execute`, `hold` (nothing fired, retry later) or
 `deny`. The stage caps keep autoplay moving:
