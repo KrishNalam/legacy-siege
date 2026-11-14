@@ -203,8 +203,10 @@ def _outside(p: dict, rb: dict) -> tuple[str, str]:
         return P5, "no SQL injection in evidence: outside this recovery plan"
     if op == "quarantine_record":
         return P5, "no poison record in evidence"
-    if op in ("rerun_transfer", "refresh_cache"):
-        return P5, f"{p['target']} isn't on this incident's fault path"
+    if op == "refresh_cache" and portal and (portal.get("cache") or {}).get("stale") is False:
+        return P4, "the balance cache isn't stale (cache.stale=false); a refresh changes nothing"
+    if op == "rerun_transfer" and unix and ((unix.get("transfer") or {}).get("status") == "ok"):
+        return P4, "the last transfer succeeded (transfer.status=ok); nothing to re-run"
     missing = "" if rb.get(p["target"]) else " (read-back unavailable)"
     return P5, f"outside this recovery plan: diagnosis found no fault it fixes{missing}"
 

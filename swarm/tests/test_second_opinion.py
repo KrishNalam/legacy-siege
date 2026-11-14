@@ -78,6 +78,11 @@ def test_missed_unknown_duplicate_and_malformed():
     assert rows[1]["verdict"] == "accepted" and rows[1]["note"] == "params completed by policy"
     assert "no op 'reboot_lpar'" in rows[2]["reason"]
     assert rows[3]["reason"] == "refresh_cache runs on portal, not unix"
+    fresh = {"portal": {"sessions": 40, "cache": {"stale": False}}, "unix": {"transfer": {"status": "ok"}}}
+    res2 = so.judge(prop(("portal", "apply_patch", {"patch": "parameterize_search"}), ("portal", "refresh_cache", {}),
+                         root="portal", fc="sqli_exploit"),
+                    [dict(s, n=1) for s in policy.fix_plan("sqli_exploit")], "portal", "sqli_exploit", fresh)
+    assert res2["verdicts"][1]["rule"] == so.P4 and "isn't stale" in res2["verdicts"][1]["reason"]
     assert rows[4]["reason"].startswith("duplicate")
     assert rows[5]["reason"].startswith("unknown parameter color")
     assert rows[6]["reason"].startswith("malformed")
