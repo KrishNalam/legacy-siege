@@ -66,7 +66,8 @@ class Drift(Demo):
         rec = (feed.get("sample") or [{}])[0]
         self.r.add(f"v{version} a. drift", portal_bad is not None and not unix_down and new in rec and old not in rec,
                    f"manifest field {old} → {new} (schema v{feed.get('schema_version')}); unix stayed up={not unix_down}; "
-                   f"portal degraded at {portal_bad if portal_bad is None else round(portal_bad, 1)}s", portal_bad)
+                   f"portal degraded at {portal_bad if portal_bad is None else round(portal_bad, 1)}s; sentinel noticed "
+                   f"first: {bool(early)}", portal_bad)
         inc = self.s.incidents.find_one({"_id": inc_id}) if inc_id else None
         if not inc:
             return self.r.add(f"v{version} b. diagnosis", False, f"no schema_drift incident within {timeout:.0f}s", secs)
