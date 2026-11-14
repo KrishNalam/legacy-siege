@@ -205,3 +205,18 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     also fails while the mapping doesn't match. A drifted feed makes the portal `degraded`, blames `unix`,
     `error_rate` 0.25; unix stays `up`. Full fix: `map_field` → `refresh_cache`.
   - War room: `schema_drift` in the fault launcher, with its own strike caption.
+- **Schema drift — the adaptation (additive, W3, `swarm/schema.py`).**
+  - New collections `swarm.schema_samples` (TTL 24h on `ts`; `_id:"good:unix:xfer_manifest"` = known-good sample the
+    sentinel rewrites every 10 s while unix+portal are up and the sample matches the expected schema) and
+    `swarm.schema_mappings` (`_id:"unix.xfer_manifest.balance"`, `{source, previous, version, history[], learned_from,
+    verified_by, evidence}`). Both are wiped on full and next_round resets (the estate's schema goes back to v1).
+  - The unix diagnosis hop matches the manifest sample against the expected schema with a `$jsonSchema` query and
+    diffs its fields against the good sample with an aggregation (`$objectToArray`/`$setDifference`/`$type`) →
+    `fault_class:"schema_drift"`, plan `map_field` + `refresh_cache` on portal (`policy.rebind` uses today's names).
+  - Only the Guard stores a mapping: after it verifies `map_field` by read-back (portal reads the new field, values
+    line up with the good sample within 35%) it writes the mapping (version+1) and says
+    "unix renamed X → Y · mapping learned vN". The resolved incident's playbook (with embedding) is the memory that
+    a repeat drift recalls via `$vectorSearch`. `schema_drift` is excluded from the sentinel's Gardener upgrade
+    requests (the mapping is the adaptation).
+  - War room watches `swarm.schema_mappings` (caption + "MAPPING LEARNED" stamp on unix).
+    Rehearsal: `python -m scripts.drift_check` (12 checks, separate from demo_check).
