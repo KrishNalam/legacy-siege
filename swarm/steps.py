@@ -53,6 +53,26 @@ def mark_sent(task: dict, agent: str, generation: int, step: dict, action_id: st
     txn(fn)
 
 
+def resubmit(task: dict, agent: str, generation: int, step: dict) -> bool:
+    """failed -> sent for the SAME attempt (its effect landed after the Guard rejected it), so the Guard
+    re-judges it by read-back. No new action_id, nothing re-sent to the system. False if the step moved."""
+    def fn(s: ClientSession):
+        leases.fence(col("tasks"), task["_id"], agent, generation, s)
+        r = col("incidents").update_one(
+            {"_id": task["incident"], "steps": {"$elemMatch": {"step_id": step["step_id"], "status": "failed",
+                                                               "action_id": step["action_id"]}}},
+            {"$set": {"steps.$[s].status": "sent", "steps.$[s].agent": agent, "steps.$[s].evidence": None,
+                      "steps.$[s].resubmitted": step["action_id"], "steps.$[s].ts": now()}},
+            array_filters=[{"s.step_id": step["step_id"]}], session=s)
+        if r.matched_count != 1:
+            return False
+        col("ledger").update_one({"action_id": step["action_id"]},
+                                 {"$set": {"status": "sent", "agent": agent, "resubmitted": True,
+                                           "updated_at": now()}}, session=s)
+        return True
+    return txn(fn)
+
+
 def take_over_sent(task: dict, agent: str, generation: int, step: dict) -> None:
     """A nurse adopts a step stuck in 'sent' (same attempt, same action_id): record the new agent."""
     def fn(s: ClientSession):
