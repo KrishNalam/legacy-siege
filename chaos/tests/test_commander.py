@@ -156,3 +156,15 @@ def test_poison_then_break_combo_needs_the_switch_and_a_poisonable_repair(monkey
                                {"persona": "red-saboteur", "fault": "disk_fill", "target": "unix"}]
     strike, _ = commander.order_strike("red-memory", {**got[0]["steps"][0], "reason": "r"}, snap(poisonable=learned), cfg())
     assert strike["params"] == {"playbook": "PB-0003"}
+
+
+def test_reset_reusing_run_id_does_not_carry_old_campaigns(systems, fast, monkeypatch):
+    monkeypatch.setenv("RED_COMMANDER_MAX", "1")
+    run_id = _night_with_pending_mainframe_step()
+    old = now() - timedelta(seconds=900)   # last session's RUN-0001, before this night started
+    world().red_agents.insert_one({"_id": commander.COMMANDER_ID, "lessons": [{"run_id": run_id, "ts": old}],
+                                   "campaign": {"id": "CMP-old", "run_id": run_id, "status": "active", "started_at": old,
+                                                "steps": [], "current": 0}})
+    commander.Commander(cfg()).step()
+    camp = world().red_agents.find_one({"_id": commander.COMMANDER_ID})["campaign"]
+    assert camp["id"] != "CMP-old" and camp["status"] == "active"

@@ -210,12 +210,19 @@ def policy_pick(options: list[dict], lessons: list[dict]) -> dict | None:
 
 
 # ------------------------------------------------------------------ orders on the shared board
-def my_order(persona_id: str, run_id: str | None) -> dict | None:
+def _this_night(row: dict | None, snap: dict, key: str = "ts") -> bool:
+    """A full reset reuses run ids (RUN-0001 again) and keeps world.red_agents: fence by night start too."""
+    started = snap.get("night_started")
+    return bool(row) and row.get("run_id") == snap.get("run_id") and (
+        started is None or (row.get(key) is not None and row[key] >= started))
+
+
+def my_order(persona_id: str, snap: dict) -> dict | None:
     """The Commander's order for this Striker this night (``queued`` = stand by, ``assigned`` = go)."""
     order = (world().red_agents.find_one({"_id": persona_id}, {"order": 1}) or {}).get("order")
     if not order or order.get("status") not in ("queued", "assigned"):
         return None
-    if order.get("run_id") != run_id:
+    if not _this_night(order, snap):
         world().red_agents.update_one({"_id": persona_id, "order.campaign": order.get("campaign")},
                                       {"$unset": {"order": ""}})
         return None
@@ -325,7 +332,7 @@ class Commander:
         snap = core.scout(COMMANDER_ID)
         findings = post_findings(snap)
         camp = doc.get("campaign")
-        if camp and camp.get("run_id") != snap.get("run_id"):
+        if camp and not _this_night(camp, snap, "started_at"):
             self._cancel_orders(camp)   # reset or a new night: drop the old campaign, never its lesson on new ids
             world().red_agents.update_one({"_id": COMMANDER_ID}, {"$unset": {"campaign": ""}})
             camp = None
@@ -345,7 +352,7 @@ class Commander:
             return f"{snap['scenario']} is off limits"
         if snap.get("upgrade_busy"):
             return "the Gardener is mid-upgrade"
-        history = [h for h in doc.get("lessons") or [] if h.get("run_id") == snap.get("run_id")]
+        history = [h for h in doc.get("lessons") or [] if _this_night(h, snap)]
         if self.max_campaigns and len(history) >= self.max_campaigns:
             return f"campaign budget spent ({len(history)}/{self.max_campaigns})"
         started = snap.get("night_started")

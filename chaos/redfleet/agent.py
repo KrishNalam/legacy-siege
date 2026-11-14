@@ -97,7 +97,7 @@ class Attacker:
             self._pending = reg.get("pending_reflection")
         self._finish_reflection()
         snap = core.scout(self.p.id)
-        order = commander.my_order(self.p.id, snap.get("run_id")) if commander.enabled() else None
+        order = commander.my_order(self.p.id, snap) if commander.enabled() else None
         if order:
             return {"snap": snap, "order": order, "hold": self._order_gate(snap, order)}
         return {"snap": snap, "hold": ("observing Hive defence" if self._pending else core.gate(snap, self.cfg, self.p.stagger_s))}
