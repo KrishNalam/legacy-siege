@@ -193,3 +193,15 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
 - Recall confirm hop (round 2) narrates without the deliberate pause; `diagnosis_s` is measured before the final sentence in both paths.
 - Nurses pick up a task whose specialty has no live worker after 0.5 s (was `NURSE_PICKUP_S`).
 - Rehearsal: `python -m scripts.demo_check` (see README).
+- **Schema drift — the attack (additive, W3).** Re-adds a small slice of the cut "schema drift":
+  - Chaos: fault `schema_drift` (target `unix`, params `{to?}`): a "vendor patch" silently renames the balance field
+    in the unix xfer manifest (`balance` → `acct_bal` → `ledger_bal` …). Scenario `bank-drift` (seed 1004) fires it
+    at t=0. `SCHEMA_DRIFT_DEMO=1` (default off) appends it to `bank-night-3` at t=45 (after the prove window);
+    keep it off for `scripts.demo_check` (night 3 must open no incident). Built-in scenarios are re-upserted from
+    code when the stored copy differs.
+  - Systems (additive fields only): `GET /unix/state` adds `feed: {name:"xfer_manifest", schema_version, sample:[{acct,
+    <balance field>, as_of}]}`; `GET /portal/state` adds `feed: {map: {balance: <manifest field>}, errors}`;
+    `GET /unix/view/manifest` (JSON). Portal op `map_field {field:"balance", source}` (non-destructive); `refresh_cache`
+    also fails while the mapping doesn't match. A drifted feed makes the portal `degraded`, blames `unix`,
+    `error_rate` 0.25; unix stays `up`. Full fix: `map_field` → `refresh_cache`.
+  - War room: `schema_drift` in the fault launcher, with its own strike caption.
