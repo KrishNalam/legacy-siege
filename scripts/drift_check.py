@@ -4,7 +4,7 @@
     .venv/bin/python -m scripts.drift_check --once --keep       # one drift, leave it on screen
     .venv/bin/python -m scripts.drift_check --base http://127.0.0.1:8740
 
-Separate from scripts.demo_check on purpose: the four scored beats are untouched. Beats checked:
+Also reused by scripts.demo_check --drift; the default demo stays unchanged. Beats checked:
   a. bank-drift renames unix's manifest field balance -> acct_bal; unix stays UP, the portal degrades blaming unix
   b. one incident; the walk portal -> unix finds schema_drift on unix (MongoDB $jsonSchema + field diff)
   c. map_field + refresh_cache verified by guard-1 with read-back evidence (values line up)
@@ -40,6 +40,7 @@ class Drift(Demo):
                           if got else "no good sample captured in 30s", secs)
 
     def drift(self, start, old: str, new: str, version: int, timeout: float) -> bool:
+        started = datetime.now(timezone.utc)
         t0 = time.monotonic()
         start()
         unix_down, portal_bad, inc_id = False, None, None
@@ -49,6 +50,7 @@ class Drift(Demo):
             unix_down |= ux.get("status") != "up"
             if portal_bad is None and po.get("status") == "degraded" and po.get("blames") == "unix":
                 portal_bad = time.monotonic() - t0
+                portal_bad_at = datetime.now(timezone.utc)
                 log(f"portal degraded blaming unix at {portal_bad:.1f}s (unix {ux.get('status')})")
             inc = self.s.incidents.find_one({"fault_class": "schema_drift", "steps.params.source": new},
                                             sort=[("opened_at", -1)])
@@ -59,9 +61,13 @@ class Drift(Demo):
             time.sleep(0.5)
         secs = time.monotonic() - t0
         early = self.s.thoughts.find_one({"agent": {"$regex": "^sentinel"}, "text": {"$regex": f"feed schema changed: "
-                                          f"{old} missing"}}, sort=[("ts", -1)])
+                                          f"{old} missing"}, "ts": {"$gte": started}}, sort=[("ts", -1)])
         if early:
             log(f"sentinel noticed early: {early['text'][:90]}")
+        self.r.add(f"v{version} sentinel before portal", bool(early) and portal_bad is not None
+                   and early["ts"] < portal_bad_at,
+                   f"sentinel notice={(early or {}).get('ts')}; portal degradation observed="
+                   f"{portal_bad_at if portal_bad is not None else 'never'}")
         feed = self.sys_http.get("/unix/state").json().get("feed") or {}
         rec = (feed.get("sample") or [{}])[0]
         self.r.add(f"v{version} a. drift", portal_bad is not None and not unix_down and new in rec and old not in rec,

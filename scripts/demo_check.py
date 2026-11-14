@@ -2,6 +2,7 @@
 
     .venv/bin/python -m scripts.demo_check                 # full reset, nights 1-3, Gardener, reset again
     .venv/bin/python -m scripts.demo_check --no-reset      # start from the current state
+    .venv/bin/python -m scripts.demo_check --drift         # also check schema adaptation and repeat memory
     .venv/bin/python -m scripts.demo_check --keep          # leave the upgraded estate (no final reset)
     .venv/bin/python -m scripts.demo_check --base http://127.0.0.1:8700 --approve-delay 2
 
@@ -540,6 +541,7 @@ def main() -> int:
                     help="the stack runs with DEMO_AUTOPLAY=1: don't click Night 2/3, next round or later approvals")
     ap.add_argument("--check-ai", action="store_true",
                     help="also check Claude's second opinion on each night's incident (skipped without AI_SECOND_OPINION=1 + key)")
+    ap.add_argument("--drift", action="store_true", help="also rehearse schema drift and mapping reuse")
     a = ap.parse_args()
     rep = Report()
     d = Demo(a.base, a.approve_delay, rep, autoplay=a.autoplay, red_kill=a.red_kill)
@@ -557,6 +559,15 @@ def main() -> int:
                 d.check_ai([n["inc"]["_id"] for n in (n1, n2) if n])
             elif a.check_ai:
                 log("--check-ai skipped: needs AI_SECOND_OPINION=1 or AI_DRIVES=1, and ANTHROPIC_API_KEY")
+            if a.drift:
+                # Import only on opt-in; share the standalone rehearsal's assertions.
+                from scripts.drift_check import Drift
+                drift = Drift(a.base, a.approve_delay, rep)
+                drift.post("/api/reset", {"mode": "next_round"})
+                if drift.wait_good_sample():
+                    if drift.drift(lambda: drift.post("/api/scenario/bank-drift"),
+                                   "balance", "acct_bal", 2, a.night_timeout):
+                        drift.repeat(a.night_timeout)
             if not a.keep:
                 d.final_reset()
     except KeyboardInterrupt:
