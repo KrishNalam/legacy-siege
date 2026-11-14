@@ -214,29 +214,10 @@ enabling a project server, so it is off until you approve it). It points at loca
 `explain` plans; it exposes no insert/update/delete/drop tools. It is not part of the swarm's runtime: the
 agents talk to Atlas through PyMongo directly.
 
-## Tracing (LangSmith)
-
-Optional and **off by default**: with the flag unset (or the key missing) `langsmith` is never configured,
-nothing is sent and nothing slows down. To switch it on, add to `.env`:
-
-```bash
-LANGSMITH_TRACING=1
-LANGSMITH_API_KEY=lsv2_...          # without it tracing stays off, with one warning line
-LANGSMITH_PROJECT=legacy-siege      # optional (this is the default)
-```
-
-In LangSmith you will see one trace per graph run, named `<role>:<agent_id>` (`queen:queen-1`,
-`worker:worker-unix-1`, `undertaker:...`), tagged and annotated with `{role, agent_id, incident_id, night}`;
-each LangGraph node is a child run, and the direct Claude calls in `common/llm.py` (`claude` runs: prompt,
-answer, tokens, latency) nest under the node that made them. Prompts and graph state are sent to LangSmith;
-API keys never go into metadata. Sends are batched on a background thread with 2 s / 5 s timeouts and every
-hook swallows its own errors, so tracing can never block or crash an agent. The code is `common/tracing.py`
-plus one-line hooks in `common/llm.py`, `swarm/harness.py` and each role's `run()`.
-
 ## Layout
 
 ```
-common/      config, db (client/world/swarm/col/next_id), embed (voyage | local-hash), llm, tracing (LangSmith, opt-in), events (think/say)
+common/      config, db (client/world/swarm/col/next_id), embed (voyage | local-hash), llm, events (think/say)
 systems/     the simulated estate: app.py (FastAPI), estate.py (tick engine, txns), mainframe/unix/portal.py
 swarm/       supervisor, agent harness, leases, steps (txns), recall ($vectorSearch), verify, roles/*
 chaos/       faults, scenarios (seeded), runner, score, cli (`python -m chaos.cli run bank-night-1`)
