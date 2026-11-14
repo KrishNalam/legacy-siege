@@ -17,7 +17,10 @@ Design doc: https://claude.ai/artifact/TYfnA6aTSG99oMb9t1nzpr
   It writes a diff, runs the tests and a replay, gets human approval, hot-deploys the patch and then
   proves it by replaying the attack.
 - **The War Room** (`warroom/`): a live visualisation that only *watches* MongoDB through change
-  streams. It holds no state, and every pixel comes from a change event.
+  streams. It holds no state, and every pixel comes from a change event. Views: `/diagram` (Chaos Monkey →
+  Legacy ← Bees, Gardener below; click or 1-4 to zoom, V toggles Live / How it works), `/flow`, the classic
+  page, and `/why` (use cases and how each Statement 3 question is answered). `WARROOM_VIEW=diagram|flow|classic`
+  picks what `/` serves (default classic).
 
 What the demo shows, all checked automatically by `scripts/demo_check.py`:
 
