@@ -105,8 +105,10 @@ def scout(agent_id: str) -> dict:
     mine, fleet = [], []
     if run_id:
         for e in w.chaos_events.find({"run_id": run_id, "by": {"$regex": "^red-"}},
-                                     {"fault": 1, "target": 1, "status": 1, "ts": 1, "by": 1, "outcome": 1, "lesson": 1}).sort("ts", 1):
+                                     {"fault": 1, "target": 1, "status": 1, "ts": 1, "by": 1, "outcome": 1, "lesson": 1,
+                                      "params.playbook": 1}).sort("ts", 1):
             row = {"fault": e["fault"], "target": e.get("target"), "status": e.get("status"), "ts": e.get("ts"),
+                   "victim": (e.get("params") or {}).get("playbook"),
                    "by": e.get("by"), "outcome": e.get("outcome"), "lesson": e.get("lesson")}
             fleet.append(row)
             if e.get("by") == agent_id:
@@ -127,11 +129,18 @@ def scout(agent_id: str) -> dict:
         "approvals_pending": s.approvals.count_documents({"status": "pending"}),
         "upgrade_busy": s.upgrade_requests.count_documents({"status": {"$in": list(UPGRADE_BUSY)}}),
         "learned": learned, "red_attacks": mine, "fleet_attacks": fleet,
+        "poisonable": [{"id": pb["_id"], "fault_class": pb.get("fault_class"), "system": pb.get("system")}
+                       for pb in _poisonable()],
         "lessons": lessons,
         "attack_history": [{k: e.get(k) for k in ("fault", "target", "who", "why", "outcome", "lesson")}
                            for e in recent_chaos[:6]],
         "red_board": list(w.red_agents.find({}, {"name": 1, "status": 1, "intent": 1, "last_reflection": 1, "last_seen": 1})),
     }
+
+
+def _poisonable() -> list[dict]:
+    from .. import faults
+    return faults.poisonable() if faults.FAULTS["poison_memory"].enabled() else []
 
 
 def _age_s(ts: datetime | None, at: datetime) -> float:

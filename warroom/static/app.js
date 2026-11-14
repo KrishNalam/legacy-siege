@@ -3,6 +3,7 @@ import { state, on, connect, prettyTime } from "./js/store.js";
 import { Stage } from "./js/stage.js";
 import { Panels } from "./js/panels.js";
 import { installBeats } from "./js/beats.js";
+import { installRoster } from "./js/roster.js";
 
 const panels = new Panels({ onInspect: (h) => inspect(h) });
 const stage = new Stage(document.getElementById("stage"), { onInspect: (h) => inspect(h) });
@@ -29,6 +30,7 @@ function caption(text, small = "", color = "#4cc9f0", ms = 4200) {
 window.addEventListener("caption", (e) => caption(e.detail.text, e.detail.small, e.detail.color));
 
 installBeats(stage, panels, caption);
+installRoster(document.getElementById("roster-card"));
 
 on("snapshot", () => {
   quietUntil = performance.now() + 1200;

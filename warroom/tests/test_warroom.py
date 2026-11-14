@@ -137,6 +137,22 @@ def test_scorecard_aggregates_rounds(app_client):
     assert r["runs"][0]["events"] == 2 and r["runs"][0]["incidents"] == 1 and r["runs"][0]["manual"] == 1
 
 
+def test_spine_analytics_learning_curve(app_client):
+    """MONGO_SPINE (W25): /api/spine computes the per-class learning curve inside MongoDB; off by default."""
+    t = now()
+    swarm().incidents.insert_many([
+        {"_id": "INC-1", "status": "resolved", "system": "portal", "opened_at": t, "round": 1, "fault_class": "batch_abort",
+         "metrics": {"ttr_s": 90.0, "diagnosis_s": 30, "hops": 3}, "handoffs": [{"takeover_s": 8.0}]},
+        {"_id": "INC-2", "status": "resolved", "system": "portal", "opened_at": t + timedelta(seconds=5), "round": 2,
+         "fault_class": "batch_abort", "metrics": {"ttr_s": 30.0, "diagnosis_s": 2, "hops": 1}, "recall": {"used": True}},
+    ])
+    r = app_client.get("/api/spine").json()
+    assert r["enabled"] is False  # the Atlas overlay hides the card unless MONGO_SPINE=1
+    night2 = next(x for x in r["learning"] if x["_id"] == "INC-2")
+    assert night2["night"] == 2 and night2["prev_ttr_s"] == 90 and night2["speedup"] == 3.0
+    assert [x["ttr_p50_s"] for x in r["rounds"]] == [90, 30] and r["takeovers"]["n"] == 1
+
+
 def test_doc_lookup_by_id_and_alt_key(app_client):
     swarm().ledger.insert_one({"action_id": "INC-1-s1-a1", "incident": "INC-1", "agent": "w", "op": "x",
                                "status": "sent", "ts": now()})
@@ -157,6 +173,7 @@ def test_atlas_lists_collections(app_client):
 
 
 def test_reset_next_round_keeps_memory_full_wipes(app_client):
+    world().red_agents.insert_one({"_id": "red-liar", "pending_reflection": "CHX-0001"})
     swarm().playbooks.insert_one({"_id": "PB-1", "embedding_model": "m"})
     swarm().incidents.insert_one({"_id": "INC-1", "status": "fixing", "system": "portal", "opened_at": now(), "active": True})
     swarm().approvals.insert_one({"_id": "APR-1", "status": "pending", "ts": now()})
@@ -176,6 +193,7 @@ def test_reset_next_round_keeps_memory_full_wipes(app_client):
     assert app_client.post("/api/reset", json={"mode": "full"}).json()["ok"]
     assert swarm().playbooks.count_documents({}) == 0 and swarm().incidents.count_documents({}) == 0
     assert swarm().schema_mappings.count_documents({}) == 0
+    assert world().red_agents.count_documents({}) == 0
     assert app_client.post("/api/reset", json={"mode": "bogus"}).status_code == 400
 
 
@@ -195,3 +213,60 @@ def test_static_page_served(app_client):
     assert r.status_code == 200 and "LEGACY SIEGE" in r.text
     assert app_client.get("/app.js").status_code == 200
     assert app_client.get("/js/stage.js").status_code == 200
+
+
+def test_token_write_retries_and_preserves_newer_token():
+    """A failed save/reconnect must not discard the newest delivered stream position."""
+    import asyncio
+    from types import SimpleNamespace
+    from pymongo.errors import AutoReconnect
+    from warroom.stream import Hub
+
+    async def exercise():
+        hub = Hub()
+        hub.client = object()
+        hub._token, hub._token_dirty = {"_data": "one"}, True
+        saved = []
+
+        async def update(*args, **kwargs):
+            saved.append(args[1]["$set"]["token"])
+            if len(saved) == 1:
+                raise AutoReconnect("temporary outage")
+            if len(saved) == 2:
+                hub._token = {"_data": "two"}
+
+        hub.swarm = lambda: SimpleNamespace(stats=SimpleNamespace(update_one=update))
+        await hub._save_token()
+        assert hub._token_dirty
+        await hub._save_token()
+        assert hub._token_dirty  # event two arrived while saving event one
+        await hub._save_token()
+        assert not hub._token_dirty
+        assert saved == [{"_data": "one"}, {"_data": "one"}, {"_data": "two"}]
+
+    asyncio.run(exercise())
+
+
+def test_views_switch_classic_stays_default(app_client, monkeypatch):
+    """WARROOM_VIEW off (default) keeps the classic war room on /; the diagram and flow views are always
+    reachable, and ?classic=1 always wins."""
+    monkeypatch.delenv("WARROOM_VIEW", raising=False)
+    assert 'src="app.js"' in app_client.get("/").text
+    for url, marker in (("/diagram", "diagram.js"), ("/?view=diagram", "diagram.js"), ("/flow", "flow.js"),
+                        ("/?view=flow", "flow.js"), ("/classic", 'src="app.js"'), ("/?classic=1", 'src="app.js"')):
+        r = app_client.get(url)
+        assert r.status_code == 200 and marker in r.text, url
+    monkeypatch.setenv("WARROOM_VIEW", "diagram")
+    assert "diagram.js" in app_client.get("/").text
+    assert 'src="app.js"' in app_client.get("/?classic=1").text
+    for asset in ("/diagram.js", "/diagram.css", "/flow.js", "/flow.css"):
+        assert app_client.get(asset).status_code == 200, asset
+
+
+def test_why_page_served_and_linked(app_client):
+    """/why is the static 'Why it matters' page; the diagram's top bar links to it; it never becomes the / view."""
+    r = app_client.get("/why")
+    assert r.status_code == 200 and "why.css" in r.text and "Statement 3" in r.text
+    assert app_client.get("/why.css").status_code == 200
+    assert 'href="./why"' in app_client.get("/diagram").text
+    assert 'src="app.js"' in app_client.get("/?view=why").text

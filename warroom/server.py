@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -76,9 +77,46 @@ async def ws(websocket: WebSocket) -> None:
         hub.unsubscribe(queue)
 
 
+VIEWS = {"diagram": "diagram.html", "flow": "flow.html", "classic": "index.html"}
+PAGES = {**VIEWS, "why": "why.html"}  # /why is a static explainer page, never the / view
+
+
+def _page(name: str) -> FileResponse:
+    return FileResponse(STATIC / PAGES[name], headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/")
-async def index() -> FileResponse:
-    return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+async def index(classic: str | None = None, view: str | None = None) -> FileResponse:
+    """The war room page. ``WARROOM_VIEW`` (diagram | flow | classic, default classic) picks what ``/`` serves.
+    ``?classic=1`` always gives the classic war room, ``?view=diagram|flow|classic`` any view."""
+    if classic is not None and classic.lower() not in ("0", "false", "no"):
+        return _page("classic")
+    if view in VIEWS:
+        return _page(view)
+    default = os.environ.get("WARROOM_VIEW", "classic").strip().lower()
+    return _page(default if default in VIEWS else "classic")
+
+
+@app.get("/classic")
+async def classic_view() -> FileResponse:
+    return _page("classic")
+
+
+@app.get("/diagram")
+async def diagram_view() -> FileResponse:
+    return _page("diagram")
+
+
+@app.get("/flow")
+async def flow_view() -> FileResponse:
+    return _page("flow")
+
+
+@app.get("/why")
+async def why_view() -> FileResponse:
+    """Why it matters: real-world use cases, why the project is good, Statement 3 point by point. Static, linked from
+    the diagram's top bar."""
+    return _page("why")
 
 
 app.mount("/", StaticFiles(directory=STATIC), name="static")

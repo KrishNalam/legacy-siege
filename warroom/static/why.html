@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Legacy Siege · Why it matters</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Cpath fill='%23111' d='M0 0h16v16H0z'/%3E%3Cpath fill='%23fff' d='M3 3h4v4H3zM9 9h4v4H9zM9 3h4v1H9zM3 12h4v1H3z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="why.css">
+</head>
+<body>
+<!-- Why it matters: three 1600 × 900 sheets, each scaled to the screen width, same printed-transcript look as /diagram.
+     Static page, no live data. Keys: 1 / 2 / 3 jump to a section, ← → or PgUp/PgDn step, D back to the diagram.
+     Every claim here is on origin/main (results/AD2.md section C). ★ = in the code, behind a switch that is off by default. -->
+
+<section class="s" id="s1"><div class="f">
+  <header class="sheet">
+    <div class="l row" style="top:14px"><span><span class="brand">LEGACY SIEGE</span><span class="chip">WHY IT MATTERS</span></span><span class="nav"><a href="#s1" class="on">1 WHERE</a><a href="#s2">2 WHY US</a><a href="#s3">3 STATEMENT 3</a><a class="back" href="./diagram">← WAR ROOM</a></span></div>
+    <div class="l" style="top:40px"><span class="dim">Old systems run the world. When they break at night, someone has to finish the job.</span></div>
+  </header>
+  <div class="k" style="top:130px">01 · WHERE THIS IS REAL</div>
+  <h1 style="top:170px">The world still runs<br>on <em class="amb">legacy</em>.</h1>
+  <div class="cards c4" style="top:430px">
+    <div class="card"><div class="ic">▣</div><h2>Banks</h2><p>Core ledgers on mainframes. Nightly COBOL batch. No API.</p></div>
+    <div class="card"><div class="ic">✈</div><h2>Airlines</h2><p>Bookings and crew systems decades old. One failed batch, a bad morning.</p></div>
+    <div class="card"><div class="ic">⌂</div><h2>Government</h2><p>Tax, benefits, licences. The people who wrote it are gone.</p></div>
+    <div class="card red"><div class="ic">03:00</div><h2>The 3 a.m. page</h2><p>It says “done”. Nothing changed. On-call is half asleep.</p></div>
+  </div>
+  <div class="foot" style="top:820px"><span class="dim">Our demo estate:</span> mainframe ledger <span class="dim">→</span> Unix batch server <span class="dim">→</span> customer portal</div>
+</div></section>
+
+<section class="s" id="s2"><div class="f">
+  <header class="sheet">
+    <div class="l row" style="top:14px"><span><span class="brand">LEGACY SIEGE</span><span class="chip">WHY IT MATTERS</span></span><span class="nav"><a href="#s1">1 WHERE</a><a href="#s2" class="on">2 WHY US</a><a href="#s3">3 STATEMENT 3</a><a class="back" href="./diagram">← WAR ROOM</a></span></div>
+    <div class="l" style="top:40px"><span class="dim">A swarm that fixes things, proves it, survives its own crashes and gets faster.</span></div>
+  </header>
+  <div class="k" style="top:130px">02 · WHY THIS PROJECT</div>
+  <ol class="big" style="top:180px">
+    <li><b>Self-healing swarm</b><span>12 agents, each its own process. Sentinel spots, Queen triages, Scout fixes.</span></li>
+    <li><b class="grn">“Took effect”, not “sent”</b><span>Only the Guard marks a step done, after reading the system back.</span></li>
+    <li><b>Crash? A Nurse takes over</b><span>Kill an agent mid-step. A Nurse claims its lease and resumes. No replay.</span></li>
+    <li><b class="amb">It learns</b><span>Same attack next night: 1 hop instead of 3, about 2× faster.</span></li>
+    <li><b class="red">Red team keeps it honest</b><span>A seeded Chaos Monkey attacks live, and kills agents mid-job.</span></li>
+  </ol>
+</div></section>
+
+<section class="s" id="s3"><div class="f">
+  <header class="sheet">
+    <div class="l row" style="top:14px"><span><span class="brand">LEGACY SIEGE</span><span class="chip">WHY IT MATTERS</span></span><span class="nav"><a href="#s1">1 WHERE</a><a href="#s2">2 WHY US</a><a href="#s3" class="on">3 STATEMENT 3</a><a class="back" href="./diagram">← WAR ROOM</a></span></div>
+    <div class="l" style="top:40px"><span class="dim">Statement 3: Finish the Job. Three questions, three answers, all in MongoDB Atlas.</span></div>
+  </header>
+  <div class="k" style="top:130px">03 · STATEMENT 3, POINT BY POINT</div>
+  <div class="grid" style="top:175px">
+    <div class="hd"><span>THE QUESTION</span><span>HOW WE ANSWER IT</span><span>MONGODB UNDER IT</span></div>
+    <div class="q">
+      <h2><i>1</i>Did it take effect, or was it only sent?</h2>
+      <p>Every action gets a unique id in the ledger. The Guard reads the system back. “Done” but unchanged → <em class="red">ACK ≠ APPLIED</em>, retry with a new attempt id.</p>
+      <ul><li>multi-doc transactions</li><li>unique index = exactly once</li><li>pre-images custody trail ★</li></ul>
+    </div>
+    <div class="q">
+      <h2><i>2</i>Can it resume after a crash?</h2>
+      <p>Agents hold leases with a generation number. A Nurse claims the expired lease; the old agent’s token is fenced off. Resume from the last verified step.</p>
+      <ul><li>findOneAndUpdate leases + fencing</li><li>MongoDBSaver checkpoints</li><li>change streams + resume tokens</li><li>TTL indexes</li></ul>
+    </div>
+    <div class="q">
+      <h2><i>3</i>Can it adapt when fields change?</h2>
+      <p>A schema check spots the rename. Claude proposes the mapping, the Guard checks it on real values, Atlas stores it by system version.</p>
+      <ul><li>$jsonSchema validators</li><li>field-diff aggregation</li><li>$vectorSearch memory</li></ul>
+    </div>
+    <div class="q last">
+      <h2><i>+</i>And it proves it got faster.</h2>
+      <p>The learning curve and round-by-round times are computed in the database, not in the browser.</p>
+      <ul><li>$setWindowFields ★</li><li>$percentile p50 / p90 ★</li></ul>
+    </div>
+  </div>
+  <div class="foot" style="top:830px"><span class="dim">★ in the code, behind the MONGO_SPINE switch (off by default).</span></div>
+</div></section>
+
+<script>
+(() => {
+  const W = 1600, H = 900, secs = [...document.querySelectorAll(".s")], all = new URLSearchParams(location.search).has("all");
+  const fit = () => { const s = all ? innerWidth / W : Math.min(innerWidth / W, innerHeight / H), h = all ? H * s : Math.max(innerHeight, H * s);
+    for (const sec of secs) { sec.style.height = `${h}px`;
+      sec.firstElementChild.style.transform = `translate(${Math.max(0, (innerWidth - W * s) / 2)}px, ${Math.max(0, (h - H * s) / 2)}px) scale(${s})`; } };
+  addEventListener("resize", fit); fit();
+  const hashGo = () => { const t = document.querySelector(location.hash || "#s1"); if (t) t.scrollIntoView(); };
+  addEventListener("load", hashGo); document.fonts?.ready.then(hashGo);
+  const at = () => secs.reduce((b, s, i) => Math.abs(s.getBoundingClientRect().top) < Math.abs(secs[b].getBoundingClientRect().top) ? i : b, 0);
+  const go = (i) => secs[Math.max(0, Math.min(secs.length - 1, i))].scrollIntoView({ behavior: "smooth" });
+  addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key >= "1" && e.key <= "3") go(+e.key - 1);
+    else if (["ArrowRight", "ArrowDown", "PageDown", " "].includes(e.key)) { e.preventDefault(); go(at() + 1); }
+    else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) { e.preventDefault(); go(at() - 1); }
+    else if (e.key.toLowerCase() === "d") location.href = "./diagram";
+    else return;
+  });
+})();
+</script>
+</body>
+</html>

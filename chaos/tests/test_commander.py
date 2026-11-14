@@ -53,6 +53,7 @@ def test_off_by_default_strikers_ignore_orders(systems, monkeypatch, fast):
 
 
 def test_combos_are_vetted_and_feasible(monkeypatch):
+    monkeypatch.setenv("RED_FLEET", "1")   # false_log is a fleet-only fault; the Commander only runs inside the fleet
     monkeypatch.setenv("CHAOS_AGENT_FREEZE", "1")
     monkeypatch.delenv("RED_FLEET_AGENTS", raising=False)
     s = snap(agents=HIVE, mid_send=[a for a in HIVE if a["phase"] == "step_sent"], incidents=[INC])
@@ -66,6 +67,7 @@ def test_combos_are_vetted_and_feasible(monkeypatch):
 
 
 def test_claude_pick_must_be_on_the_menu(systems, monkeypatch, fast):
+    monkeypatch.setenv("RED_FLEET", "1")   # false_log is a fleet-only fault; the Commander only runs inside the fleet
     _night_with_pending_mainframe_step()
     monkeypatch.setattr(commander.llm, "llm_available", lambda: True)
     monkeypatch.setattr(commander.llm, "complete", lambda *a, **k: '{"combo": "nuke-it", "reason": "x"}')
@@ -141,3 +143,28 @@ def test_ordered_victim_is_kept_when_still_on_the_menu():
     assert strike["victim"] == "worker-web-1" and strike["params"]["selector"] == {"agent": "worker-web-1"}
     strike, _ = commander.order_strike("red-assassin", {**order, "victim": "worker-gone-9"}, s, cfg())
     assert strike["victim"] == "worker-mainframe-1"   # victim left: the worker mid-send now
+
+
+def test_poison_then_break_combo_needs_the_switch_and_a_poisonable_repair(monkeypatch):
+    monkeypatch.setenv("RED_FLEET_AGENTS", "red-memory,red-saboteur")
+    learned = [{"id": "PB-0003", "fault_class": "disk_fill", "system": "unix"}]
+    assert commander.combos(snap(poisonable=learned), cfg()) == []          # CHAOS_POISON_MEMORY off
+    monkeypatch.setenv("CHAOS_POISON_MEMORY", "1")
+    got = commander.combos(snap(poisonable=learned), cfg())
+    assert [o["combo"] for o in got] == ["poison-then-break"]
+    assert got[0]["steps"] == [{"persona": "red-memory", "fault": "poison_memory", "target": "swarm", "victim": "PB-0003"},
+                               {"persona": "red-saboteur", "fault": "disk_fill", "target": "unix"}]
+    strike, _ = commander.order_strike("red-memory", {**got[0]["steps"][0], "reason": "r"}, snap(poisonable=learned), cfg())
+    assert strike["params"] == {"playbook": "PB-0003"}
+
+
+def test_reset_reusing_run_id_does_not_carry_old_campaigns(systems, fast, monkeypatch):
+    monkeypatch.setenv("RED_COMMANDER_MAX", "1")
+    run_id = _night_with_pending_mainframe_step()
+    old = now() - timedelta(seconds=900)   # last session's RUN-0001, before this night started
+    world().red_agents.insert_one({"_id": commander.COMMANDER_ID, "lessons": [{"run_id": run_id, "ts": old}],
+                                   "campaign": {"id": "CMP-old", "run_id": run_id, "status": "active", "started_at": old,
+                                                "steps": [], "current": 0}})
+    commander.Commander(cfg()).step()
+    camp = world().red_agents.find_one({"_id": commander.COMMANDER_ID})["campaign"]
+    assert camp["id"] != "CMP-old" and camp["status"] == "active"

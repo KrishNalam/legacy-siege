@@ -10,6 +10,7 @@ import subprocess
 import sys
 import time
 
+from .. import faults
 from . import commander, core
 from .personas import PERSONAS
 
@@ -96,6 +97,8 @@ def main() -> None:
         return run_agent(a.agent)
     raw = os.environ.get("RED_FLEET_AGENTS", "").strip()
     ids = [i.strip() for i in raw.split(",") if i.strip() in PERSONAS] if raw else list(PERSONAS)
+    # no process for a Striker whose whole kit is switched off (e.g. the Memory Striker without CHAOS_POISON_MEMORY)
+    ids = [i for i in ids if any(faults.FAULTS[f].enabled() for f in PERSONAS[i].faults)]
     run_fleet(ids)
 
 

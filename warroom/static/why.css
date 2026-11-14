@@ -1,0 +1,71 @@
+/* Legacy Siege · why it matters. Same printed-transcript look as diagram.css: one monospace face at one weight,
+   paper header over a black exhibit, thin rules, inverted chips. Colour means the same thing:
+   red = attack / a lie, green = verified, amber = memory / legacy. Type is big: this page is read from across a room. */
+@font-face { font-family: "JB Mono"; src: url("vendor/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: block; }
+:root {
+  --ink: #f2f2f2; --paper: #0a0a0a; --gutter: #6e6e6e; --faint: #343434; --muted: #a0a0a0;
+  --red: #ff4b55; --green: #2fd36b; --amber: #f0a030; --warn: #ffc400;
+  --mono: "JB Mono", ui-monospace, Menlo, "DejaVu Sans Mono", monospace;
+}
+* { box-sizing: border-box; }
+html { scroll-snap-type: y mandatory; }
+html, body { margin: 0; background: #000; color: var(--ink); overflow-x: hidden; }
+body { font-family: var(--mono); font-size: 14px; line-height: 1.8; font-weight: 400; }
+b, strong, h1, h2, h3 { font-weight: 400; margin: 0; }
+em { font-style: normal; }
+.red { color: var(--red); } .grn { color: var(--green); } .amb { color: var(--amber); }
+.dim { color: var(--muted); }
+
+/* each section is one 1600 × 900 sheet, scaled to fit (why.html sets the transform) */
+.s { position: relative; overflow: hidden; scroll-snap-align: start; background: #000; height: 100vh; }
+.f { position: absolute; left: 0; top: 0; width: 1600px; height: 900px; transform-origin: 0 0; background: var(--paper); counter-reset: ln; }
+.f > * { position: absolute; }
+
+/* paper header, same as the diagram */
+.sheet { left: 0; top: 0; width: 1600px; height: 84px; background: #f4f4f1; color: #111;
+  --ink: #111; --paper: #f4f4f1; --gutter: #8a8a8a; --muted: #555; --faint: #c9c9c9; }
+.l { position: absolute; left: 60px; right: 40px; height: 26px; line-height: 26px; counter-increment: ln; white-space: nowrap; }
+.l::before { content: counter(ln); position: absolute; left: -44px; width: 28px; text-align: right; font-size: 10px; color: var(--gutter); }
+.row { display: flex; justify-content: space-between; align-items: center; gap: 2ch; }
+.brand { letter-spacing: .14em; }
+.chip { background: var(--ink); color: var(--paper); padding: 0 1ch; margin-left: 1ch; }
+.nav { display: flex; gap: 1ch; }
+.nav a { color: var(--ink); text-decoration: none; border: 1px solid var(--ink); padding: 0 1.2ch; height: 26px; line-height: 24px; }
+.nav a:hover, .nav a.on { background: var(--ink); color: var(--paper); }
+.nav a.back { border-color: var(--amber); color: #8a5200; margin-left: 2ch; }
+.nav a.back:hover { background: var(--amber); color: #111; }
+
+/* black exhibit */
+.k { left: 60px; font-size: 16px; letter-spacing: .14em; color: var(--muted); }
+.k::after { content: ""; display: block; width: 1480px; border-top: 1px solid var(--faint); margin-top: 6px; }
+h1 { left: 60px; font-size: 104px; line-height: 1.12; letter-spacing: -.02em; }
+.foot { left: 60px; font-size: 20px; }
+
+.cards { left: 60px; width: 1480px; display: grid; gap: 24px; }
+.cards.c4 { grid-template-columns: repeat(4, 1fr); }
+.card { border: 1px solid var(--ink); padding: 22px 24px 26px; min-height: 330px; box-shadow: 6px 6px 0 var(--faint); }
+.card .ic { font-size: 30px; color: var(--amber); height: 52px; }
+.card h2 { font-size: 40px; line-height: 1.15; margin-bottom: 16px; }
+.card p { font-size: 22px; line-height: 1.45; margin: 0; color: var(--muted); }
+.card.red { border-color: var(--red); box-shadow: 6px 6px 0 #4a161a; }
+.card.red .ic { color: var(--red); animation: blink 1.6s steps(2, jump-none) infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+
+.big { left: 60px; width: 1480px; margin: 0; padding: 0; list-style: none; counter-reset: it; }
+.big li { counter-increment: it; display: grid; grid-template-columns: 90px 640px 1fr; align-items: baseline; padding: 22px 0; border-bottom: 1px dashed var(--faint); }
+.big li::before { content: "0" counter(it); font-size: 22px; color: var(--gutter); }
+.big b { font-size: 40px; line-height: 1.2; }
+.big span { font-size: 24px; line-height: 1.4; color: var(--muted); }
+
+.grid { left: 60px; width: 1480px; display: grid; grid-template-columns: repeat(4, 1fr); column-gap: 0; }
+.grid .hd { grid-column: 1 / -1; display: none; }
+.q { border-left: 1px solid var(--faint); padding: 0 26px 0 26px; min-height: 620px; }
+.hd + .q { border-left: 0; padding-left: 0; }
+.q h2 { font-size: 30px; line-height: 1.25; min-height: 130px; margin-bottom: 14px; }
+.q h2 i { font-style: normal; display: inline-block; background: var(--ink); color: var(--paper); width: 1.4em; text-align: center; margin-right: .5ch; }
+.q.last h2 i { background: var(--amber); color: #111; }
+.q p { font-size: 21px; line-height: 1.45; color: var(--muted); margin: 0 0 22px; min-height: 270px; }
+.q p em { color: var(--red); }
+.q ul { list-style: none; margin: 0; padding: 18px 0 0; border-top: 1px solid var(--green); }
+.q li { font-size: 19px; line-height: 1.35; color: var(--green); padding: 4px 0; }
+.q li::before { content: "◆ "; font-size: 14px; vertical-align: 2px; }

@@ -39,6 +39,7 @@ def _local(text: str) -> list[float]:
 
 
 LOCAL_MODEL = "local-hash-v1"
+_voyage_slots = threading.BoundedSemaphore(2)
 _voyage_down_until = 0.0  # monotonic time before which we don't even try Voyage (set after a failure)
 
 
@@ -47,6 +48,8 @@ def _voyage(text: str, input_type: str) -> list[float]:
     can take 3x longer, e.g. on an unreachable host). A straggler thread is a daemon and just finishes later."""
     import voyageai
 
+    if not _voyage_slots.acquire(blocking=False):
+        raise TimeoutError("voyage provider still busy")
     box: dict = {}
 
     def run() -> None:
@@ -56,9 +59,15 @@ def _voyage(text: str, input_type: str) -> list[float]:
             box["vec"] = list(r.embeddings[0])
         except BaseException as e:  # noqa: BLE001 - reported to the caller below
             box["err"] = e
+        finally:
+            _voyage_slots.release()
 
     t = threading.Thread(target=run, daemon=True, name="voyage-embed")
-    t.start()
+    try:
+        t.start()
+    except BaseException:
+        _voyage_slots.release()
+        raise
     t.join(config.EMBED_TIMEOUT_S)
     if t.is_alive():
         raise TimeoutError(f"voyage embed exceeded {config.EMBED_TIMEOUT_S}s")
