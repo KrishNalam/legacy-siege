@@ -20,7 +20,7 @@ from langgraph.graph import END, START, StateGraph
 from common import config as shared
 from common.db import col, now
 
-from .. import schema, settings, steps, verify
+from .. import recovery, schema, settings, steps, verify
 from ..harness import Agent, checkpointer, log
 from .. import lessons
 
@@ -68,6 +68,10 @@ def build_graph(agent: Agent):
         if not lessons.enabled():
             return
         try:
+            rejected = recovery.reject_bad_memory(inc, evidence, agent.id)
+            if rejected:
+                agent.think(f"Rejected memory {rejected}: its repair failed read-back and disagrees with the repair policy; "
+                            "retiring it and asking for a fresh plan.", kind="reject", incident=inc, pause=False)
             doc = col("incidents").find_one({"_id": inc}, {"fault_class": 1}) or {}
             ls = lessons.record_failure(inc, st, aid, evidence, agent.id, sysc.version(st["system"]),
                                         doc.get("fault_class"))
