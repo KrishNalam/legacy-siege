@@ -18,7 +18,7 @@ import time
 
 from pymongo import DESCENDING, ReturnDocument
 
-from common import config
+from common import config, progress
 from common.db import next_id, now, swarm, world
 
 from . import decider, faults, scenarios
@@ -86,7 +86,7 @@ def announce_current(run_id: str, round: int) -> None:
 # ------------------------------------------------------------------ fire one fault
 def fire(fault: str, target: str | None = None, params: dict | None = None, manual: bool = True,
          run_id: str | None = None, extra: dict | None = None, who: str | None = None,
-         why: str | None = None) -> dict:
+         why: str | None = None, step: tuple[int, int] | None = None) -> dict:
     """Execute one fault and record it. Returns the final ``chaos_events`` document.
 
     The event is inserted *before* the fault executes (status ``firing``) so the war room
@@ -125,11 +125,16 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
     _events().insert_one(event)
     if event.get("runner_decision"):
         decider.link(event["runner_decision"], event["_id"])
-    try:
-        result = faults.execute(f, target, params)
-    except Exception as e:  # never lose the event record because a fault blew up
-        log.exception("fault %s failed", fault)
-        result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    # PROGRESS_ETA (off = no-op): ETA from past runs on start, one duration record + done line at the end
+    with progress.track("world", f"attack:{f.name}", target, "red" if red else "chaos", agent=who,
+                        label=f"{'Red fleet' if red else 'Chaos'}: {f.name} on {target or 'hive'}",
+                        step=step[0] if step else None, of=step[1] if step else None) as tracked:
+        try:
+            result = faults.execute(f, target, params)
+        except Exception as e:  # never lose the event record because a fault blew up
+            log.exception("fault %s failed", fault)
+            result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        tracked.outcome = "ok" if result.get("ok") else "failed"
     finished = _events().find_one_and_update(
         {"_id": event["_id"]},
         {"$set": {"result": result, "status": "ok" if result.get("ok") else "failed", "done_at": now()}},
@@ -161,8 +166,9 @@ def _observe_later(event_id: str) -> None:
 # ------------------------------------------------------------------ play a scenario
 def _play(run_id: str, scn: dict, stop: threading.Event, on_event=None) -> None:
     t0 = time.monotonic()
+    total = len(scn["steps"])
     try:
-        for step in scn["steps"]:
+        for i, step in enumerate(scn["steps"], 1):
             delay = config.pace(step["t"]) - (time.monotonic() - t0)  # PACE=0 -> back-to-back, same order
             if delay > 0 and stop.wait(delay):
                 break
@@ -171,7 +177,8 @@ def _play(run_id: str, scn: dict, stop: threading.Event, on_event=None) -> None:
             if decider.enabled():
                 decider.seeded_step(step, scn["_id"], run_id)
             ev = fire(step["fault"], step["target"], step.get("params"), manual=False, run_id=run_id,
-                      who=f"scenario:{scn['_id']}", why=step.get("why"))
+                      who=f"scenario:{scn['_id']}", why=step.get("why"),
+                      **({"step": (i, total)} if progress.enabled() else {}))
             _runs().update_one({"_id": run_id}, {"$inc": {"steps_fired": 1}})
             if on_event:
                 on_event(ev)
