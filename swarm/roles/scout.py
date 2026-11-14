@@ -24,7 +24,7 @@ from common import config as shared
 from common.db import col, next_id, now, txn
 from common.events import say as bus
 
-from .. import leases, policy, recall, recovery, scale, second_opinion, settings, steps
+from .. import leases, policy, recall, recovery, scale, second_opinion, settings, steps, workflow
 
 from ..harness import Agent, checkpointer, main_loop, retrying
 from .. import lessons
@@ -278,12 +278,13 @@ def build_graph(agent: Agent):
                 drove = second_opinion.decide(agent.id, inc, state, raw, state["root"], state["fault_class"],
                                               say=lambda t: say(inc_id, t, system=state["root"], pause=False))
                 raw = drove["plan"]
+            raw, wf_lines = workflow.with_memory(raw, sysc.ops)  # WORKFLOW_DRIFT: learned prerequisites up front
             plan_steps = [{
                 "step_id": f"{inc_id}-s{i}", "n": i, "desc": s["desc"], "system": s["system"], "op": s["op"],
                 "params": s["params"], "destructive": bool(s["destructive"] or (s["system"], s["op"]) in policy.DESTRUCTIVE),
                 "task_id": None, "status": "planned", "action_id": None, "attempts": [], "agent": None,
                 "evidence": None, "approval_id": None, "ts": now(),
-                **{k: s[k] for k in ("source", "ai_why") if s.get(k)}} for i, s in enumerate(raw, 1)]
+                **{k: s[k] for k in ("source", "ai_why", "workflow") if s.get(k)}} for i, s in enumerate(raw, 1)]
             fenced(config, inc_id, {"$set": {
                 "steps": plan_steps, "status": "fixing", "root_cause_system": state["root"],
                 "fault_class": state["fault_class"], "root_cause": state.get("root_cause"),
@@ -292,6 +293,8 @@ def build_graph(agent: Agent):
             if drove is None and not state.get("hit") and not second_opinion.owned_elsewhere(inc):
                 # (a recall hit skips it: keep Night 2's speedup beat clean)
                 second_opinion.start(agent.id, inc, state, plan_steps, state["root"], state["fault_class"])
+            for line in wf_lines:
+                say(inc_id, line, kind="recall", system=state["root"], pause=False)
             desc = "; ".join(f"{s['op']}{' (needs approval)' if s['destructive'] else ''}" for s in plan_steps)
             who = "Claude's plan" if drove and drove["decision"] == "ai_plan" else "Plan"
             say(inc_id, f"{who}, {len(plan_steps)} steps: {desc}.", system=state["root"])

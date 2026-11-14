@@ -259,7 +259,8 @@ def items(current_versions: dict[str, int] | None = None, limit: int = 100) -> l
                     "stale": bool(m.get("stale")) or (sv is not None and cv.get(m.get("system")) not in (None, sv)),
                     "stale_reason": m.get("stale_reason"), "uses": m.get("uses"), "last_used_at": m.get("ts"),
                     "learned_at": (m.get("history") or [{}])[0].get("ts") or m.get("ts"),
-                    "summary": f"{m.get('field')} ← {m.get('source')} (was {m.get('previous')})",
+                    "summary": (f"{m.get('op')} needs {' → '.join(m.get('requires') or [])} first (workflow)"
+                                if m.get("kind") == "workflow" else f"{m.get('field')} ← {m.get('source')} (was {m.get('previous')})"),
                     "incident": m.get("learned_from")})
     return out
 

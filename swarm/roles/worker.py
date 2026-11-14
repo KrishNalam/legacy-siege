@@ -19,7 +19,7 @@ from langgraph.graph import END, START, StateGraph
 
 from common.db import col, now, txn
 
-from .. import diagnosis, leases, recovery, schema, settings, steps, verify
+from .. import diagnosis, leases, recovery, schema, settings, steps, verify, workflow
 from ..policy import fmt_op
 from ..harness import Agent, checkpointer, main_loop, retrying
 from ..http import SystemsUnavailable
@@ -108,6 +108,8 @@ def build_graph(agent: Agent):
         for s in mine:
             if s["status"] == "verified":
                 continue
+            if s["status"] == "failed" and workflow.refusal(s) and workflow.adapt(agent, task, _who(config)[1], s):
+                return select(state, config)  # WORKFLOW_DRIFT: a prerequisite step now comes first
             if s["status"] == "failed" and len(s.get("attempts") or []) >= recovery.budget(s):
                 agent.think(f"{s['step_id']} failed {len(s.get('attempts') or [])} attempts; giving the task back to the scout.",
                             incident=task["incident"], system=s["system"], pause=False)
