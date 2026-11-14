@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Legacy Siege · Diagram</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Cpath fill='%23111' d='M0 0h16v16H0z'/%3E%3Cpath fill='%23fff' d='M3 3h4v4H3zM9 9h4v4H9zM9 3h4v1H9zM3 12h4v1H3z'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="diagram.css">
+</head>
+<body>
+<!-- Diagram view: the agents and the systems they work on, drawn as one live wiring diagram.
+     Same data as every other view: the /ws change stream (js/store.js) + the existing REST API.
+     Classic war room: ?classic=1 · W9's flowchart: ?view=flow -->
+<div id="fit">
+<div id="frame">
+  <header class="sheet">
+    <div class="l row" style="top:14px"><span>LEGACY SIEGE&nbsp;&nbsp;/&nbsp;&nbsp;NIGHT SHIFT AT AN OLD BANK</span><span id="conn" class="conn"><i></i><span id="conn-txt">CONNECTING…</span></span></div>
+    <div class="l row" style="top:42px"><span class="dim">AI AGENTS KEEP A 1980s BANK RUNNING WHILE WE ATTACK IT. <span id="night" class="chip">READY</span></span>
+      <nav class="controls">
+        <button id="btn-start" class="btn inv" title="S">START</button>
+        <button id="btn-kill" class="btn" title="Kill the worker that is in the middle of a job (K)">KILL A WORKER</button>
+        <button id="btn-queen" class="btn" title="Kill the queen, the coordinator; the backup queen takes over (Q)">KILL THE QUEEN</button>
+        <button id="btn-next" class="btn" title="N">NEXT NIGHT</button>
+        <span class="more">
+          <button id="btn-more" class="btn" aria-haspopup="true">RESET ▾</button>
+          <div id="more-pop" class="pop" hidden>
+            <button data-reset="next_round">RESET THIS NIGHT <small>KEEP WHAT THE AGENTS LEARNED</small></button>
+            <button data-reset="full">FULL RESET <small>WIPE EVERYTHING, BACK TO NIGHT 1</small></button>
+            <hr>
+            <button data-scn="bank-night-1">RUN NIGHT 1</button>
+            <button data-scn="bank-night-2">RUN NIGHT 2</button>
+            <button data-scn="bank-night-3">RUN NIGHT 3</button>
+            <hr>
+            <button id="btn-details">DETAILS <small>MONGODB, MEMORY SEARCH, NUMBERS</small></button>
+            <a href="./?classic=1">CLASSIC WAR ROOM VIEW</a>
+            <a href="./?view=flow">FLOWCHART VIEW</a>
+          </div>
+        </span>
+      </nav>
+    </div>
+  </header>
+
+  <main class="screen">
+    <div class="l row" style="top:104px"><span id="ex-a-l" class="dim">THE HIVE</span><span>EXHIBIT A: THE AGENTS AT WORK</span><span id="clock" class="dim">—</span></div>
+    <svg id="wires" class="wires" viewBox="0 0 1600 900" aria-hidden="true"></svg>
+    <div id="nodes"></div>
+    <div class="l rule" style="top:578px"><span>================================================================================================================================================================</span></div>
+    <div class="l row" style="top:604px"><span class="dim">EVERY MARK IS A REAL WRITE IN MONGODB</span><span>EXHIBIT B: WHO DID WHAT TONIGHT</span><span class="dim" id="ex-b-r">&nbsp;</span></div>
+    <div id="strips"></div>
+    <div id="board"></div>
+    <div class="l legend" style="top:832px"><span>H CHECK A SYSTEM&nbsp;&nbsp;S SEND A FIX&nbsp;&nbsp;V VERIFIED&nbsp;&nbsp;<b class="x">X</b> CAUGHT A LIE&nbsp;&nbsp;A ASK A HUMAN&nbsp;&nbsp;R REMEMBERED&nbsp;&nbsp;<b class="k">†</b> KILLED&nbsp;&nbsp;T TOOK OVER&nbsp;&nbsp;M SAVED TO MEMORY</span></div>
+    <div class="l now" style="top:862px"><span class="now-k">NOW</span><span id="now" class="now-t" aria-live="polite">CONNECTING TO THE LIVE FEED…</span></div>
+  </main>
+
+  <div id="approval" class="approval" hidden>
+    <div class="ap-k">YOUR OK IS NEEDED</div>
+    <div class="ap-t" id="ap-t"></div>
+    <div class="ap-d" id="ap-d"></div>
+    <div class="ap-b"><button class="btn inv" id="ap-yes">APPROVE</button><button class="btn" id="ap-no">DENY</button></div>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+</div>
+</div>
+
+<div id="details" class="details" hidden>
+  <div class="det-box">
+    <div class="det-h"><h2>DETAILS</h2><button class="x" id="det-x" aria-label="close">×</button></div>
+    <div id="det-body" class="det-body"></div>
+  </div>
+</div>
+
+<script type="module" src="diagram.js"></script>
+</body>
+</html>

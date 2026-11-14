@@ -245,3 +245,19 @@ def test_token_write_retries_and_preserves_newer_token():
         assert saved == [{"_data": "one"}, {"_data": "one"}, {"_data": "two"}]
 
     asyncio.run(exercise())
+
+
+def test_views_switch_classic_stays_default(app_client, monkeypatch):
+    """WARROOM_VIEW off (default) keeps the classic war room on /; the diagram and flow views are always
+    reachable, and ?classic=1 always wins."""
+    monkeypatch.delenv("WARROOM_VIEW", raising=False)
+    assert 'src="app.js"' in app_client.get("/").text
+    for url, marker in (("/diagram", "diagram.js"), ("/?view=diagram", "diagram.js"), ("/flow", "flow.js"),
+                        ("/?view=flow", "flow.js"), ("/classic", 'src="app.js"'), ("/?classic=1", 'src="app.js"')):
+        r = app_client.get(url)
+        assert r.status_code == 200 and marker in r.text, url
+    monkeypatch.setenv("WARROOM_VIEW", "diagram")
+    assert "diagram.js" in app_client.get("/").text
+    assert 'src="app.js"' in app_client.get("/?classic=1").text
+    for asset in ("/diagram.js", "/diagram.css", "/flow.js", "/flow.css"):
+        assert app_client.get(asset).status_code == 200, asset
