@@ -88,3 +88,18 @@ def test_hung_voyage_is_bounded(monkeypatch):
     t = time.monotonic()
     assert embed.embed_with_model("x")[1] == embed.LOCAL_MODEL
     assert time.monotonic() - t < 1.5
+
+
+def test_rate_limit_error_falls_back_instantly(monkeypatch):
+    import time
+
+    from voyageai.error import RateLimitError
+
+    class Limited(_Ok):
+        def embed(self, texts, **k):
+            raise RateLimitError("429 too many requests")
+
+    _fake(monkeypatch, Limited)
+    t = time.monotonic()
+    vec, model = embed.embed_with_model("x", "query")
+    assert model == embed.LOCAL_MODEL and len(vec) == config.EMBED_DIM and time.monotonic() - t < 0.5
