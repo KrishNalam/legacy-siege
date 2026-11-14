@@ -354,3 +354,33 @@ def test_stats_write_never_blocks(monkeypatch):
     for _ in range(50):
         llm._record("t", "timeout")
     assert time.monotonic() - t < 0.2 and llm.guard_stats()["t.timeout"] >= 50
+
+
+
+def test_params_left_to_policy_is_not_claudes_plan(inc, monkeypatch):
+    ops = [("mainframe", "quarantine_record", {})] + GOOD[1:]  # no record_id: the policy would supply it
+    d, said, ai = drive(inc, monkeypatch, claude(ops))
+    assert d["decision"] == "rules_plan" and "left params of quarantine_record to the policy" in ai["decision_reason"]
+
+
+def test_decide_failure_marks_card_offline_at_once(inc, monkeypatch):
+    doc, state = inc
+
+    def boom(*a, **k):
+        raise RuntimeError("x")
+    monkeypatch.setattr(so, "hypothesis_lines", boom)  # fails after the "thinking" write
+    monkeypatch.setattr(so.llm, "guarded_json", lambda *a, **k: (claude(GOOD), {"outcome": "ok", "latency_ms": 1}))
+    d = so.decide("scout-1", doc, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
+    ai = col("incidents").find_one({"_id": "INC-0099"})["ai"]
+    assert d["decision"] == "rules_plan" and ai["status"] == "offline" and ai["decision"] == "rules_plan"
+    assert "AI step failed (RuntimeError)" in ai["decision_reason"]
+
+
+def test_map_field_is_in_the_catalog():
+    plan = [{"system": "portal", "op": "map_field", "params": {"field": "balance", "source": "acct_bal"}, "n": 1,
+             "destructive": False, "desc": ""},
+            {"system": "portal", "op": "refresh_cache", "params": {}, "n": 2, "destructive": False, "desc": ""}]
+    p = prop(("portal", "map_field", {"field": "balance", "source": "acct_bal"}), ("portal", "refresh_cache", {}),
+             root="unix", fc="other")
+    res = so.judge(p, plan, "unix", "other", READBACK)
+    assert [v["verdict"] for v in res["verdicts"]] == ["accepted", "accepted"]

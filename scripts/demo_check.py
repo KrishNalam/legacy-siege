@@ -490,7 +490,7 @@ class Demo:
                         and src == ({"ai"} if ai.get("decision") == "ai_plan" else {"policy"})
                         and (judged or ai.get("status") == "offline"))
                 parts.append(f"{inc_id} decision={ai.get('decision')} ({str(ai.get('decision_reason'))[:60]})")
-            elif config.AI_DRIVES and not config.AI_SECOND_OPINION and not ai:
+            elif not ai and inc_id != inc_ids[0]:
                 good = True  # recall night: a fresh playbook short-circuits, Claude isn't asked
                 parts.append(f"{inc_id} recall hit: AI skipped")
             else:

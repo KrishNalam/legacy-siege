@@ -131,7 +131,7 @@ Docker, Fly and the other hosting options. The app reads only `MONGODB_URI`; oth
 | var | effect without it |
 |---|---|
 | `ANTHROPIC_API_KEY` (+ `LLM_MODEL`) | No **AI second opinion** card (also needs `AI_SECOND_OPINION=1`) (Claude's independent diagnosis + op plan per incident, judged op-by-op by the deterministic policy and read-backs, `swarm/second_opinion.py`); agents narrate with fixed sentences and the Gardener writes a template explanation |
-| `AI_DRIVES=1` (+ key) | Off by default. When on, Claude reasons over the evidence at plan time and **its plan runs** if it passes every guardrail; otherwise (or after `AI_DRIVE_TIMEOUT_S`, 6 s) the rules plan runs and the card says why |
+| `AI_DRIVES=1` (+ key) | Off by default. When on, Claude reasons over the evidence at plan time and **its plan runs** if it passes every guardrail; otherwise (or when `AI_DRIVE_TIMEOUT_S`, 6 s for evidence + Claude, runs out; ≈7 s worst case with bookkeeping) the rules plan runs and the card says why |
 | `VOYAGE_API_KEY` (+ `VOYAGE_MODEL`) | Embeddings use a deterministic local hashing model (`local-hash-v1`, 1024-d). The same vector index works either way |
 | `PACE` (default 1.0) | Multiplier on the deliberate "thinking" delays (0 in tests) |
 
