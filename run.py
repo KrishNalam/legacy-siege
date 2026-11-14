@@ -29,12 +29,55 @@ PROCS = [
 ]
 
 
+def group_alive(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def end_group(pgid: int, grace: float = 8.0) -> None:
+    """SIGTERM a whole process group (a top-level process AND everything it started, e.g. the supervisor's
+    agents), wait up to `grace` for it to empty, then SIGKILL what is left. Each child runs in its own
+    session, so its pid is its group id even after the leader itself has exited."""
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline and group_alive(pgid):
+        time.sleep(0.2)
+    if group_alive(pgid):
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def main() -> None:
     os.chdir(ROOT)
-    setup = [PY, "-m", "scripts.setup_db"] + (["--reset"] if "--reset" in sys.argv else [])
-    subprocess.run(setup, check=True)
     running: dict[str, subprocess.Popen] = {}
     restarts: dict[str, list[float]] = {name: [] for name, _ in PROCS}
+
+    def stop(*_):
+        # every group we ever started (current ones; replaced ones were already ended before relaunch)
+        for name, p in list(running.items()):
+            try:
+                os.killpg(p.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        for name, p in list(running.items()):
+            end_group(p.pid, grace=8.0)
+        sys.exit(0)
+
+    # cleanup handlers BEFORE anything is launched: a Ctrl-C during startup must not orphan children
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    setup = [PY, "-m", "scripts.setup_db"] + (["--reset"] if "--reset" in sys.argv else [])
+    subprocess.run(setup, check=True)
 
     def launch(name: str, cmd: list[str]) -> None:
         with open(LOGS / f"{name}.log", "a") as log:
@@ -47,16 +90,6 @@ def main() -> None:
         if name == "systems":
             time.sleep(2)  # systems must be up before agents start probing
 
-    def stop(*_):
-        for name, p in running.items():
-            try:
-                os.killpg(p.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-        sys.exit(0)
-
-    signal.signal(signal.SIGTERM, stop)
-    signal.signal(signal.SIGINT, stop)
     # Crash-only design: any process may die (chaos kills agents on purpose); state is in MongoDB,
     # so a crashed top-level process is simply restarted. Give up only on a tight crash loop.
     while True:
@@ -70,6 +103,11 @@ def main() -> None:
             if len(recent) >= 5:
                 print(f"{name} crash-looping (exit {p.returncode}); see logs/{name}.log — stopping", flush=True)
                 stop()
+            # its children may still be alive in its process group (e.g. a crashed supervisor's agents):
+            # end that group first, or every restart would add another full set of agents
+            if group_alive(p.pid):
+                print(f"{name}: ending leftover processes of its old group {p.pid}", flush=True)
+                end_group(p.pid)
             print(f"{name} exited with {p.returncode}; restarting", flush=True)
             launch(name, cmd)
 

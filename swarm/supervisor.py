@@ -57,6 +57,31 @@ def roster() -> list[tuple[str, str]]:
     return [tuple(x.split(":", 1)) for x in raw.split(",") if ":" in x]  # type: ignore[misc]
 
 
+def _load_prctl():
+    try:
+        import ctypes  # noqa: PLC0415
+        return ctypes.CDLL("libc.so.6", use_errno=True).prctl
+    except Exception:
+        return None
+
+
+_PRCTL = _load_prctl() if sys.platform.startswith("linux") else None  # resolved in the parent, not after fork
+_SUPERVISOR_PID = os.getpid()
+
+
+def _die_with_parent() -> None:
+    """preexec_fn for every agent process: Linux sends it SIGTERM when the supervisor dies (crash, SIGKILL),
+    so a supervisor restart never leaves a second set of agents behind (they shut down cleanly: leases are
+    handed back and the hive recovers their work from MongoDB as after any death). No imports here: the
+    MongoDB client's threads may hold locks at fork time."""
+    _PRCTL(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+    if os.getppid() != _SUPERVISOR_PID:  # the supervisor already died between fork and prctl
+        os._exit(0)
+
+
+_PREEXEC = _die_with_parent if _PRCTL is not None else None
+
+
 def log(msg: str) -> None:
     print(f"{time.strftime('%H:%M:%S')} [supervisor] {msg}", flush=True)
 
@@ -94,7 +119,7 @@ class Supervisor:
             except (BrokenPipeError, OSError):
                 continue
         if p is None:
-            p = subprocess.Popen([sys.executable, "-m", "swarm.agent", *args], cwd=ROOT)
+            p = subprocess.Popen([sys.executable, "-m", "swarm.agent", *args], cwd=ROOT, preexec_fn=_PREEXEC)
         self.children[agent_id] = (role, p)
         if ephemeral:
             self.ephemeral.add(agent_id)
@@ -110,7 +135,7 @@ class Supervisor:
         if len(self.warm) < scale.WARM and time.monotonic() - self.warm_started >= 0.5:
             self.warm_started = time.monotonic()
             self.warm.append(subprocess.Popen([sys.executable, "-m", "swarm.agent", "--warm"], cwd=ROOT,
-                                              stdin=subprocess.PIPE))
+                                              stdin=subprocess.PIPE, preexec_fn=_PREEXEC))
 
     def live_count(self) -> int:
         return sum(1 for _r, p in self.children.values() if p.poll() is None)
@@ -290,28 +315,35 @@ class Supervisor:
         except Exception:
             pass
 
-    def stop(self, *_):
+    def stop(self, *_, code: int = 0):
         if self.stopping:
             return
         self.stopping = True
         log("stopping all agents")
-        for w in self.warm:
-            if w.poll() is None:
-                w.send_signal(signal.SIGTERM)
-        for _, p in self.children.values():
+        procs = [p for _, p in self.children.values()] + list(self.warm)  # roster, spawned and warm spares
+        for p in procs:
             if p.poll() is None:
                 p.send_signal(signal.SIGTERM)
         deadline = time.monotonic() + 8
-        for _, p in self.children.values():
+        for p in procs:
             try:
                 p.wait(timeout=max(0.1, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
                 p.kill()
-        sys.exit(0)
+        sys.exit(code)
 
     def run(self) -> None:
         signal.signal(signal.SIGTERM, self.stop)
         signal.signal(signal.SIGINT, self.stop)
+        try:
+            self._run()
+        except BaseException as e:  # never orphan the agents: an unexpected error stops them, then exits
+            if not isinstance(e, SystemExit):
+                log(f"supervisor error: {type(e).__name__}: {e}; stopping all agents")
+            self.stop(code=1)
+            raise
+
+    def _run(self) -> None:
         for role, agent_id in roster():
             self.spawn(role, agent_id)
         if self.dynamic:
