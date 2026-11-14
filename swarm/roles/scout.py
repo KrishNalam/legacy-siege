@@ -428,6 +428,12 @@ def build_graph(agent: Agent):
             kind="action", system=sys, pause=False)
         agent.nap(wait_s)
         agent.check("incidents", inc_id)
+        # re-read after the nap: a Guard verdict may have landed while we backed off
+        inc = inc_doc(inc_id)
+        todo = [s for s in sorted(inc.get("steps") or [], key=lambda s: s["n"])
+                if s["step_id"] in ids and s["status"] != "verified"]
+        if not todo:
+            return {"outcome": "await"}
         out = replan_after_new_fault(config, inc, [sys], todo)
         if out:  # a second fault landed mid-repair: fix it first, then redo the unverified steps
             return out
@@ -465,15 +471,29 @@ def build_graph(agent: Agent):
                 continue
             new_steps, added = replanned
             todo = todo or []
-            fenced(config, inc_id, {"$set": {"steps": new_steps, "recovery_rounds": rnd, "status": "fixing"},
-                                    "$push": {"recoveries": {
-                                        "round": rnd, "step_ids": [s["step_id"] for s in todo],
-                                        "attempts_used": sum(len(s.get("attempts") or []) for s in todo),
-                                        "replan": {"system": f["system"], "fault_class": f["fault_class"],
-                                                   "facts": f.get("facts") or [],
-                                                   "added": [s["step_id"] for s in added]},
-                                        "reason": recovery.why_failed(todo) if todo else f"{sys} still unhealthy",
-                                        "ts": now()}}})
+            n_old = len(inc.get("steps") or [])
+            superseded = [s["step_id"] for s in new_steps[:n_old] if s.get("superseded_by_replan")]
+            appended = new_steps[n_old:]
+            # One server-side pipeline update (like the memory replan): steps are flagged superseded only if still
+            # unverified *at write time*, and a retry copy is dropped when its original got verified meanwhile, so
+            # a Guard verdict landing during the backoff nap is never overwritten or redone.
+            unverified = {"$and": [{"$in": ["$$s.step_id", superseded]}, {"$ne": ["$$s.status", "verified"]}]}
+            verified_ids = {"$map": {"input": {"$filter": {"input": "$steps", "as": "v",
+                                                           "cond": {"$eq": ["$$v.status", "verified"]}}},
+                                     "as": "v", "in": "$$v.step_id"}}
+            rec = {"round": rnd, "step_ids": [s["step_id"] for s in todo],
+                   "attempts_used": sum(len(s.get("attempts") or []) for s in todo),
+                   "replan": {"system": f["system"], "fault_class": f["fault_class"], "facts": f.get("facts") or [],
+                              "added": [s["step_id"] for s in added]},
+                   "reason": recovery.why_failed(todo) if todo else f"{sys} still unhealthy", "ts": now()}
+            fenced(config, inc_id, [{"$set": {
+                "steps": {"$concatArrays": [
+                    {"$map": {"input": "$steps", "as": "s", "in": {"$cond": [
+                        unverified, {"$mergeObjects": ["$$s", {"superseded_by_replan": True}]}, "$$s"]}}},
+                    {"$filter": {"input": {"$literal": appended}, "as": "a", "cond": {
+                        "$not": [{"$in": [{"$ifNull": ["$$a.retry_of", None]}, verified_ids]}]}}}]},
+                "recoveries": {"$concatArrays": [{"$ifNull": ["$recoveries", []]}, {"$literal": [rec]}]},
+                "recovery_rounds": rnd, "status": "fixing"}}])
             say(inc_id, f"Recovery {rnd}/{recovery.ROUNDS}: re-diagnosis found a new fault on {f['system']}: "
                         f"{f.get('root_cause') or f['fault_class']}. Re-planning: "
                         f"{', '.join(policy.fmt_op(s) for s in added)} first"
@@ -541,6 +561,7 @@ def build_graph(agent: Agent):
                 # SWARM_RECOVERY: every step verified, yet a system stays down: something new hit it (a re-struck
                 # fault, a second attack). Re-diagnose and fix that instead of waiting out the timeout.
                 next_look = time.monotonic() + recovery.HEALTH_GRACE_S
+                inc = inc_doc(inc_id)
                 out = replan_after_new_fault(config, inc, [s for s, v in health.items() if v != "up"])
                 if out:
                     return out
