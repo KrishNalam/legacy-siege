@@ -20,6 +20,17 @@ TEST_ENV = {
     "FAKE_TICK_S": "0.2", "STEP_HOLD_S": "0", "SYSTEMS_URL": f"http://127.0.0.1:{FAKE_PORT}",
     "ANTHROPIC_API_KEY": "", "VOYAGE_API_KEY": "",
 }
+# parallel runs on one MongoDB: SWARM_TEST_DB_SUFFIX (or the shared TEST_DB_SUFFIX) suffixes both DB names,
+# SWARM_TEST_PORT=0 puts the fake systems server on a free port. Unset: the names/port above, unchanged.
+_SFX_ANY = os.environ.get("SWARM_TEST_DB_SUFFIX") or os.environ.get("TEST_DB_SUFFIX", "")
+TEST_ENV["WORLD_DB"], TEST_ENV["SWARM_DB"] = f"world_test_swarm{_SFX_ANY}", f"swarm_test_swarm{_SFX_ANY}"
+if FAKE_PORT == 0:
+    import socket
+
+    with socket.socket() as _s:
+        _s.bind(("127.0.0.1", 0))
+        FAKE_PORT = _s.getsockname()[1]
+    TEST_ENV["SYSTEMS_URL"] = f"http://127.0.0.1:{FAKE_PORT}"
 os.environ.update(TEST_ENV)  # must happen before anything imports `common`
 
 import httpx  # noqa: E402
