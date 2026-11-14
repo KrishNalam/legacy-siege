@@ -250,3 +250,18 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   (`guard_stats()`, `swarm.stats{_id:"llm_guard"}` `{<task>.<outcome>, all.calls}`). Wrap untrusted system or log
   text with `fence(source, text)` (control/bidi chars stripped, truncated, no tags). Provider seam
   `PROVIDERS[LLM_PROVIDER]` (only `anthropic` today; add e.g. `openrouter` with the same signature).
+- **Schema drift — the adaptation (additive, W3, `swarm/schema.py`).**
+  - New collections `swarm.schema_samples` (TTL 24h on `ts`; `_id:"good:unix:xfer_manifest"` = known-good sample the
+    sentinel rewrites every 10 s while unix+portal are up and the sample matches the expected schema) and
+    `swarm.schema_mappings` (`_id:"unix.xfer_manifest.balance"`, `{source, previous, version, history[], learned_from,
+    verified_by, evidence}`). Both are wiped on full and next_round resets (the estate's schema goes back to v1).
+  - The unix diagnosis hop matches the manifest sample against the expected schema with a `$jsonSchema` query and
+    diffs its fields against the good sample with an aggregation (`$objectToArray`/`$setDifference`/`$type`) →
+    `fault_class:"schema_drift"`, plan `map_field` + `refresh_cache` on portal (`policy.rebind` uses today's names).
+  - Only the Guard stores a mapping: after it verifies `map_field` by read-back (portal reads the new field, values
+    line up with the good sample within 35%) it writes the mapping (version+1) and says
+    "unix renamed X → Y · mapping learned vN". The resolved incident's playbook (with embedding) is the memory that
+    a repeat drift recalls via `$vectorSearch`. `schema_drift` is excluded from the sentinel's Gardener upgrade
+    requests (the mapping is the adaptation).
+  - War room watches `swarm.schema_mappings` (caption + "MAPPING LEARNED" stamp on unix).
+    Rehearsal: `python -m scripts.drift_check` (12 checks, separate from demo_check).

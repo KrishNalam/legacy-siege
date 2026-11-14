@@ -35,7 +35,7 @@ log = logging.getLogger("warroom.stream")
 WATCHED: dict[str, list[str]] = {
     "world": ["systems", "chaos_events", "runs", "system_logs", "op_receipts", "system_state"],
     "swarm": ["agents", "thoughts", "incidents", "tasks", "ledger", "approvals", "upgrade_requests",
-              "playbooks", "messages", "checkpoints", "checkpoint_writes", "stats"],
+              "playbooks", "messages", "checkpoints", "checkpoint_writes", "stats", "schema_mappings"],
 }
 # counted (spine pulses) but never forwarded: high-volume / opaque documents
 COUNT_ONLY = {"system_state", "checkpoint_writes"}

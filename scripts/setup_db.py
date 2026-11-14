@@ -79,7 +79,8 @@ def ensure() -> None:
     _ensure(s, "incidents", INCIDENT_SCHEMA)
     _ensure(s, "ledger", LEDGER_SCHEMA)
     _ensure(s, "agents", AGENT_SCHEMA)
-    for n in ["tasks", "thoughts", "messages", "playbooks", "approvals", "upgrade_requests", "stats", "counters"]:
+    for n in ["tasks", "thoughts", "messages", "playbooks", "approvals", "upgrade_requests", "stats", "counters",
+              "schema_samples", "schema_mappings"]:
         _ensure(s, n)
 
     w.system_logs.create_indexes([
@@ -108,6 +109,8 @@ def ensure() -> None:
         IndexModel([("incident", ASCENDING), ("ts", ASCENDING)]),
     ])
     s.messages.create_index([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h")
+    # schema drift: observed feed samples expire; the known-good sample is re-written every few seconds
+    s.schema_samples.create_index([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h")
     s.tasks.create_index([("incident", ASCENDING)])
     s.tasks.create_index([("status", ASCENDING), ("lease_until", ASCENDING)])
     s.tasks.create_index([("status", ASCENDING), ("specialty", ASCENDING), ("ts", ASCENDING)])
@@ -154,6 +157,7 @@ def reset() -> None:
     for n in ["systems", "system_state", "system_logs", "op_receipts", "chaos_events", "runs"]:
         w[n].delete_many({})
     for n in ["incidents", "tasks", "agents", "thoughts", "messages", "ledger", "playbooks", "approvals",
+              "schema_samples", "schema_mappings",
               "upgrade_requests", "stats", "counters", "checkpoints", "checkpoint_writes"]:
         try:
             s[n].delete_many({})

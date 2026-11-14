@@ -155,6 +155,15 @@ export function installBeats(stage, panels, caption) {
     }
   });
 
+  // ------------------------------------------------ schema drift: a verified field mapping was learned
+  on("change:schema_mappings", (doc, prev, m) => {
+    if (!doc || !doc.source || prev?.version === doc.version) return;
+    const sys = doc.system || "unix";
+    stage.stamp(sys, "MAPPING LEARNED", C.green, { sub: `${doc.previous ?? "?"} → ${doc.source} · v${doc.version}`, dur: 5, rot: -0.06 });
+    caption(`${sys} renamed ${doc.previous ?? "?"} → ${doc.source} · mapping learned v${doc.version}`,
+      "Guard verified by read-back · stored in swarm.schema_mappings for every agent", C.green);
+  });
+
   // ------------------------------------------------ thoughts (activity) + the Guard's rejection stamp
   on("change:thoughts", (doc, prev, m) => {
     if (!doc || m.op !== "insert") return;

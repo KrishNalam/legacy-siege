@@ -37,7 +37,8 @@ DECISIONS = {"approve": "approved", "approved": "approved", "deny": "denied", "d
 # where to look when a clicked id is not the document _id
 ALT_KEYS = {"ledger": ["action_id"], "checkpoints": ["checkpoint_id", "thread_id"],
             "incidents": ["steps.step_id"], "playbooks": ["incident"]}
-NEXT_ROUND_CLEAR = ["tasks", "messages"]  # swarm runtime that must not leak into the next night
+NEXT_ROUND_CLEAR = ["tasks", "messages",  # swarm runtime that must not leak into the next night
+                    "schema_samples", "schema_mappings"]  # the estate's feed schema is back at v1
 
 
 def _chaos():
