@@ -349,3 +349,13 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   menu + `validate` and `runner.fire`; `chaos_events.red` may carry `campaign {id, step, of, combo, ordered_by}` and
   `campaign_reflection`. Thoughts: `role:"red"`, agents `red-commander`, `red-scout-hive`, `red-scout-systems`.
   No new faults, no new collections, no swarm writes beyond thoughts.
+- **Memory Striker (W18; additive, `CHAOS_POISON_MEMORY=1`, default off; supersedes "poison not in the whitelist").**
+  New fault `poison_memory` (kind agent, target `swarm`, params `{playbook?}`) and persona `red-memory` (no process
+  unless the switch is on). It copies a genuine non-stale learned playbook whose `fault_class` is NOT `batch_abort`/
+  `schema_drift` (policy.rebind re-derives those, so poison would be silently neutralised) into
+  `swarm.playbooks {_id:"RED-POISON:<id>", red_planted:true, red_source}` with every fix step's `system` moved to the
+  wrong system, and hides the genuine one (`stale:true, red_hidden_by`). It never edits the genuine fix. Any reset
+  (`runner.cancel()` / setup_db) deletes `red_planted` docs and un-hides `red_hidden_by` docs. The visible defence needs
+  `SWARM_RECOVERY=1` + `FAILURE_MEMORY=1` (W16): Guard read-back rejects the recalled repair, retires it, re-plans.
+  Red `outcome.incidents[].memory_rejected` = incident `recall.rejected`; a rejection counts as `guard_caught:true`.
+  Commander combo `poison-then-break`: poison a learned repair, then the Saboteur/Hacker causes that fault again.
