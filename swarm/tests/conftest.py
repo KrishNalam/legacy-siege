@@ -30,7 +30,7 @@ LOGS = ROOT / "logs"  # git-ignored; agent/supervisor output of test runs lands 
 LOGS.mkdir(exist_ok=True)
 PY = sys.executable
 RUNTIME = ["incidents", "tasks", "agents", "thoughts", "messages", "ledger", "playbooks", "approvals",
-           "upgrade_requests", "stats", "counters", "checkpoints", "checkpoint_writes"]
+           "upgrade_requests", "stats", "counters", "checkpoints", "checkpoint_writes", "spawn_requests"]
 
 
 def wait_for(pred, timeout: float = 30, interval: float = 0.1, what: str = "condition"):
@@ -105,13 +105,13 @@ class Swarm:
         self.log.close()
 
 
-def start_swarm(env_extra=None, log_name="swarm") -> Swarm:
+def start_swarm(env_extra=None, log_name="swarm", agents: int = 12) -> Swarm:
     from common.db import col
 
     s = Swarm(env_extra, log_name)
     try:
-        wait_for(lambda: col("agents").count_documents({"status": {"$in": ["idle", "standby"]}}) >= 12, 60, 0.2,
-                 "12 agents to register")
+        wait_for(lambda: col("agents").count_documents({"status": {"$in": ["idle", "standby"]}}) >= agents, 60, 0.2,
+                 f"{agents} agents to register")
         wait_for(lambda: col("stats").find_one({"_id": "queen_lease", "owner": "queen-1"}), 30, 0.2,
                  "queen-1 to take the queen lease")
     except BaseException:

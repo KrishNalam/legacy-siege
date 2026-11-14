@@ -21,7 +21,7 @@ from common import config
 from common.db import col, now
 from common.events import say
 
-from .. import leases, policy, settings
+from .. import leases, policy, scale, settings
 from ..harness import Agent, checkpointer, main_loop
 
 LEASE_ID = "queen_lease"
@@ -45,6 +45,12 @@ def build_graph(agent: Agent):
         busy = {i["owner"] for i in col("incidents").find({"active": True, "owner": {"$ne": None}}, {"owner": 1})}
         idle = [a["_id"] for a in col("agents").find({"role": "scout", "status": "idle", "last_seen": {"$gte": cutoff}},
                                                      {"_id": 1}).sort("_id", 1) if a["_id"] not in busy]
+        if not idle and scale.enabled():  # dynamic scaling: a scout is spawned for this incident
+            rid = scale.ensure_scout(agent.id, state["incident"])
+            if rid:
+                agent.think(f"No free scout for {state['incident']} — spawning one ({rid}).", kind="spawn",
+                            incident=state["incident"], pause=False)
+                return {"scout": None}
         if not idle:
             agent.think(f"No idle scout for {state['incident']}; the first free scout will self-claim it.",
                         incident=state["incident"], pause=False)

@@ -128,9 +128,12 @@ class Demo:
             ids = {a["_id"] for a in agents}
             roles = [a["role"] for a in agents]
             systems = {d["_id"]: d for d in self.w.systems.find()}
+            # SWARM_DYNAMIC: no standing scouts/workers (they are spawned per incident), so don't wait for them
+            dyn = bool((self.s.stats.find_one({"_id": "swarm_scale"}) or {}).get("dynamic"))
+            pool = dyn or (roles.count("worker") >= 3 and "worker-mainframe-1" in ids and roles.count("scout") >= 1)
             ok = (len(systems) == 3 and all(d["status"] == "up" for d in systems.values())
-                  and roles.count("worker") >= 3 and "worker-mainframe-1" in ids and "guard-1" in ids
-                  and "sentinel-1" in ids and "gardener-1" in ids and roles.count("scout") >= 1
+                  and pool and "guard-1" in ids
+                  and "sentinel-1" in ids and "gardener-1" in ids
                   and roles.count("nurse") >= 1 and not self.s.incidents.count_documents({"active": True}))
             return (agents, systems) if ok else None
 

@@ -80,8 +80,11 @@ def ensure() -> None:
     _ensure(s, "ledger", LEDGER_SCHEMA)
     _ensure(s, "agents", AGENT_SCHEMA)
     for n in ["tasks", "thoughts", "messages", "playbooks", "approvals", "upgrade_requests", "stats", "counters",
-              "schema_samples", "schema_mappings"]:
+              "schema_samples", "schema_mappings", "spawn_requests"]:
         _ensure(s, n)
+    # dynamic scaling (SWARM_DYNAMIC): the supervisor polls pending requests; history expires after a day
+    s.spawn_requests.create_index([("status", ASCENDING), ("ts", ASCENDING)])
+    s.spawn_requests.create_index([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h")
 
     w.system_logs.create_indexes([
         IndexModel([("system", ASCENDING), ("ts", ASCENDING)]),
@@ -158,7 +161,7 @@ def reset() -> None:
         w[n].delete_many({})
     for n in ["incidents", "tasks", "agents", "thoughts", "messages", "ledger", "playbooks", "approvals",
               "schema_samples", "schema_mappings",
-              "upgrade_requests", "stats", "counters", "checkpoints", "checkpoint_writes"]:
+              "upgrade_requests", "stats", "counters", "checkpoints", "checkpoint_writes", "spawn_requests"]:
         try:
             s[n].delete_many({})
         except OperationFailure:

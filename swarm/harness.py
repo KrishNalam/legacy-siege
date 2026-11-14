@@ -18,7 +18,7 @@ from datetime import datetime
 from common import config, events, llm
 from common.db import client, col, now
 
-from . import leases, settings
+from . import leases, scale, settings
 from .http import Systems
 
 _saver = None
@@ -40,9 +40,12 @@ def log(agent_id: str, msg: str) -> None:
 
 class Agent:
     def __init__(self, role: str, agent_id: str, specialty: str | None = None,
-                 standby: bool = False, standby_for: str | None = None):
+                 standby: bool = False, standby_for: str | None = None, ephemeral: bool = False):
         self.id, self.role, self.specialty = agent_id, role, specialty
         self.standby, self.standby_for = standby, standby_for
+        # dynamic scaling (swarm.scale): a spawned bee retires itself once its work is over
+        self.ephemeral, self.retired = ephemeral, False
+        self.last_busy, self.last_incident, self._retire_checked = time.monotonic(), None, 0.0
         self.pid = os.getpid()
         self.systems = Systems()
         self.stop = threading.Event()
@@ -60,7 +63,8 @@ class Agent:
         col("agents").update_one({"_id": self.id}, {
             "$set": {"role": self.role, "specialty": self.specialty, "status": status, "target": target,
                      "incident": None, "task": None, "phase": None, "pid": self.pid, "last_seen": now(),
-                     "standby_for": self.standby_for, "started_at": now(), "died_at": None},
+                     "standby_for": self.standby_for, "started_at": now(), "died_at": None,
+                     **({"spawned": True} if self.ephemeral else {})},
             "$inc": {"generation": 1},
         }, upsert=True)
 
@@ -78,8 +82,26 @@ class Agent:
         self.stop.set()
         raise SystemExit(0)
 
+    def retire(self, why: str) -> None:
+        """Dynamic scaling: leave the hive for good (no leases held). The agent doc is deleted, so the bee
+        disappears from the war room; exit code 0 tells the supervisor not to respawn it."""
+        self.think(f"{self.id} retiring ({why}); the swarm scales back down.", kind="retire", pause=False)
+        self.retired = True
+        self.stop.set()
+        if self._hb is not None:  # no heartbeat may re-register us after the delete
+            self._hb.join(timeout=config.HEARTBEAT_S + 5)
+        col("agents").delete_one({"_id": self.id, "pid": self.pid})
+        log(self.id, f"retired ({why})")
+        raise SystemExit(0)
+
+    def holding(self) -> bool:
+        with self._lock:
+            return bool(self._held)
+
     def shutdown(self) -> None:
         """Clean exit (SIGTERM): hand back leases immediately and grey out."""
+        if self.retired:
+            return
         self.stop.set()
         with self._lock:
             held = dict(self._held)
@@ -133,11 +155,13 @@ class Agent:
         with self._lock:
             self._held[key] = (coll, _id, generation)
             self._lost.discard(key)
+        self.last_busy = time.monotonic()
         return key
 
     def drop(self, coll: str, _id) -> None:
         with self._lock:
             self._held.pop(f"{coll}/{_id}", None)
+        self.last_busy = time.monotonic()
 
     def check(self, coll: str, _id) -> None:
         """Raise LeaseLost if the heartbeat found this lease gone. Call before every action."""
@@ -152,6 +176,8 @@ class Agent:
     # ------------------------------------------------------------------ narration + sprite
     def set(self, **fields) -> None:
         """Update this agent's doc: target (sprite position), phase, status, incident, task."""
+        if fields.get("incident"):
+            self.last_incident = fields["incident"]
         r = col("agents").update_one({"_id": self.id}, {"$set": {**fields, "last_seen": now()}})
         if r.matched_count == 0:  # a full demo reset wiped swarm.agents: re-register, then apply
             self.register()
@@ -211,4 +237,11 @@ def main_loop(agent: Agent, tick, interval: float) -> None:
             import traceback
             traceback.print_exc(file=sys.stdout)
             agent.nap(1.0)
+        if agent.ephemeral:
+            try:
+                scale.maybe_retire(agent)
+            except SystemExit:
+                raise
+            except Exception as e:
+                log(agent.id, f"retire check: {type(e).__name__}: {e}")
         agent.nap(max(0.0, interval - (time.monotonic() - t0)))

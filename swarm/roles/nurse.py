@@ -21,7 +21,7 @@ from langgraph.graph import END, START, StateGraph
 from common import config as shared
 from common.db import col, now, txn
 
-from .. import leases, settings
+from .. import leases, scale, settings
 from ..harness import Agent, checkpointer, main_loop
 from . import scout as scout_role
 from . import worker as worker_role
@@ -175,7 +175,7 @@ def run(agent: Agent) -> None:
         # a task whose specialty has no live worker at all needs no grace period beyond a moment
         orphan_after = now() - timedelta(seconds=min(settings.NURSE_PICKUP_S, 0.5))
         for t in col("tasks").find({"status": "open", "ts": {"$lt": orphan_after}}).sort("ts", 1).limit(5):
-            if _live("worker", specialty=t["specialty"]):
+            if _live("worker", specialty=t["specialty"]) or scale.spawn_pending(task_id=t["_id"]):
                 continue
             won = leases.claim(col("tasks"), {"_id": t["_id"], "status": "open"}, agent.id,
                                extra_set={"status": "claimed", "claimed_at": now()})
@@ -185,7 +185,13 @@ def run(agent: Agent) -> None:
                 worker_role.execute(agent, worker_graph, won)
                 return
         if not _live("scout"):
-            inc = leases.claim(col("incidents"), {"active": True, "status": "open", "opened_at": {"$lt": stale}},
+            q = {"active": True, "status": "open", "opened_at": {"$lt": stale}}
+            if scale.enabled():  # leave an incident alone while the scout spawned for it is on its way
+                busy = [r["incident"] for r in col("spawn_requests").find(
+                    {"role": "scout", "status": {"$in": ["pending", "spawned"]},
+                     "ts": {"$gte": now() - timedelta(seconds=scale.SPAWN_GRACE_S)}}, {"incident": 1})]
+                q["_id"] = {"$nin": busy}
+            inc = leases.claim(col("incidents"), q,
                                agent.id, extra_set={"status": "claimed", "claimed_at": now()})
             if inc:
                 agent.hold("incidents", inc["_id"], inc["generation"])

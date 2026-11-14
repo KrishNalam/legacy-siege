@@ -24,7 +24,7 @@ from common import config as shared
 from common.db import col, next_id, now, txn
 from common.events import say as bus
 
-from .. import leases, policy, recall, second_opinion, settings, steps
+from .. import leases, policy, recall, scale, second_opinion, settings, steps
 from ..harness import Agent, checkpointer, main_loop, retrying
 from .. import lessons
 
@@ -87,12 +87,23 @@ def build_graph(agent: Agent):
         return {"_id": task_id, "status": "failed", "findings": None}
 
     def new_task(inc: dict, task_id: str, kind: str, specialty: str, **fields) -> None:
+        doc = {"_id": task_id, "incident": inc["_id"], "kind": kind, "specialty": specialty,
+               "step_ids": [], "status": "open", "owner": None, "lease_until": None,
+               "generation": 0, "checkpoint_thread": task_id, "ts": now(), **fields}
         try:
-            col("tasks").insert_one({"_id": task_id, "incident": inc["_id"], "kind": kind, "specialty": specialty,
-                                     "step_ids": [], "status": "open", "owner": None, "lease_until": None,
-                                     "generation": 0, "checkpoint_thread": task_id, "ts": now(), **fields})
+            col("tasks").insert_one(doc)
         except DuplicateKeyError:
             pass  # node re-ran after a resume: the task already exists
+        if scale.enabled():  # dynamic scaling: spawn the specialist this task needs if none is free
+            try:
+                rid = scale.ensure_worker(agent.id, doc)
+            except Exception as e:  # never block the incident on scaling; a nurse picks the task up anyway
+                rid = None
+                agent.think(f"Spawn request for {task_id} failed ({type(e).__name__}); a nurse will cover it.",
+                            incident=inc["_id"], pause=False)
+            if rid:
+                agent.think(f"Spawning a {specialty} worker for {task_id} ({rid}).", kind="spawn",
+                            incident=inc["_id"], system=fields.get("system"), pause=False)
 
     def escalate(config, inc_id: str, reason: str) -> dict:
         fenced(config, inc_id, {"$set": {"status": "failed", "active": False, "closed_at": now(),
