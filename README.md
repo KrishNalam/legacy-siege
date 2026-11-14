@@ -96,6 +96,9 @@ fault class has been resolved twice, the sentinel files an **upgrade request** f
 | **LangGraph `MongoDBSaver`** | Every role is a StateGraph checkpointed in `swarm.checkpoints`. The thread id is the *task* id, so the checkpoint follows the work, not the process | `swarm/harness.py:27`; nurse resume `swarm/roles/nurse.py:68` |
 | Atomic counters | `INC-0001`, `RUN-0001`, `CHX-0001` | `common/db.py:47`, `chaos/runner.py:42` |
 | Conditional update | An approval decision lands only on `{status:"pending"}`, so double clicks are no-ops | `warroom/api.py:114` |
+| **Change-stream pre-images** (`MONGO_SPINE=1`) | `changeStreamPreAndPostImages` on tasks/incidents/approvals; a resumable watcher with `fullDocumentBeforeChange` turns every claim, nurse takeover, release and Beekeeper decision into a sha256-chained `swarm.custody` row (before → after owner/generation, lease expired or not). Tamper-evident: `custody.verify_chain()` | `swarm/custody.py`, `scripts/setup_db.py` (`ensure_spine`) |
+| **`$facet` + `$setWindowFields` + `$percentile`** (`MONGO_SPINE=1`) | `/api/spine`: the learning curve per fault class (`$documentNumber` night, `$shift` previous TTR, speedup), p50/p90 TTR per round, median takeover time, custody summary, all computed in MongoDB; shown in the Atlas overlay | `warroom/spine.py` |
+| More `$jsonSchema` (`MONGO_SPINE=1`) | tasks (fencing token is an int, lease a date, status enum), approvals (a decision must carry `decided_by`/`decided_at`), upgrade_requests, playbooks (embedding exactly `EMBED_DIM` long, or the vector index would silently skip it) | `scripts/setup_db.py` |
 
 ## Run it (one command)
 
@@ -131,6 +134,7 @@ Docker, Fly and the other hosting options. The app reads only `MONGODB_URI`; oth
 | var | effect without it |
 |---|---|
 | `ANTHROPIC_API_KEY` (+ `LLM_MODEL`) | No **AI second opinion** card (also needs `AI_SECOND_OPINION=1`) (Claude's independent diagnosis + op plan per incident, judged op-by-op by the deterministic policy and read-backs, `swarm/second_opinion.py`); agents narrate with fixed sentences and the Gardener writes a template explanation |
+| `MONGO_SPINE=1` | Off by default. Adds change-stream pre-images + the lease chain of custody, four more `$jsonSchema` validators and the spine analytics card in the Atlas overlay (needs MongoDB 7.0+; run `scripts.setup_db` once with it on) |
 | `AI_DRIVES=1` (+ key) | Off by default. When on, Claude reasons over the evidence at plan time and **its plan runs** if it passes every guardrail; otherwise (or when `AI_DRIVE_TIMEOUT_S`, 6 s for evidence + Claude, runs out; ≈7 s worst case with bookkeeping) the rules plan runs and the card says why |
 | `VOYAGE_API_KEY` (+ `VOYAGE_MODEL`) | Embeddings use a deterministic local hashing model (`local-hash-v1`, 1024-d). The same vector index works either way |
 | `PACE` (default 1.0) | Multiplier on the deliberate "thinking" delays (0 in tests) |
@@ -209,6 +213,47 @@ survive a round reset (only a full reset clears them), so when the same rename c
 says "seen before: mapping v2 reused": the mapping comes from MongoDB memory with no Claude call, and
 `$vectorSearch` recall makes it a single hop. The scenario `bank-drift` plays it, and `python -m scripts.drift_check` rehearses it
 (14 checks).
+
+### Red fleet (AI attackers, opt-in)
+
+`RED_FLEET=1` makes `run.py` also start `python -m chaos.redfleet`: five AI attackers that play on top of the
+seeded nights (which stay exactly as they are). Each is its own process running its own LangGraph loop
+(scout → plan → strike → observe), aimed at "Finish the Job":
+
+| attacker | strikes with | Statement 3 angle |
+|---|---|---|
+| `red-saboteur` | `batch_abort`, `disk_fill`, `cron_stop`, `session_leak`, timed to break the system the Hive is about to fix next | systems won't hold still mid-job |
+| `red-assassin` | `agent_kill`: the worker mid-send, the crowned queen, a scout, the guard, the sentinel | Q2 resume after a crash |
+| `red-liar` | `lying_success`, `slow_apply`, `false_log` (planted log lines and operator notes blaming the wrong system) | Q1 took effect vs only sent; knowing what actually happened |
+| `red-hacker` | `credential_exploit`, `sqli_exploit`, `config_exploit` while the vuln is still open | an intruder mid-job |
+| `red-drifter` | `schema_drift` (renames the balance field) | Q3 adapt when fields change |
+
+Each attacker's Red Scout step reads the Hive's state from MongoDB (open incidents and their pending steps, live
+agents and phases, systems, learned playbooks, what the rest of the fleet already did). Claude (`LLM_MODEL` via
+`common/llm.py`) picks ONE item from that attacker's menu; the menu is built from the existing fault library, so an
+off-menu pick is rejected (shown in the thought feed) and the attacker's own deterministic playbook decides instead,
+which is also what runs with no key, on a timeout or on bad JSON. Every strike goes through `chaos.runner.fire`, so it
+is an ordinary `chaos_events` document signed `by: "red-<name>"`; the war room captions it as "Red Liar: …". Their
+reasoning shows in the thought feed (role `red`), and each attacker heartbeats into `world.red_agents`.
+
+No caps by default (Krish's call); `RED_FLEET_COOLDOWN_S` (30 s per attacker) keeps the war room readable and
+`RED_FLEET_MAX_ATTACKS`, `RED_FLEET_FIRST_STRIKE_S`, `RED_FLEET_SKIP_SCENARIOS`, `RED_FLEET_FAULTS`, `RED_FLEET_AGENTS`
+and `RED_FLEET_LLM=0` tune it. Guardrails that stay (no permanent damage): it refuses the live `world`/`swarm` DBs
+unless `RED_FLEET_ALLOW_LIVE=1`, holds while the Gardener is mid-upgrade, and never kills the Gardener or the last
+live queen. Reset ▸ Full restores everything. Off by default: with `RED_FLEET` unset nothing changes; keep it off for
+`scripts.demo_check` (it times the seeded beats).
+
+**Red Commander + 2 Scouts (`RED_COMMANDER=1`, off by default, needs `RED_FLEET=1`).** A thread inside the fleet
+supervisor (no extra process). Two cheap Scouts (`red-scout-hive`: busy / mid-send workers, free nurses, where the next
+fix steps land; `red-scout-systems`: weak systems, open vulns, which systems already lie) post findings on
+`world.red_agents`. The Commander (OBSERVE → THINK → ACT → REFLECT; Claude, or a labelled `policy (no reasoning)`
+fallback) picks ONE campaign from the vetted combos feasible right now (`lie-then-freeze`, `lie-then-kill`,
+`false-log-then-kill`, `break-then-drift`, `kill-then-exploit`), assigns each step to a Striker on the board, and the
+Striker executes it from its own menu through `runner.fire` (event `red.campaign = {id, step, of, combo}`). After the
+last step it watches the Hive (`RED_COMMANDER_OBSERVE_S`, 45 s) and reflects (Guard catch, Nurse handoffs, recovery
+time) into `chaos_events.red.campaign_reflection` and its lessons, which feed its next THINK. Knobs:
+`RED_COMMANDER_COOLDOWN_S` (45), `RED_COMMANDER_FIRST_S` (20), `RED_COMMANDER_STEP_GAP_S` (3),
+`RED_COMMANDER_STEP_TIMEOUT_S` (90, an unexecuted step calls the campaign off), `RED_COMMANDER_MAX` (0 = unlimited).
 
 ## Rehearse: `scripts/demo_check.py`
 

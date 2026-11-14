@@ -10,6 +10,7 @@ export const HEALTH = { up: C.green, degraded: C.amber, down: C.red };
 export const ROLE = {
   queen: "#ffd23f", scout: "#4cc9f0", worker: "#7aa2ff", guard: "#b388ff", waggle: "#5eead4",
   sentinel: "#38bdf8", nurse: "#f9a8d4", gardener: "#86efac",
+  red: "#ff5a5f",  // Red fleet attackers (thought feed only; they are not bees)
 };
 export const FONT = {
   display: (px, w = 700) => `${w} ${px}px "Chakra Petch", Inter, sans-serif`,

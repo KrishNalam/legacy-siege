@@ -24,7 +24,7 @@ from common import config as shared
 from common.db import col, next_id, now, txn
 from common.events import say as bus
 
-from .. import leases, policy, recall, scale, second_opinion, settings, steps
+from .. import leases, policy, recall, recovery, scale, second_opinion, settings, steps
 from gardener import help as gardener_help
 from ..harness import Agent, checkpointer, main_loop, retrying
 from .. import lessons
@@ -216,7 +216,9 @@ def build_graph(agent: Agent):
         inc = inc_doc(inc_id)
         path = list(state.get("path") or [])
         n = len(path) + 1
-        task_id = f"{inc_id}-d{n}"
+        # The recall confirm read gets its own id: if the remembered fault doesn't fit, the chain walk starts
+        # again at hop 1 and must not pick up the confirm task's findings (another system's) as its own.
+        task_id = f"{inc_id}-{'c' if mode == 'confirm' else 'd'}{n}"
         new_task(inc, task_id, "diagnose", policy.SPECIALTY[sys], system=sys, mode=mode)
         agent.set(target=sys, phase="diagnosing")
         if mode == "confirm":  # recall path: one quick confirmatory read, no deliberation pause
@@ -319,7 +321,8 @@ def build_graph(agent: Agent):
     def next_group(st: list[dict]) -> list[dict]:
         """Next batch of steps one worker can take: same specialty, in order; a destructive step always
         starts its own batch so its approval is requested right before it runs."""
-        pending = [s for s in sorted(st, key=lambda s: s["n"]) if s["status"] != "verified"]
+        pending = [s for s in sorted(st, key=lambda s: s["n"])
+                   if s["status"] != "verified" and not s.get("superseded_by_replan")]
         if not pending:
             return []
         group = [pending[0]]
@@ -370,7 +373,12 @@ def build_graph(agent: Agent):
             if t and t["status"] in ("open", "claimed"):
                 return {"outcome": "await"}
             if t and t["status"] == "failed":
-                return escalate(config, inc_id, f"{first['step_id']} ({first['op']}) could not be completed")
+                if recovery.enabled() and (inc.get("recall") or {}).get("rejected") and not inc.get("memory_replanned"):
+                    return replan_memory(state, config, inc)
+                if recovery.enabled() and inc.get("recovery_rounds", 0) < recovery.ROUNDS:
+                    return recover(config, inc, t)
+                return escalate(config, inc_id, f"{first['step_id']} ({first['op']}) could not be completed"
+                                + (f" after {recovery.ROUNDS} recovery rounds" if recovery.enabled() else ""))
         if first["destructive"] and not approved(first):
             return {"outcome": "approve"}
         task_id = f"{inc_id}-f{first['n']}"
@@ -381,6 +389,71 @@ def build_graph(agent: Agent):
         agent.set(target=first["system"], phase="fixing")
         say(inc_id, f"Dispatching {', '.join(s['op'] for s in group)} to a {policy.SPECIALTY[first['system']]} "
                     f"worker ({task_id}).", kind="action", system=first["system"])
+        return {"outcome": "await"}
+
+    def replan_memory(state, config, inc):
+        """Keep the rejected attempts in the audit trail; replace their plan with live-policy steps."""
+        raw = policy.fix_plan(state["fault_class"], state.get("params") or {})
+        if not raw:
+            return escalate(config, inc["_id"], "rejected memory has no safe policy replacement")
+        old = [dict(s) for s in inc["steps"]]
+        done = [(s["system"], s["op"], s.get("params") or {}) for s in old if s["status"] == "verified"]
+        for s in old:
+            if s["status"] != "verified":
+                s["superseded_by_replan"] = True
+        n = max(s["n"] for s in old)
+        for s in raw:
+            if (s["system"], s["op"], s.get("params") or {}) in done:
+                continue
+            n += 1
+            old.append({**s, "step_id": f"{inc['_id']}-s{n}", "n": n, "task_id": None,
+                        "status": "planned", "action_id": None, "attempts": [], "agent": None,
+                        "evidence": None, "approval_id": None, "ts": now()})
+        fenced(config, inc["_id"], {"$set": {"steps": old, "memory_replanned": True, "status": "fixing"}})
+        say(inc["_id"], "The Guard rejected the recalled repair. Replacing unverified work with a fresh policy plan; "
+                        "keeping the failed attempts as evidence.", kind="action", pause=False)
+        return {"outcome": "await"}
+
+    def recover(config, inc: dict, failed_task: dict) -> dict:
+        """SWARM_RECOVERY: the fix task ran out of attempts (or timed out). Back off, re-read the system,
+        and re-dispatch the unverified steps with a fresh attempt budget instead of giving up."""
+        inc_id = inc["_id"]
+        rnd = inc.get("recovery_rounds", 0) + 1
+        ids = set(failed_task.get("step_ids") or [])
+        todo = [s for s in sorted(inc.get("steps") or [], key=lambda s: s["n"])
+                if s["step_id"] in ids and s["status"] != "verified"]
+        if not todo:  # nothing left to retry: the next dispatch pass moves on
+            return {"outcome": "await"}
+        first = todo[0]
+        sys = first["system"]
+        used = sum(len(s.get("attempts") or []) for s in todo)
+        agent.set(target=sys, phase="recovering")
+        say(inc_id, f"Recovery {rnd}/{recovery.ROUNDS}: {first['step_id']} {policy.fmt_op(first)} did not take effect "
+                    f"after {used} attempt(s): {recovery.why_failed(todo)}. Not giving up: backing off "
+                    f"{recovery.BACKOFF_S * rnd:.0f}s, re-reading {sys}, then a fresh attempt budget.",
+            kind="action", system=sys, pause=False)
+        agent.nap(recovery.BACKOFF_S * rnd)
+        agent.check("incidents", inc_id)
+        try:
+            h = sysc.health(sys)
+            say(inc_id, f"Re-read {sys}: /health {h.get('status')}"
+                        + (f", blames {h['blames']}" if h.get("blames") else "") + ". Re-dispatching "
+                        f"{', '.join(s['op'] for s in todo)} with {settings.MAX_ATTEMPTS} more attempts each.",
+                kind="action", system=sys, pause=False)
+        except Exception:
+            pass
+        task_id = f"{inc_id}-f{first['n']}r{rnd}"
+        # task first, then the incident write: a resume after a crash in between re-creates the same id (no-op)
+        new_task(inc, task_id, "fix", policy.SPECIALTY[sys], step_ids=[s["step_id"] for s in todo], system=sys)
+        sets = {"recovery_rounds": rnd, "status": "fixing"}
+        filters = []
+        for i, s in enumerate(todo):
+            sets[f"steps.$[r{i}].task_id"] = task_id
+            sets[f"steps.$[r{i}].max_attempts"] = len(s.get("attempts") or []) + settings.MAX_ATTEMPTS
+            filters.append({f"r{i}.step_id": s["step_id"]})
+        fenced(config, inc_id, {"$set": sets, "$push": {"recoveries": {
+            "round": rnd, "step_ids": [s["step_id"] for s in todo], "attempts_used": used, "task": task_id,
+            "reason": recovery.why_failed(todo), "ts": now()}}}, array_filters=filters)
         return {"outcome": "await"}
 
     def approve(state: ScoutState, config) -> dict:
@@ -429,7 +502,8 @@ def build_graph(agent: Agent):
         fenced(config, inc_id, {"$set": {"status": "verifying"}})
         agent.set(phase="verifying", target=state["root"])
         watch = sorted(set(inc.get("affected") or []) | {state["root"]}, key=policy.rank)
-        say(inc_id, f"Every step verified by the Guard. Waiting for {', '.join(watch)} to report healthy.")
+        verified = "Current plan" if inc.get("memory_replanned") else "Every step"
+        say(inc_id, f"{verified} verified by the Guard. Waiting for {', '.join(watch)} to report healthy.")
         deadline, health = time.monotonic() + settings.RESOLVE_TIMEOUT_S, {}
         while time.monotonic() < deadline:
             agent.check("incidents", inc_id)

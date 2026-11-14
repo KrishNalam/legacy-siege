@@ -70,11 +70,13 @@ def md5(p: Path) -> str:
 
 # ---------------------------------------------------------------------------------------------- driver
 class Demo:
-    def __init__(self, base: str, approve_delay: float, report: Report, autoplay: bool = False):
+    def __init__(self, base: str, approve_delay: float, report: Report, autoplay: bool = False,
+                 red_kill: bool = False):
         self.http = httpx.Client(base_url=base, timeout=60)  # a full reset on Atlas can take ~10 s
         self.sys_http = httpx.Client(base_url=config.SYSTEMS_URL, timeout=10)
         self.approve_delay = approve_delay
         self.autoplay = autoplay  # DEMO_AUTOPLAY stack: click only Night 1, its approval and the kill
+        self.red_kill = red_kill  # RED_FLEET stage run: the Red Assassin fires the night-1 kill, not POST /api/kill
         self.r = report
         self.s, self.w = swarm(), world()
 
@@ -187,11 +189,17 @@ class Demo:
                     approved.add(apr["_id"])
                     self.approve(apr["_id"])
                     step = apr.get("step_id", "")
-                    if kill and obs["kill_fired_at"] is None and "restart_batch" in apr.get("desc", ""):
+                    if kill and not self.red_kill and obs["kill_fired_at"] is None and "restart_batch" in apr.get("desc", ""):
                         log(f"POST /api/kill {{role: worker, phase: step_sent}} (restart_batch {step} is next)")
                         self.post("/api/kill", {"selector": {"role": "worker", "phase": "step_sent"}})
                         obs["kill_fired_at"] = time.monotonic() - t0
                         obs["kill_wall"] = datetime.now(tz=timezone.utc)
+            if kill and self.red_kill and obs["kill_fired_at"] is None:  # the Red Assassin presses Kill itself
+                ev = self.w.chaos_events.find_one({"run_id": run_id, "fault": "agent_kill", "by": "red-assassin"})
+                if ev:
+                    log(f"Red Assassin fired {ev['_id']} {ev.get('params', {}).get('selector')}")
+                    obs["kill_fired_at"] = time.monotonic() - t0
+                    obs["kill_wall"] = ev["ts"]
             inc = self.s.incidents.find_one({"run_id": run_id}, sort=[("opened_at", 1)])
             if inc:
                 obs["incident"] = inc["_id"]
@@ -526,13 +534,15 @@ def main() -> int:
     ap.add_argument("--night-timeout", type=float, default=240)
     ap.add_argument("--night3-watch", type=float, default=env_float("NIGHT3_WATCH_S", 25),
                     help="seconds to watch night 3 for incidents (env NIGHT3_WATCH_S)")
+    ap.add_argument("--red-kill", action="store_true",
+                    help="stack runs the Red Assassin (stage mode): wait for its night-1 kill instead of POST /api/kill")
     ap.add_argument("--autoplay", action="store_true", default=config.DEMO_AUTOPLAY,
                     help="the stack runs with DEMO_AUTOPLAY=1: don't click Night 2/3, next round or later approvals")
     ap.add_argument("--check-ai", action="store_true",
                     help="also check Claude's second opinion on each night's incident (skipped without AI_SECOND_OPINION=1 + key)")
     a = ap.parse_args()
     rep = Report()
-    d = Demo(a.base, a.approve_delay, rep, autoplay=a.autoplay)
+    d = Demo(a.base, a.approve_delay, rep, autoplay=a.autoplay, red_kill=a.red_kill)
     log(f"demo_check against {a.base} (systems {config.SYSTEMS_URL}, db {config.WORLD_DB}/{config.SWARM_DB})"
         + (" [autoplay]" if a.autoplay else ""))
     try:

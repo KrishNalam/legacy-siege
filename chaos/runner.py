@@ -12,6 +12,7 @@ the run id at once, steps play in a daemon thread) and ``fire(...)`` for manual 
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 
@@ -84,33 +85,69 @@ def announce_current(run_id: str, round: int) -> None:
 
 # ------------------------------------------------------------------ fire one fault
 def fire(fault: str, target: str | None = None, params: dict | None = None, manual: bool = True,
-         run_id: str | None = None) -> dict:
+         run_id: str | None = None, extra: dict | None = None, who: str | None = None,
+         why: str | None = None) -> dict:
     """Execute one fault and record it. Returns the final ``chaos_events`` document.
 
     The event is inserted *before* the fault executes (status ``firing``) so the war room
     can draw the lightning strike immediately; the outcome is written back with
     ``$set`` when it lands (agent_kill may wait up to 30 s for its victim).
+    ``extra`` adds attribution fields to the event (the Red fleet sets ``by``/``red``); it can
+    never overwrite the core fields.
+
+    Every event says who, what and why, whatever fired it (the Runner is the one door for all chaos):
+    ``source`` ("scenario" | "manual" | "red-fleet"), ``who`` (``scenario:<name>``, ``beekeeper`` or the
+    attacker's id) and ``why`` (the attacker's reason, else what the fault tests).
     """
     f = faults.get(fault)
     target = faults.resolve_target(f, target)
     params = f.params_with_defaults(params)
     run = _runs().find_one({"_id": run_id}) if run_id else current_run()
+    extra = extra or {}
+    red = str(extra.get("by") or "").startswith("red-")
+    source = "red-fleet" if red else ("manual" if manual else "scenario")
+    who = who or extra.get("by") or ("beekeeper" if manual else f"scenario:{(run or {}).get('scenario') or '?'}")
+    why = why or ((extra.get("red") or {}).get("reason") if red else None) or f.tests
     event = {
         "_id": _next_id("CHX"), "fault": f.name, "kind": f.kind, "target": target, "params": params,
         "ts": now(), "scenario": run and run.get("scenario"), "run_id": run and run["_id"],
         "round": run and run.get("round"), "seed": run and run.get("seed"), "manual": manual,
         "status": "firing", "result": None,
+        "outcome": {"guard_caught": None, "recovery_s": None, "state": "awaiting Hive evidence"}, "source": source, "who": who, "why": why,
     }
+    event = {**{k: v for k, v in extra.items() if k not in event}, **event}
     _events().insert_one(event)
     try:
         result = faults.execute(f, target, params)
     except Exception as e:  # never lose the event record because a fault blew up
         log.exception("fault %s failed", fault)
         result = {"ok": False, "error": f"{type(e).__name__}: {e}"}
-    return _events().find_one_and_update(
+    finished = _events().find_one_and_update(
         {"_id": event["_id"]},
         {"$set": {"result": result, "status": "ok" if result.get("ok") else "failed", "done_at": now()}},
         return_document=ReturnDocument.AFTER)
+    if os.environ.get("CHAOS_OUTCOMES", "").strip().lower() in ("1", "true", "yes", "on"):
+        threading.Thread(target=_observe_later, args=(event["_id"],), daemon=True,
+                         name="chaos-outcome").start()
+    return finished
+
+
+def _observe_later(event_id: str) -> None:
+    """Bounded sampling for seeded/manual drills without a fleet; no decisions or extra attacks."""
+    from .redfleet.learning import outcome
+    for delay in (5, 10, 15, 30):
+        time.sleep(delay)
+        try:
+            event = _events().find_one({"_id": event_id})
+            if not event:
+                return  # full reset erased this event
+            observed = outcome(event)
+            _events().update_one({"_id": event_id}, {"$set": {"outcome": observed}})
+            if observed["recovery_s"] is not None:
+                return
+        except Exception:
+            log.exception("outcome sampling failed")
+            return
 
 
 # ------------------------------------------------------------------ play a scenario
@@ -123,7 +160,8 @@ def _play(run_id: str, scn: dict, stop: threading.Event, on_event=None) -> None:
                 break
             if stop.is_set():
                 break
-            ev = fire(step["fault"], step["target"], step.get("params"), manual=False, run_id=run_id)
+            ev = fire(step["fault"], step["target"], step.get("params"), manual=False, run_id=run_id,
+                      who=f"scenario:{scn['_id']}", why=step.get("why"))
             _runs().update_one({"_id": run_id}, {"$inc": {"steps_fired": 1}})
             if on_event:
                 on_event(ev)
@@ -166,6 +204,11 @@ def cancel(run_id: str | None = None) -> list[str]:
     Cancelling everything (a reset) also calls off manual kills still hunting for a victim."""
     if run_id is None:
         faults.cancel_pending_hunts()
+        faults.clear_planted_memory()
+        try:
+            faults.thaw_overdue(all_=True)   # a reset wakes every frozen bee
+        except Exception:
+            log.exception("thaw on reset failed")
     with _active_lock:
         targets = [run_id] if run_id else list(_active)
         for rid in targets:
@@ -182,3 +225,16 @@ def wait(run_id: str, timeout: float | None = None) -> bool:
         return True
     entry[0].join(timeout)
     return not entry[0].is_alive()
+
+
+def refresh_outcomes(limit: int = 12) -> list[dict]:
+    """Read-only Hive evidence; Runner records observations, never interprets them with a model.
+    Called by the opt-in Strikers' OBSERVE so seeded/manual attacks also acquire outcomes.
+    """
+    from .redfleet.learning import outcome
+    events = list(_events().find({"status": {"$in": ["ok", "failed"]}}).sort("ts", -1).limit(limit))
+    for event in events:
+        observed = outcome(event)
+        _events().update_one({"_id": event["_id"]}, {"$set": {"outcome": observed}})
+        event["outcome"] = observed
+    return events

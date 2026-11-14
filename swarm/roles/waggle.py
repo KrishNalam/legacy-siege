@@ -13,6 +13,7 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 from pymongo.errors import OperationFailure, PyMongoError
 
+from common import config
 from common.db import col, swarm
 from common.events import say, think
 from common import comms
@@ -102,6 +103,10 @@ def build_graph(agent: Agent):
 
 
 def run(agent: Agent) -> None:
+    if config.MONGO_SPINE:  # chain of custody from change-stream pre-images (swarm/custody.py), same process
+        from .. import custody  # noqa: PLC0415
+        custody.start(agent.stop, lambda text, row: think(agent.id, "waggle", text, incident=row.get("incident"),
+                                                           kind="handoff"))
     if comms.enabled():
         return run_prioritiser(agent)
     graph = build_graph(agent)

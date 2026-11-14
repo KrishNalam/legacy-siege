@@ -137,6 +137,22 @@ def test_scorecard_aggregates_rounds(app_client):
     assert r["runs"][0]["events"] == 2 and r["runs"][0]["incidents"] == 1 and r["runs"][0]["manual"] == 1
 
 
+def test_spine_analytics_learning_curve(app_client):
+    """MONGO_SPINE (W25): /api/spine computes the per-class learning curve inside MongoDB; off by default."""
+    t = now()
+    swarm().incidents.insert_many([
+        {"_id": "INC-1", "status": "resolved", "system": "portal", "opened_at": t, "round": 1, "fault_class": "batch_abort",
+         "metrics": {"ttr_s": 90.0, "diagnosis_s": 30, "hops": 3}, "handoffs": [{"takeover_s": 8.0}]},
+        {"_id": "INC-2", "status": "resolved", "system": "portal", "opened_at": t + timedelta(seconds=5), "round": 2,
+         "fault_class": "batch_abort", "metrics": {"ttr_s": 30.0, "diagnosis_s": 2, "hops": 1}, "recall": {"used": True}},
+    ])
+    r = app_client.get("/api/spine").json()
+    assert r["enabled"] is False  # the Atlas overlay hides the card unless MONGO_SPINE=1
+    night2 = next(x for x in r["learning"] if x["_id"] == "INC-2")
+    assert night2["night"] == 2 and night2["prev_ttr_s"] == 90 and night2["speedup"] == 3.0
+    assert [x["ttr_p50_s"] for x in r["rounds"]] == [90, 30] and r["takeovers"]["n"] == 1
+
+
 def test_doc_lookup_by_id_and_alt_key(app_client):
     swarm().ledger.insert_one({"action_id": "INC-1-s1-a1", "incident": "INC-1", "agent": "w", "op": "x",
                                "status": "sent", "ts": now()})

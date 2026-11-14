@@ -1,0 +1,19 @@
+Twelve AI agents defend a legacy bank. AI attackers try to break it.
+
+A scout traces the outage: portal, unix, mainframe, to a crashed batch job.
+
+Claude diagnoses each incident and proposes the fix. When the safety checks confirm it, Claude's plan is what runs. Unsafe ideas get overruled, on screen.
+
+The mainframe says the fix applied. It's lying. The Guard reads it back and catches it.
+
+We kill a worker mid-fix. A nurse takes its lease and resumes from MongoDB.
+
+In code: one atomic update claims a lease. The Guard trusts read-backs, never ACKs. Learned mappings live in Atlas.
+
+Round two, same attack. MongoDB memory recalls the fix: one hop instead of three.
+
+Overnight, a field gets renamed. The hive adapts, and remembers the mapping.
+
+Red strikers watch, think, strike and reflect. One freezes an agent; eleven seconds later, a nurse takes over.
+
+Every frame is a MongoDB change stream. Atlas is the hive's memory.

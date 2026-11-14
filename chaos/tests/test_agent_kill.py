@@ -136,3 +136,62 @@ def test_kill_within_the_same_night_still_lands(spawn):
     ev = runner.fire("agent_kill", params={"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0.3},
                      run_id="RUN-0002")
     assert ev["status"] == "ok" and ev["result"]["matched"] == "selector" and _killed(p)
+
+
+def test_freeze_is_opt_in_and_thaws_and_reset_wakes(spawn, monkeypatch):
+    import os
+    from chaos import faults
+    monkeypatch.delenv('CHAOS_AGENT_FREEZE', raising=False)
+    with pytest.raises(faults.FaultError):
+        runner.fire('agent_freeze')
+    monkeypatch.setenv('CHAOS_AGENT_FREEZE', '1')
+    p = spawn('worker-mainframe-1', phase='step_sent')
+    result = {}
+    t = threading.Thread(target=lambda: result.update(runner.fire('agent_freeze', params={'freeze_s': 1, 'wait_s': 0})))
+    t.start()
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        if 'T' in open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]:
+            break
+        time.sleep(.02)
+    else:
+        pytest.fail('worker was never stopped')
+    runner.cancel()
+    os.kill(p.pid, 0)
+    t.join(5)
+    assert not t.is_alive() and result['status'] == 'ok'
+    assert 'T' not in open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]
+    assert col('frozen_agents').count_documents({}) == 0
+
+
+def test_freeze_guardian_thaws_even_if_attacker_dies(spawn, monkeypatch):
+    import os
+    from chaos import faults
+    monkeypatch.setenv('CHAOS_AGENT_FREEZE', '1')
+    p = spawn('worker-mainframe-1', phase='step_sent')
+    attacker = subprocess.Popen([sys.executable, '-c',
+        "from chaos import runner; runner.fire('agent_freeze', params={'freeze_s': 2, 'wait_s': 0})"])
+    try:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            state = open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]
+            if 'T' in state:
+                break
+            time.sleep(.02)
+        else:
+            pytest.fail('attacker never froze worker')
+        attacker.kill()
+        attacker.wait(5)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if 'T' not in open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]:
+                break
+            time.sleep(.05)
+        else:
+            pytest.fail('guardian failed to thaw after attacker death')
+        os.kill(p.pid, 0)
+    finally:
+        if attacker.poll() is None:
+            attacker.kill()
+        attacker.wait(5)
+        faults._thaw(p.pid, faults._proc_start_epoch(p.pid))

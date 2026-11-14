@@ -25,6 +25,38 @@ def test_switch_off_keeps_fixed_roster(monkeypatch):
     assert not any(r in ("scout", "worker") for r, _ in supervisor.DYNAMIC_ROSTER)
 
 
+def test_supervisor_death_takes_its_agents_and_spares_along(db, fake):
+    """S1 #2: a crashed/killed supervisor must not leave its agents running (run.py would start a second set)."""
+    from common.db import col
+    from swarm.tests.conftest import Swarm
+
+    reset_runtime()
+    s = Swarm({"SWARM_DYNAMIC": "1", "SWARM_ROSTER": "waggle:waggle-1,guard:guard-1"}, log_name="swarm_lifecycle")
+    try:
+        docs = wait_for(lambda: (lambda d: d if len(d) == 2 else None)(
+            list(col("agents").find({"status": {"$ne": "dead"}}))), 60, 0.2, "2 agents")
+        children = [int(x) for x in open(f"/proc/{s.p.pid}/task/{s.p.pid}/children").read().split()]
+        assert {d["pid"] for d in docs} <= set(children) and len(children) >= 3  # + warm spare(s)
+        os.kill(s.p.pid, signal.SIGKILL)
+        s.p.wait(10)
+
+        def gone():
+            for pid in children:
+                try:
+                    os.kill(pid, 0)
+                    with open(f"/proc/{pid}/stat") as f:
+                        if f.read().split(") ")[1].startswith("Z"):
+                            continue  # exited, waiting to be reaped by init
+                    return False
+                except ProcessLookupError:
+                    continue
+            return True
+        wait_for(gone, 15, 0.2, "orphaned agents and warm spares to exit")
+    finally:
+        s.stop()
+    reset_runtime()
+
+
 @pytest.fixture(scope="module")
 def hive(db, fake):
     reset_runtime()

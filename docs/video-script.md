@@ -1,99 +1,95 @@
-# 60-second video: voiceover script
+# 60-second video: script and voiceover
 
-Timed to the seven segments that `scripts/cut_video.py` cuts (the burned-in captions match): the six story
-beats plus a 9 s **code** segment, because the rules want the video to show the code as well as the
-functionality. About 145 words, a calm pace of ~2.5 words per second. Three ways to get the audio:
+**Pitch: agents first.** The video is about AI agents attacking and patching a legacy estate. The war room
+is a live view of those agents (always "the war room", never "dashboard"). Claude's role, worded the same
+way every time: *Claude diagnoses each incident and proposes the fix; when the safety checks confirm it,
+Claude's plan is what runs; unsafe ideas get overruled on screen.* (Never "Claude freely drives".)
 
-```bash
-# 1. a human recording (best): read the table below over the silent cut, then
-.venv/bin/python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json --voiceover vo.mp3
-# 2. offline TTS fallback: speaks the "Plain text" section below, one paragraph per segment, each started at
-#    its segment's first second (piper neural voice if set up, else espeak-ng, else ffmpeg's flite)
-.venv/bin/python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json --tts
-# 3. neither: a silent AAC track (the video is still valid, but a submission needs audio)
-```
+About 150 words over 60 s (~2.5 words per second). The plain narration for TTS is also in
+`docs/video-narration.txt`. MongoDB features named: **change streams, leases, Atlas as the hive's memory**
+(also vector-search recall and checkpoints).
 
-**Numbers:** the round-2 caption prints the take's real diagnosis times and hops (from the beat log's
-`metrics`). The voiceover deliberately says only "one hop instead of three" so it stays true for any take.
-
-| time | segment | on screen | voiceover |
+| time | beat | on screen | voiceover |
 |---|---|---|---|
-| 0–7 s | **Hook** | Title card, then red lightning hits the mainframe and the estate turns amber | Tonight, a Chaos Monkey attacks a legacy bank. Twelve AI agents have to keep it alive. |
-| 7–15 s | **Cascade** | One incident card; a blue pulse walks portal → unix → mainframe | The portal still says 200, with stale balances. A scout walks the blame chain, portal, unix, mainframe, to a crashed batch job. |
-| 15–24 s | **The lie** | ACK ≠ APPLIED stamp on the mainframe step, attempt a2 goes green | A worker sends the fix. The mainframe says "applied". It's lying. The Guard reads the state back, rejects it, and tries again. |
-| 24–33 s | **Real kill** | Beekeeper approval, the worker bee falls, a nurse picks up its ticket | Now we kill that worker mid-step, a real SIGKILL. A nurse takes its lease and resumes from the checkpoint in MongoDB. |
-| 33–42 s | **Code** | Three code cards, 3 s each: `swarm/leases.py` (the atomic `find_one_and_update` lease claim), `swarm/verify.py` (the Guard's read-back checks), `swarm/schema.py` (recall of a learned schema mapping) | Under the hood: one atomic update claims the lease. The Guard reads state back, never trusting an ACK. MongoDB remembers every fix. |
-| 42–51 s | **Learning** | Golden recall beam; 1 hop; Learning chart round 1 vs 2 | Night two, same attack. Vector search recalls last night's playbook: one hop instead of three, and a much faster diagnosis. |
-| 51–60 s | **Fix for good** | Gardener card v1 → v2; night 3 stays green; Atlas collections view | Then the Gardener patches the code itself, tested and approved. Night three: nothing happens. MongoDB is the hive's memory. |
+| 0–5 s | **Hook** | Title card "LEGACY SIEGE", then the war room: bees around the estate, red lightning hits the mainframe, the estate turns amber | Twelve AI agents defend a legacy bank. AI attackers try to break it. |
+| 5–10 s | **Cascade** | One incident card; a blue pulse walks portal → unix → mainframe and stops on the crashed batch job | A scout traces the outage: portal, unix, mainframe, to a crashed batch job. |
+| 10–19 s | **Claude, checked** | The AI card: Claude's ranked hypotheses and plan, the P1–P6 safety checks ticking green, "CLAUDE'S PLAN RUNS"; then an unsafe op struck through with its rule ("overruled: P3 blast radius") | Claude diagnoses each incident and proposes the fix. When the safety checks confirm it, Claude's plan is what runs. Unsafe ideas get overruled, on screen. |
+| 19–24 s | **The lie** | `ACK ≠ APPLIED` stamp on the mainframe step; attempt a2 goes green | The mainframe says the fix applied. It's lying. The Guard reads it back and catches it. |
+| 24–30 s | **Kill + Nurse** | Worker bee falls (real SIGKILL), its lease goes grey, a Nurse picks it up and the step resumes | We kill a worker mid-fix. A nurse takes its lease and resumes from MongoDB. |
+| 30–38 s | **Code** | Three code cards, ~2.7 s each (`scripts/code_cards.py`): `swarm/leases.py` `claim()` (atomic `find_one_and_update` with the fencing `$inc`), `swarm/verify.py` `check()` (the Guard's read-back), `swarm/schema.py` `remembered()` (learned mapping recalled from MongoDB) | In code: one atomic update claims a lease. The Guard trusts read-backs, never ACKs. Learned mappings live in Atlas. |
+| 38–44 s | **Round 2** | Golden recall beam, 1 hop; the learning chart round 1 vs round 2 (real diagnosis times from the take) | Round two, same attack. MongoDB memory recalls the fix: one hop instead of three. |
+| 44–49 s | **Schema drift** | Sentinel: "unix feed schema changed: balance missing, acct_bal new"; caption "MAPPING LEARNED", then on the repeat "MAPPING REUSED" | Overnight, a field gets renamed. The hive adapts, and remembers the mapping. |
+| 49–55 s | **Red fleet** | A Red striker's loop (observe → think → act → reflect); it FREEZEs a worker; the lease expires and a Nurse takes over (~11 s on the take's clock) | Red strikers watch, think, strike and reflect. One freezes an agent; eleven seconds later, a nurse takes over. |
+| 55–60 s | **Close** | Pull back to the whole war room going green, MongoDB spine honeycomb lit, Atlas collections view with the cluster host | Every frame is a MongoDB change stream. Atlas is the hive's memory. |
+
+**Numbers on screen** come from the take (beat log `metrics`), so captions stay true. The voiceover only
+says "one hop instead of three" and "eleven seconds" (`LEASE_S` = 10 s dead-agent detection + pickup);
+re-check the second figure on the final take.
 
 ## Plain text (for TTS)
 
-One paragraph per segment; the `<!-- vo:key -->` tag above each says which segment it is spoken in
-(`scripts/narration.py` reads this section, so keep the tags).
+One paragraph per beat; the `<!-- vo:key -->` tag above each names its segment (`scripts/narration.py`
+reads this section, so keep the tags). `docs/video-narration.txt` is the same text without tags.
 
 <!-- vo:hook -->
-Tonight, a Chaos Monkey attacks a legacy bank. Twelve AI agents have to keep it alive.
+Twelve AI agents defend a legacy bank. AI attackers try to break it.
 
 <!-- vo:cascade -->
-The portal still says 200, with stale balances. A scout walks the blame chain, portal, unix, mainframe,
-to a crashed batch job.
+A scout traces the outage: portal, unix, mainframe, to a crashed batch job.
+
+<!-- vo:ai -->
+Claude diagnoses each incident and proposes the fix. When the safety checks confirm it, Claude's plan is
+what runs. Unsafe ideas get overruled, on screen.
 
 <!-- vo:lie -->
-A worker sends the fix. The mainframe says "applied". It's lying. The Guard reads the state back,
-rejects it, and tries again.
+The mainframe says the fix applied. It's lying. The Guard reads it back and catches it.
 
 <!-- vo:kill -->
-Now we kill that worker mid-step, a real SIGKILL. A nurse takes its lease and resumes from the
-checkpoint in MongoDB.
+We kill a worker mid-fix. A nurse takes its lease and resumes from MongoDB.
 
 <!-- vo:code -->
-Under the hood: one atomic update claims the lease. The Guard reads state back, never trusting an ACK.
-MongoDB remembers every fix.
+In code: one atomic update claims a lease. The Guard trusts read-backs, never ACKs. Learned mappings
+live in Atlas.
 
 <!-- vo:learn -->
-Night two, same attack. Vector search recalls last night's playbook: one hop instead of three, and a much
-faster diagnosis.
+Round two, same attack. MongoDB memory recalls the fix: one hop instead of three.
+
+<!-- vo:drift -->
+Overnight, a field gets renamed. The hive adapts, and remembers the mapping.
+
+<!-- vo:red -->
+Red strikers watch, think, strike and reflect. One freezes an agent; eleven seconds later, a nurse takes
+over.
 
 <!-- vo:garden -->
-Then the Gardener patches the code itself, tested and approved. Night three: nothing happens. MongoDB is
-the hive's memory.
+Every frame is a MongoDB change stream. Atlas is the hive's memory.
 
-## Recording and cutting
+## Cutting it
 
-With a stack running (`run.py`) and `MONGODB_URI`/`WORLD_DB`/`SWARM_DB` pointing at the same databases:
+`scripts/cut_video.py` cuts these ten beats by default (`--layout script`, the table's times; `--layout brief`
+keeps the older seven-segment cut). `--tts` speaks each tagged paragraph at the start of its segment. The
+new beats come from `record_demo` markers: **Claude, checked** needs an `AI_DRIVES` stack (`incident.ai`
+verdicts), **Schema drift** needs `record_demo --drift` (one bank-drift round after night 3), **Red fleet**
+needs a `RED_FLEET=1` stack from `t3/build-red-fleet-attacker` (an `agent_freeze` by a `red-*` striker, then
+the Nurse handoff). A beat the take lacks is cut from a fallback window with a plainer caption (`FALLBACK`
+in `cut_video.py`, flagged "(fallback)" in `--print-plan`); `--at red_freeze=212-220` points a beat at the
+right seconds of the raw video by hand.
 
 ```bash
-.venv/bin/python -m scripts.record_demo --base http://127.0.0.1:8700      # ~3-5 min; runs demo_check's 26 checks
+.venv/bin/python -m scripts.record_demo --base http://127.0.0.1:8700 --drift   # ~4-6 min; runs demo_check
 .venv/bin/python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json --print-plan
 .venv/bin/python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json \
-    --out ~/projects/legacy-siege-media/legacy-siege-60s.mp4 [--voiceover vo.mp3 | --tts] [--layout doc] [--no-code]
+    --out ~/projects/legacy-siege-media/legacy-siege-60s.mp4 [--voiceover vo.mp3 | --tts] [--at BEAT=A-B] [--no-code]
 ```
 
 - Output goes to `~/projects/legacy-siege-media/` (not the repo): `raw-<ts>.webm` (1920×1080) and
-  `beats-<ts>.json` (beats with `t_start`/`t_end` in video seconds, raw events, demo_check results,
-  `demo_ok`). Only cut a take whose `demo_ok` is true.
-- `record_demo` ends with a full reset (Gardener revert) unless `--keep`. It needs Playwright Chromium
-  (newest `~/.cache/ms-playwright/chromium-*`, launched with `--no-sandbox`) and `cut_video` needs a full
-  ffmpeg (libx264, drawtext) on PATH.
-- The Atlas view prints the cluster host: record against the Atlas-backed stack for the final take.
-- **Code segment** (`--code`, default on; `--no-code` restores the old 7/10/9/10/12/12 s cut): three cards
-  from `scripts/code_cards.py`, rendered from the repo at cut time (so they can't go stale) with Pillow, which
-  `cut_video` fetches via `uv run --no-project --with pillow` if the venv has none. Edit the `CARDS` table
-  there to change a file, an excerpt (anchor + line count), the highlighted lines or the caption. A card whose
-  file isn't found is skipped (`swarm/schema.py` is read from `origin/t3/add-schema-drift-adaptation` until
-  that branch is merged); the 9 s are split between the cards that remain.
-- **`--layout doc`** is the design doc's cut with the code segment folded in: 5/12/8/11/9/9/6 s.
-- **`--tts`**: `scripts/narration.py` speaks the "Plain text" section above, each paragraph starting
-  0.3 s into its segment (sped up a little if it runs long; the cut warns past ×1.25: shorten the paragraph).
-  Engines, first usable wins: `piper` (neural, private venv + voice model in `~/projects/legacy-siege-media/tts`,
-  setup commands in the module docstring), `espeak-ng`, ffmpeg's `flite`. `python -m scripts.narration --list`
-  shows what this machine has. A human `--voiceover` always wins over `--tts`.
-- Check the audio is real: `ffmpeg -i out.mp4 -af volumedetect -vn -f null -` should report a `mean_volume`
-  well above -40 dB (about -20 dB for the TTS mix).
-
-## After the code freeze (schema-drift beat)
-
-`cut_video.py` has a commented slot for a schema-drift beat after "Real kill" (and the code segment). When it
-exists, take ~5 s from "Learning" and add one line here and a `<!-- vo:drift -->` paragraph, e.g. "The
-mainframe changes its record format overnight. The hive notices the drift and adapts." Keep the total near
-145 words. (The code segment already shows the schema mapping recall from `swarm/schema.py`.)
+  `beats-<ts>.json`. Only cut a take whose `demo_ok` is true. Record against the Atlas-backed stack (the
+  close shows the cluster host).
+- `record_demo` needs Playwright Chromium; `cut_video` needs a full ffmpeg (libx264, drawtext) on PATH.
+- Code cards are rendered from the repo at cut time (`scripts/code_cards.py`, `CARDS` table), so they
+  can't go stale.
+- `--tts` engines, first usable wins: `piper`, `espeak-ng`, ffmpeg's `flite`
+  (`python -m scripts.narration --list`). A paragraph that runs past ×1.25 of its slot gets a warning:
+  shorten it. A human `--voiceover` always wins over `--tts`.
+- Check the audio: `ffmpeg -i out.mp4 -af volumedetect -vn -f null -` should report a `mean_volume` well
+  above -40 dB.

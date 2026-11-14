@@ -57,6 +57,31 @@ def roster() -> list[tuple[str, str]]:
     return [tuple(x.split(":", 1)) for x in raw.split(",") if ":" in x]  # type: ignore[misc]
 
 
+def _load_prctl():
+    try:
+        import ctypes  # noqa: PLC0415
+        return ctypes.CDLL("libc.so.6", use_errno=True).prctl
+    except Exception:
+        return None
+
+
+_PRCTL = _load_prctl() if sys.platform.startswith("linux") else None  # resolved in the parent, not after fork
+_SUPERVISOR_PID = os.getpid()
+
+
+def _die_with_parent() -> None:
+    """preexec_fn for every agent process: Linux sends it SIGTERM when the supervisor dies (crash, SIGKILL),
+    so a supervisor restart never leaves a second set of agents behind (they shut down cleanly: leases are
+    handed back and the hive recovers their work from MongoDB as after any death). No imports here: the
+    MongoDB client's threads may hold locks at fork time."""
+    _PRCTL(1, signal.SIGTERM)  # PR_SET_PDEATHSIG
+    if os.getppid() != _SUPERVISOR_PID:  # the supervisor already died between fork and prctl
+        os._exit(0)
+
+
+_PREEXEC = _die_with_parent if _PRCTL is not None else None
+
+
 def log(msg: str) -> None:
     print(f"{time.strftime('%H:%M:%S')} [supervisor] {msg}", flush=True)
 
@@ -70,6 +95,8 @@ class Supervisor:
         self.retired: set[str] = set()   # extra nurses stopped on a roster restore: never respawned
         self.restore_seen = None
         self.restore_checked = 0.0
+        self.nights = 0                  # roster restores so far
+        self.bench_born: dict[str, int] = {}  # replacement nurse -> self.nights when it was started
         # dynamic scaling
         self.dynamic = dynamic()
         self.warm: list[subprocess.Popen] = []      # pre-imported spares waiting for an assignment on stdin
@@ -94,8 +121,10 @@ class Supervisor:
             except (BrokenPipeError, OSError):
                 continue
         if p is None:
-            p = subprocess.Popen([sys.executable, "-m", "swarm.agent", *args], cwd=ROOT)
+            p = subprocess.Popen([sys.executable, "-m", "swarm.agent", *args], cwd=ROOT, preexec_fn=_PREEXEC)
         self.children[agent_id] = (role, p)
+        if standby_for:
+            self.bench_born[agent_id] = self.nights
         if ephemeral:
             self.ephemeral.add(agent_id)
         log(f"spawned {agent_id} ({role}) pid={p.pid}" + (f" standby for {standby_for}" if standby_for else "")
@@ -110,7 +139,7 @@ class Supervisor:
         if len(self.warm) < scale.WARM and time.monotonic() - self.warm_started >= 0.5:
             self.warm_started = time.monotonic()
             self.warm.append(subprocess.Popen([sys.executable, "-m", "swarm.agent", "--warm"], cwd=ROOT,
-                                              stdin=subprocess.PIPE))
+                                              stdin=subprocess.PIPE, preexec_fn=_PREEXEC))
 
     def live_count(self) -> int:
         return sum(1 for _r, p in self.children.values() if p.poll() is None)
@@ -276,42 +305,61 @@ class Supervisor:
                 pass
         base = roster()
         base_ids = {i for _, i in base}
+        # A bee that died this night is still owed its replacement nurse on the bench: start it now instead of
+        # dropping it (at stage pace the next night's reset lands before NURSE_RESPAWN_S, and the dead bee's
+        # roster slot is refilled in its own role below). Replacement nurses of the night now ending survive
+        # this reset (demo_check / the war room still look for them) and retire at the next one.
+        owed = [(role, aid, sb) for _, role, aid, sb in self.pending if sb]
         self.pending = []
         for agent_id, (_role, p) in list(self.children.items()):
+            if agent_id in self.bench_born and self.bench_born[agent_id] == self.nights:
+                continue  # replacement for a bee that died in the night now ending: keep it one more night
             if agent_id not in base_ids and p.poll() is None:
+                self.bench_born.pop(agent_id, None)
                 self.retired.add(agent_id)
                 p.send_signal(signal.SIGTERM)
                 log(f"roster restore: retiring {agent_id}")
         for role, agent_id in base:
             if agent_id not in self.children:
                 self.spawn(role, agent_id)
+        for role, agent_id, standby_for in owed:
+            if agent_id not in self.children:
+                self.spawn(role, agent_id, standby_for)
+        self.nights += 1
         try:
             col("stats").delete_one({"_id": "roster_reset", "at": self.restore_seen})
         except Exception:
             pass
 
-    def stop(self, *_):
+    def stop(self, *_, code: int = 0):
         if self.stopping:
             return
         self.stopping = True
         log("stopping all agents")
-        for w in self.warm:
-            if w.poll() is None:
-                w.send_signal(signal.SIGTERM)
-        for _, p in self.children.values():
+        procs = [p for _, p in self.children.values()] + list(self.warm)  # roster, spawned and warm spares
+        for p in procs:
             if p.poll() is None:
                 p.send_signal(signal.SIGTERM)
         deadline = time.monotonic() + 8
-        for _, p in self.children.values():
+        for p in procs:
             try:
                 p.wait(timeout=max(0.1, deadline - time.monotonic()))
             except subprocess.TimeoutExpired:
                 p.kill()
-        sys.exit(0)
+        sys.exit(code)
 
     def run(self) -> None:
         signal.signal(signal.SIGTERM, self.stop)
         signal.signal(signal.SIGINT, self.stop)
+        try:
+            self._run()
+        except BaseException as e:  # never orphan the agents: an unexpected error stops them, then exits
+            if not isinstance(e, SystemExit):
+                log(f"supervisor error: {type(e).__name__}: {e}; stopping all agents")
+            self.stop(code=1)
+            raise
+
+    def _run(self) -> None:
         for role, agent_id in roster():
             self.spawn(role, agent_id)
         if self.dynamic:

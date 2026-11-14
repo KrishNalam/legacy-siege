@@ -43,6 +43,8 @@ COUNT_ONLY = {"system_state", "checkpoint_writes"}
 QUIET_FIELDS = {"last_seen", "lease_until", "updated_at", "heartbeat_at", "pid"}
 TOKEN_DOC = "stream_tokens"
 WATCHED["swarm"].append("lessons")  # failure memory (swarm/lessons.py): empty unless FAILURE_MEMORY=1
+if config.MONGO_SPINE:  # lease chain of custody from change-stream pre-images (swarm/custody.py)
+    WATCHED["swarm"].append("custody")
 
 
 def db_names() -> dict[str, str]:

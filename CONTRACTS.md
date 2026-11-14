@@ -141,7 +141,7 @@ Approval is requested and granted **before** the op is sent. Decisions update on
 Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) → `rerun_transfer` → `refresh_cache`; then all three `/health` up.
 
 ## 3. Chaos (C)
-- `chaos/faults.py` fault library (code only): `batch_abort`, `disk_fill`, `cron_stop`, `session_leak`, `lying_success` (params `{count:1}`), `slow_apply`, `sqli_exploit`, `config_exploit`, `agent_kill`.
+- `chaos/faults.py` fault library (code only): `batch_abort`, `disk_fill`, `cron_stop`, `session_leak`, `lying_success` (params `{count:1}`), `slow_apply`, `sqli_exploit`, `config_exploit`, `agent_kill`.  Additive: `schema_drift` (W3), `false_log`, `credential_exploit` (Red fleet, §8).
 - `chaos/runner.py`: `start_run(scenario, round) -> run_id`, `run_scenario(name, round=None)` (background-thread friendly), `fire(fault, target, params, manual=True, run_id=None)`. Every fault writes `world.chaos_events`.
 - `chaos/scenarios.py: seed()` writes: `bank-night-1` (t=0 lying_success{count:1} on mainframe, t=1 batch_abort mainframe), `bank-night-2` (batch_abort mainframe — same class, no lying, for fair round-2 timing), `bank-night-3` (replay batch_abort after Gardener upgrade → no incident), `free-play` (empty; manual buttons).
 - Agent kill: selector `{"agent": id}` or `{"role":"worker", "phase":"step_sent"}` (waits up to 30 s for a matching agent, then gives up: nobody is killed and the event records `result.how:"gave_up"`, `selector`, `waited_s`, error "kill skipped: …"; no fallback to another worker). Reads `swarm.agents.pid`, `os.kill(pid, SIGKILL)`. No warning to the swarm.
@@ -280,6 +280,23 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     incident that already has `ai.kind == "schema_mapping"`.
   - War room watches `swarm.schema_mappings` (caption + "MAPPING LEARNED" / "MAPPING REUSED" stamp on unix).
     Rehearsal: `python -m scripts.drift_check` (14 checks incl. the repeat-from-memory round; separate from demo_check).
+- **Red fleet — AI attackers (additive, W14; opt-in `RED_FLEET=1`, default off).** Seeded scenarios are unchanged.
+  - Chaos: `python -m chaos.redfleet` (started by `run.py` only when `RED_FLEET=1`) supervises five attacker processes
+    (`--agent red-saboteur|red-assassin|red-liar|red-hacker|red-drifter`), each a LangGraph loop scout → plan → strike → observe.
+    Claude picks one item from the persona's menu (library faults × the Hive's state); off-menu picks are rejected and a
+    deterministic playbook decides. Every strike goes through `runner.fire(..., extra={"by": <persona id>, "red": {persona,
+    planner, question, reason}})`: `fire()` gained an optional `extra` (attribution fields; core fields can't be overwritten),
+    so `chaos_events` may carry `by`/`red`. New collection `world.red_agents` `{_id: persona id, name, motto, question, pid,
+    status: "hunting"|"holding"|"striking"|"stopped", hold, last_seen, attacks, last_attack}` (C only). Red writes
+    `swarm.thoughts` with `role:"red"`, `agent:<persona id>` (like any agent); it never writes other swarm collections.
+  - New faults: `false_log` (any system, params `{blame?}`): one-shot misleading log lines blaming another system
+    (never an exploit signature, never `S0C7`); nothing else changes. `credential_exploit` (mainframe): default OPERATOR
+    logon logged as `... factory default password accepted` + a ledger tamper; resolved when the probe is no longer
+    exploitable (`rotate_credential`); `/_admin/reset` restores the default credential.
+  - Guardrails kept (no permanent damage): refuses `WORLD_DB=world`/`SWARM_DB=swarm` unless `RED_FLEET_ALLOW_LIVE=1`;
+    holds while an `upgrade_requests` doc is mid-pipeline; never kills a `gardener` or the last live queen.
+    Pacing knobs: `RED_FLEET_COOLDOWN_S` (30, per attacker), `RED_FLEET_MAX_ATTACKS` (0 = unlimited, per attacker per night),
+    `RED_FLEET_FIRST_STRIKE_S`, `RED_FLEET_SKIP_SCENARIOS`, `RED_FLEET_FAULTS`, `RED_FLEET_AGENTS`, `RED_FLEET_LLM=0`.
 - **Dynamic swarm scaling (additive, W15; switch `SWARM_DYNAMIC=1`, default off = the fixed roster above, unchanged).**
   - Standing roster shrinks to `queen-1/2, guard-1, waggle-1, sentinel-1, nurse-1/2`; no standing scouts or workers.
   - `swarm.spawn_requests {_id:"SPW-0001", role:"scout"|"worker", specialty, incident, task, reason, requested_by,
@@ -297,6 +314,18 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   - Requests are narrated as `kind:"spawn"` thoughts. Nurses leave work alone for `SWARM_SPAWN_GRACE_S` (8 s) while its
     spawn is under way. `swarm.stats{_id:"swarm_scale"}` = `{dynamic, live, spawned_live, peak, spawned, retired,
     cold_spawns, warm_ready, max, base, avg_spawn_ms}`, counters reset per night (roster reset).
+- **Red v5 continuation (W14c; additive, default off).** Runner remains code with a vetted whitelist and executors;
+  no Runner agent or Mongo fault catalog. Every chaos event has `source`, `who`, `why`, plus `outcome` with
+  `guard_caught` / `recovery_s` (null means not observed), incident read-backs and a temporal-association caveat.
+  Fleet OBSERVE refreshes recent outcomes; `CHAOS_OUTCOMES=1` enables bounded delayed sampling for seeded/manual
+  attacks without the fleet. Strikers persist reflection/lesson in the event and read it into their next THINK.
+  `world.red_agents` adds intent, bounded lessons, pending reflection, planner, llm_calls and fallback_count;
+  thoughts explicitly label `policy (no reasoning)` and show the call/fallback counts.
+  `CHAOS_AGENT_FREEZE=1` adds `agent_freeze` (`freeze_s`, max 60); PID-checked guardian thaws even after attacker
+  death, and reset thaws records in `swarm.frozen_agents`. `CHAOS_AGENT_LIE=1` adds `lie_to_agent`: Runner calls
+  the existing false_log hook with `{prompt_injection:true}`; the system also checks the switch and writes a fixed
+  instruction-like log line, changing no actual state. Poison preparation is NOT in the whitelist: no Memory Striker
+  until visible Guard rejection is proved. Both reset routes remove any `red_planted:true` playbooks/lessons.
 
 - **Comms / Sentinel #2 (additive W17, `SWARM_COMMS=1`, default off).** `messages` retains its
   existing fields; opt-in writes add `priority` (higher first), `severity`, `source`, `incident`,
@@ -328,3 +357,12 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   symptom lines match a current playbook, plus a `known_fix` message to the owning Scout. The Scout keeps its vector
   search (recall.used semantics unchanged); on a miss it uses the pushed playbook via the normal confirm hop.
   All three narrate as thoughts (kinds upgrade / handoff / action / recall).
+- **Red Commander + 2 Scouts (W18; additive, `RED_COMMANDER=1`, default off, only with `RED_FLEET=1`).** Runs as a
+  thread in `python -m chaos.redfleet` (or `--agent red-commander`). New `world.red_agents` entries: `red-commander`
+  `{kind:"commander", status, planner, campaign?, lessons[≤8], last_reflection, llm_calls, fallback_count}` and
+  `red-scout-hive` / `red-scout-systems` `{kind:"scout", findings, summary, run_id}`. Striker entries gain
+  `order {campaign, run_id, combo, step, of, fault, target, victim?, blame?, to?, status:"queued"|"assigned"|"taken"|
+  "done"|"failed", event?}`; with the switch off Strikers ignore it. Orders are executed only from the Striker's own
+  menu + `validate` and `runner.fire`; `chaos_events.red` may carry `campaign {id, step, of, combo, ordered_by}` and
+  `campaign_reflection`. Thoughts: `role:"red"`, agents `red-commander`, `red-scout-hive`, `red-scout-systems`.
+  No new faults, no new collections, no swarm writes beyond thoughts.
