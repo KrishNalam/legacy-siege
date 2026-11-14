@@ -39,16 +39,21 @@ def group_alive(pgid: int) -> bool:
         return True
 
 
-def end_group(pgid: int, grace: float = 8.0) -> None:
+def end_group(pgid: int, grace: float = 8.0, leader: subprocess.Popen | None = None) -> None:
     """SIGTERM a whole process group (a top-level process AND everything it started, e.g. the supervisor's
     agents), wait up to `grace` for it to empty, then SIGKILL what is left. Each child runs in its own
-    session, so its pid is its group id even after the leader itself has exited."""
+    session, so its pid is its group id even after the leader itself has exited. The leader is reaped while
+    waiting: an un-reaped (zombie) leader still counts as a group member."""
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
         return
     deadline = time.monotonic() + grace
-    while time.monotonic() < deadline and group_alive(pgid):
+    while time.monotonic() < deadline:
+        if leader is not None:
+            leader.poll()
+        if not group_alive(pgid):
+            return
         time.sleep(0.2)
     if group_alive(pgid):
         try:
@@ -70,7 +75,7 @@ def main() -> None:
             except ProcessLookupError:
                 pass
         for name, p in list(running.items()):
-            end_group(p.pid, grace=8.0)
+            end_group(p.pid, grace=8.0, leader=p)
         sys.exit(0)
 
     # cleanup handlers BEFORE anything is launched: a Ctrl-C during startup must not orphan children
