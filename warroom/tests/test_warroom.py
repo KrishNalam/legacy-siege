@@ -261,3 +261,12 @@ def test_views_switch_classic_stays_default(app_client, monkeypatch):
     assert 'src="app.js"' in app_client.get("/?classic=1").text
     for asset in ("/diagram.js", "/diagram.css", "/flow.js", "/flow.css"):
         assert app_client.get(asset).status_code == 200, asset
+
+
+def test_why_page_served_and_linked(app_client):
+    """/why is the static 'Why it matters' page; the diagram's top bar links to it; it never becomes the / view."""
+    r = app_client.get("/why")
+    assert r.status_code == 200 and "why.css" in r.text and "Statement 3" in r.text
+    assert app_client.get("/why.css").status_code == 200
+    assert 'href="./why"' in app_client.get("/diagram").text
+    assert 'src="app.js"' in app_client.get("/?view=why").text

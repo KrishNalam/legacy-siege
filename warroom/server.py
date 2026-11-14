@@ -78,10 +78,11 @@ async def ws(websocket: WebSocket) -> None:
 
 
 VIEWS = {"diagram": "diagram.html", "flow": "flow.html", "classic": "index.html"}
+PAGES = {**VIEWS, "why": "why.html"}  # /why is a static explainer page, never the / view
 
 
 def _page(name: str) -> FileResponse:
-    return FileResponse(STATIC / VIEWS[name], headers={"Cache-Control": "no-cache"})
+    return FileResponse(STATIC / PAGES[name], headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/")
@@ -109,6 +110,13 @@ async def diagram_view() -> FileResponse:
 @app.get("/flow")
 async def flow_view() -> FileResponse:
     return _page("flow")
+
+
+@app.get("/why")
+async def why_view() -> FileResponse:
+    """Why it matters: real-world use cases, why the project is good, Statement 3 point by point. Static, linked from
+    the diagram's top bar."""
+    return _page("why")
 
 
 app.mount("/", StaticFiles(directory=STATIC), name="static")
