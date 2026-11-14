@@ -169,6 +169,19 @@ class Demo:
         log(f"autoplay started {scenario} as {cur['run_id']} (waited {secs:.1f}s)")
         return cur
 
+    def chain_only(self) -> dict:
+        """With the Red fleet on, its exploits open their own security incidents: the cascade beats count chain ones."""
+        return {"kind": {"$ne": "security"}} if self.red_kill else {}
+
+    def night_incidents(self, obs: dict) -> list[dict]:
+        """The night's incidents. Red mode: the chain incidents opened while the night's cascade incident was open
+        (a Red re-strike after it closed is a new attack wave, not a failed coalesce)."""
+        q = {"run_id": obs["run_id"], **self.chain_only()}
+        first = self.s.incidents.find_one({"_id": obs.get("incident")}) if self.red_kill and obs.get("incident") else None
+        if first and first.get("closed_at"):
+            q["opened_at"] = {"$lte": first["closed_at"]}
+        return list(self.s.incidents.find(q).sort("opened_at", 1))
+
     def red_worker_kill(self, run_id: str, obs: dict) -> dict | None:
         """The Red Assassin's first kill of a worker this night. Beat d is the worker kill + nurse takeover; the
         Assassin may also take out a queen first (the standby takes the crown), which is logged, not scored."""
@@ -197,7 +210,7 @@ class Demo:
                     and mf.get("status") == "up" and (mf.get("metrics") or {}).get("batch_status") == "ABENDED":
                 obs["cascade_at"] = time.monotonic() - t0
                 log(f"cascade visible: portal→unix→mainframe (mainframe up, batch ABENDED) at {obs['cascade_at']:.1f}s")
-            active = list(self.s.incidents.find({"active": True}, {"_id": 1}))
+            active = list(self.s.incidents.find({"active": True, **self.chain_only()}, {"_id": 1}))
             obs["max_active"] = max(obs["max_active"], len(active))
             for apr in self.s.approvals.find({"status": "pending", "kind": "step"}):
                 a = obs["approvals"].setdefault(apr["_id"], {"seen_at": time.monotonic(), "doc": apr})
@@ -224,7 +237,7 @@ class Demo:
                     obs["kill_fired_at"] = time.monotonic() - t0
                     obs["kill_wall"] = ev["ts"]
                     obs["kill_event"] = ev["_id"]
-            inc = self.s.incidents.find_one({"run_id": run_id}, sort=[("opened_at", 1)])
+            inc = self.s.incidents.find_one({"run_id": run_id, **self.chain_only()}, sort=[("opened_at", 1)])
             if inc:
                 obs["incident"] = inc["_id"]
                 if inc["status"] in ("resolved", "failed") and not inc.get("active"):
@@ -242,7 +255,7 @@ class Demo:
         log("=== NIGHT 1: cascade, lying system, approval, agent kill ===")
         obs = self.play_night("bank-night-1", kill=True, timeout=timeout)
         run_id = obs["run_id"]
-        incs = list(self.s.incidents.find({"run_id": run_id}))
+        incs = self.night_incidents(obs)
         inc = incs[0] if incs else None
         # (a) cascade + coalescing + diagnosis
         self.r.add("a. cascade visible in world.systems", obs["cascade_at"] is not None,
@@ -406,7 +419,7 @@ class Demo:
             log(f"POST /api/reset {{mode: next_round}} → closed {out.get('closed_incidents')} incidents")
             self.wait("estate green", lambda: all(d["status"] == "up" for d in self.w.systems.find()), 20)
         obs = self.play_night("bank-night-2", kill=False, timeout=timeout)
-        incs = list(self.s.incidents.find({"run_id": obs["run_id"]}))
+        incs = self.night_incidents(obs)
         if len(incs) != 1:
             self.r.add("f. round-2 incident", False, f"{len(incs)} incidents for {obs['run_id']}")
             return None
