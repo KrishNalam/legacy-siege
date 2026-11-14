@@ -12,6 +12,7 @@ Each judgement is a tiny LangGraph run (read_back -> judge) on thread "<action_i
 """
 from __future__ import annotations
 
+import re
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -161,6 +162,28 @@ def build_graph(agent: Agent):
             agent.think(f"{schema.SYSTEM} renamed {m['from']} → {m['to']} · mapping learned v{m['version']} "
                         f"(swarm.schema_mappings; every agent reads {m['to']} from now on).", kind="learn",
                         incident=inc, system=schema.SYSTEM, pause=False)
+            try:
+                doc = schema.guard_verdict(inc, m["to"], facts, m["version"])
+            except Exception:
+                doc = None
+            ai = (doc or {}).get("ai") or {}
+            v0 = (ai.get("verdicts") or [{}])[0]
+            claimed = ((ai.get("proposed_ops") or [{}])[0].get("params") or {}).get("source")
+            how = ai.get("proposed_by")
+            if not how:  # flag off: the unix hop's findings still say who proposed it
+                t = col("tasks").find_one({"incident": inc, "kind": "diagnose", "findings.params.to": m["to"]},
+                                          {"findings.params.proposed_by": 1}, sort=[("ts", -1)])
+                how = (((t or {}).get("findings") or {}).get("params") or {}).get("proposed_by")
+            prov = {"claude": f"Claude proposed {m['from']}→{claimed}",
+                    "memory": "MongoDB memory already knew it (no Claude call)"}.get(
+                how, f"type + value match proposed {m['from']}→{m['to']}")
+            if ai.get("proposed_by") == "claude" and v0.get("verdict") == "overruled":
+                prov += f", rules overruled → {m['to']}"
+            n = re.search(r"(\d+/\d+) accounts", facts or "")
+            lined = f"{n.group(1)} values match" if n else "values line up"
+            agent.think(f"rules: no playbook/op for unknown field {m['to']} → {prov} → Guard verified ({lined}) "
+                        f"→ mapping v{m['version']} stored.", kind="learn", incident=inc, system=schema.SYSTEM,
+                        pause=False)
 
     g = StateGraph(GuardState)
     g.add_node("read_back", read_back)

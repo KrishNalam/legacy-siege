@@ -61,7 +61,7 @@ def classify(system: str, health: dict, metrics: dict, logs: list[dict], state: 
             drift = _schema_drift(state)
             if drift:
                 fault, cause, params = drift["fault_class"], drift["root_cause"], drift["params"]
-                facts += drift["facts"]
+                facts[:0] = drift["facts"]  # lead with the schema story (thoughts are capped at 280 chars)
     elif system == "portal":
         sessions = (state or {}).get("sessions", metrics.get("sessions")) or 0
         if sessions >= settings.SESSION_HIGH:
