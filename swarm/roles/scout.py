@@ -375,20 +375,26 @@ def build_graph(agent: Agent):
         raw = policy.fix_plan(state["fault_class"], state.get("params") or {})
         if not raw:
             return escalate(config, inc["_id"], "rejected memory has no safe policy replacement")
-        old = [dict(s) for s in inc["steps"]]
+        old = inc["steps"]
         done = [(s["system"], s["op"], s.get("params") or {}) for s in old if s["status"] == "verified"]
-        for s in old:
-            if s["status"] != "verified":
-                s["superseded_by_replan"] = True
         n = max(s["n"] for s in old)
+        new = []
         for s in raw:
             if (s["system"], s["op"], s.get("params") or {}) in done:
                 continue
             n += 1
-            old.append({**s, "step_id": f"{inc['_id']}-s{n}", "n": n, "task_id": None,
+            new.append({**s, "step_id": f"{inc['_id']}-s{n}", "n": n, "task_id": None,
                         "status": "planned", "action_id": None, "attempts": [], "agent": None,
                         "evidence": None, "approval_id": None, "ts": now()})
-        fenced(config, inc["_id"], {"$set": {"steps": old, "memory_replanned": True, "status": "fixing"}})
+        # One server-side pipeline update: flags whatever is unverified *at write time* and appends the new
+        # steps, so a Guard verdict that lands between our read and this write is never overwritten.
+        fenced(config, inc["_id"], [{"$set": {
+            "steps": {"$concatArrays": [
+                {"$map": {"input": "$steps", "as": "s", "in": {"$cond": [
+                    {"$in": ["$$s.status", ["planned", "failed"]]},
+                    {"$mergeObjects": ["$$s", {"superseded_by_replan": True}]}, "$$s"]}}},
+                {"$literal": new}]},
+            "memory_replanned": True, "status": "fixing"}}])
         say(inc["_id"], "The Guard rejected the recalled repair. Replacing unverified work with a fresh policy plan; "
                         "keeping the failed attempts as evidence.", kind="action", pause=False)
         return {"outcome": "await"}
