@@ -109,6 +109,10 @@ def test_red_poison_each_shape_is_visibly_rejected(db, fake, monkeypatch, fault,
                                          'text': {'$regex': f'^Rejected memory {planted}'}})
         if shape == 'wrong_record':  # today's record was quarantined, never the planted one
             assert [s['params']['record_id'] for s in inc['steps'] if s['op'] == 'quarantine_record'] == ['REC-00077']
+            # the verified repair from the same incident is restored and used: the round-2 speedup survives
+            assert inc['recall']['used'] and inc['recall']['rejected'] == planted
+            assert not col('playbooks').find_one({'_id': pb['_id']})['stale']
+            assert inc.get('diagnosis_path') == [system]
     finally:
         hive.stop()
         faults.clear_planted_memory()
