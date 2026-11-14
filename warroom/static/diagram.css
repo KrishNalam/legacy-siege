@@ -361,3 +361,47 @@ main > .l { z-index: 5; }
 .lz h3 small { font-size: 11px; color: var(--muted); }
 .lz .log { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-transform: none; }
 .lz .stamp { left: auto; right: 20px; top: 60px; }
+
+/* ---- demo steer: fewer words, bigger ---- */
+.why { color: var(--amber); text-decoration: none; border-bottom: 1px solid var(--amber); font-size: 12px; margin-left: 1ch; }
+.why:hover { background: var(--amber); color: #111; }
+.big { font-size: 14px; }
+.bt { font-size: 22px; }
+.bh .dim { font-size: 12px; }
+.bl-k { font-size: 11px; margin-top: 16px; }
+.pers span { font-size: 13px; padding: 2px 1ch; }
+.duo { font-size: 14px; margin-top: 8px; }
+.nowl { font-size: 16px; margin-top: 16px; padding-top: 8px; }
+.nowl .lk { font-size: 11px; }
+.chainL .mc { min-height: 120px; }
+.chainL .mc .mn { font-size: 18px; }
+.chainL .mc b { font-size: 12px; }
+.chainL .mc .ms { font-size: 12px; }
+.chainL .mca { font-size: 12px; }
+.hc { width: 34px; height: 34px; font-size: 14px; }
+.hive { gap: 8px; margin-top: 14px; }
+.cnt { font-size: 13px; margin-top: 16px; }
+.ttf { font-size: 13px; margin-top: 4px; }
+.ttf i { height: 10px; }
+.gsteps span { font-size: 12px; line-height: 28px; }
+.wl { font-size: 12px; }
+.hint { font-size: 13px; }
+/* Live / How it works toggle + architecture diagrams */
+.seg { display: inline-flex; margin-right: 2ch; border: 1px solid var(--faint); }
+.seg[hidden] { display: none; }
+.seg button { background: none; border: 0; color: var(--muted); font-size: 12px; padding: 0 1.2ch; height: 22px; cursor: pointer; }
+.seg button.on { background: var(--ink); color: var(--paper); }
+.how-lead { font-size: 18px; letter-spacing: .04em; }
+.how-note { font-size: 13px; color: var(--muted); border-top: 1px dashed var(--faint); padding-top: 8px; }
+.hn { position: absolute; border: 1px solid var(--ink); background: var(--paper); padding: 8px 1.4ch; line-height: 1.4; }
+.hn .ht { font-size: 17px; letter-spacing: .06em; }
+.hn .hs { font-size: 12px; color: var(--muted); margin-top: 4px; text-transform: none; }
+.hn.db { border-color: var(--amber); padding: 4px 1.4ch; } .hn.db .ht { color: var(--amber); font-size: 15px; text-transform: none; } .hn.db .hs { margin-top: 0; }
+.hn.ai { border-color: #b48cff; } .hn.ai .ht { color: #c9a8ff; }
+.hn.sys { box-shadow: 0 0 0 4px var(--paper), 0 0 0 5px var(--ink); }
+.hn.ext { border-style: dashed; }
+.how-key { position: absolute; display: flex; gap: 2ch; }
+.how-key .hn.sm { position: static; font-size: 11px; padding: 0 1ch; line-height: 22px; }
+.w.how { stroke: var(--muted); stroke-width: 1.4; }
+.w.how.red { stroke: var(--red); } .w.how.amb, .w.how.warn { stroke: var(--amber); } .w.how.grn { stroke: var(--green); } .w.how.faint { stroke: var(--faint); stroke-dasharray: 4 4; }
+.wl.warn { fill: var(--amber); } .wl.faint { fill: var(--gutter); }
