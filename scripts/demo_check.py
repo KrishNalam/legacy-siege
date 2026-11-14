@@ -399,6 +399,9 @@ class Demo:
         inc = self.s.incidents.find_one({"_id": inc["_id"]})
         systems = obs.get("systems_at_close") if self.autoplay and obs.get("systems_at_close") else \
             {d["_id"]: d["status"] for d in self.w.systems.find()}
+        if self.red_kill:  # other Red attacks may still be on screen elsewhere: green = this incident's systems
+            mine = set(inc.get("affected") or []) | {inc.get("root_cause_system")}
+            systems = {k: v for k, v in systems.items() if k in mine}
         m = inc.get("metrics") or {}
         self.r.add(f"{tag} incident resolved, estate green",
                    inc["status"] == "resolved" and all(v == "up" for v in systems.values()),
