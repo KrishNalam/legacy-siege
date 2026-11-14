@@ -5,6 +5,7 @@
 import { state, on, connect, api, currentRun, pendingApprovals, latestUpgrade, serverNow, ts, prettyTime } from "./js/store.js";
 
 const $ = (s) => document.querySelector(s);
+const XMARK = '<svg viewBox="0 0 16 16" width="0.9em" height="0.9em" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" fill="none"/></svg>';
 const esc = (s) => prettyTime(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const secs = (s) => (s == null || isNaN(s) ? "—" : s >= 100 ? `${Math.round(s)} s` : `${(+s).toFixed(s < 10 ? 1 : 0)} s`);
 const ago = (iso) => { const d = (serverNow() - ts(iso)) / 1000; return isNaN(d) ? "" : d < 60 ? `${Math.max(0, Math.round(d))}s ago` : `${Math.round(d / 60)}m ago`; };
@@ -46,6 +47,11 @@ const NAMES = { "worker-web-1": "Portal worker", "worker-unix-1": "Unix worker",
   "scout-1": "Scout", "nurse-1": "Nurse", "waggle-1": "Messenger" };
 function agentName(id) {
   if (!id) return "a bee";
+  const a = state.agents.get(id);
+  if (a?.role === "queen") {
+    if (a.status === "dead" || a.status === "standby") return a.status === "dead" ? "Queen" : "Backup queen";
+    return [...state.agents.values()].some((q) => q.role === "queen" && q.status === "dead") ? "New queen" : "Queen";
+  }
   if (NAMES[id]) return NAMES[id];
   const m = id.match(/^(\w+?)-(?:(\w+)-)?(\d+)$/);
   if (!m) return id;
@@ -110,7 +116,7 @@ function translate(t) {
   if (/blast radius settle/.test(x)) return { text: "Waiting a moment to see what else breaks." };
   if (/Checking the hive's memory/.test(x)) return { text: "Asking the shared memory: have we seen this before?" };
   if (/^Claimed INC/.test(x)) return { text: "Took the case." };
-  if ((m = x.match(/^Assigning INC-\d+ to (\S+)/))) return { text: `Gave the case to the ${esc(agentName(m[1]))}.` };
+  if ((m = x.match(/^Assigning INC-\d+ to ([\w-]+)/))) return { text: `Gave the case to the ${esc(agentName(m[1]))}.` };
   if (/^Holding the queen lease/.test(x)) return { text: "In charge. Goal: every system green." };
   if ((m = x.match(/^INC-\d+ opened \((.*?)\)/))) return { text: `New problem (${esc(m[1].split(/,\s*/).map(sn).join(", "))}). Goal stands: all green.` };
   if ((m = x.match(/^(\w+) also unhealthy/))) return { text: `${S(m[1])} is hurt too: same case.` };
@@ -265,12 +271,14 @@ function lastThoughtBy() {
 }
 function renderTeam() {
   const last = lastThoughtBy();
-  const agents = [...state.agents.values()].sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || String(a._id).localeCompare(String(b._id)));
+  const standbyLast = (a) => (a.status === "standby" ? 1 : 0);
+  const agents = [...state.agents.values()].sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role)
+    || (a.role === "queen" ? standbyLast(a) - standbyLast(b) : 0) || String(a._id).localeCompare(String(b._id)));
   const seenRole = new Set();
   const show = agents.filter((a) => {
     const first = !seenRole.has(a.role); seenRole.add(a.role);
     if (a.role === "waggle" && !last.has(a._id)) return false;
-    return first || a.role === "worker" || a.status === "dead" || (a.status !== "standby" && a.status !== "idle") || last.has(a._id) && ts(last.get(a._id).ts) > runStartedAt();
+    return first || a.role === "worker" || a.role === "queen" || a.status === "dead" || (a.status !== "standby" && a.status !== "idle") || last.has(a._id) && ts(last.get(a._id).ts) > runStartedAt();
   });
   const rid = runId();
   const lastAttack = attackLines().filter((l) => !rid || state.chaos.get(l.id.split(":")[0])?.run_id === rid).sort((a, b) => ts(a.ts) - ts(b.ts)).pop();
@@ -418,7 +426,7 @@ function renderJudge() {
     } else {
       left = `${ai.hypothesis ? `<div class="hyp">“${esc(ai.hypothesis)}”</div>` : ""}<ul>${vs.slice(0, 4).map((o) => `<li><span>→</span><span>${label(o)}</span></li>`).join("")}</ul>`;
       right = `<ul>${vs.slice(0, 4).map((o) => o.verdict === "overruled"
-        ? `<li><span class="no">✗</span><span><b class="no">Blocked</b> ${label(o)}<span class="why">${esc(o.reason || o.rule || "not safe")}</span></span></li>`
+        ? `<li><span class="no">${XMARK}</span><span><b class="no">Blocked</b> ${label(o)}<span class="why">${esc(o.reason || o.rule || "not safe")}</span></span></li>`
         : `<li><span class="ok">✓</span><span>OK: ${label(o)}${o.gated ? " <span class=\"why\">(needs a human OK first)</span>" : ""}</span></li>`).join("")}
         ${missed.slice(0, 2).map((m) => `<li><span class="ok">+</span><span>Adds ${label(m)}<span class="why">the AI missed this step</span></span></li>`).join("")}</ul>`;
       verdict = bad.length ? `<div class="verdict no">Checker blocked ${bad.length} AI suggestion${bad.length === 1 ? "" : "s"}</div>`
@@ -437,13 +445,13 @@ function renderJudge() {
       <div class="col chk"><h3>Checker says…</h3><div class="off">The Guard bee reads every system back. Nothing counts as fixed until it confirms.</div></div></div>`;
     return;
   }
-  const rowsL = steps.slice(0, 5).map((s) => `<li><span>${s.n ?? ""}</span><span>${esc(Op(s.op))} <span class="why">${esc(sn(s.system))}</span></span></li>`).join("");
+  const rowsL = steps.slice(0, 5).map((s) => `<li><span>${s.n ?? ""}</span><span>${esc(Op(s.op))} <span class="dimt">· ${esc(sn(s.system))}</span></span></li>`).join("");
   const rowsR = steps.slice(0, 5).map((s) => {
     const n = (s.attempts || []).length;
-    if (s.status === "verified") return `<li><span class="ok">✓</span><span>${n > 1 ? `<b class="no">Caught a lie</b>, then confirmed` : "Confirmed"}<span class="why">read the ${esc(sn(s.system))} back</span></span></li>`;
-    if (s.status === "failed") return `<li><span class="no">✗</span><span>Failed</span></li>`;
+    if (s.status === "verified") return `<li><span class="ok">✓</span><span>${n > 1 ? `<b class="no">Caught a lie</b>, then confirmed` : `Confirmed <span class="dimt">· read it back</span>`}</span></li>`;
+    if (s.status === "failed") return `<li><span class="no">${XMARK}</span><span><b class="no">Rejected</b> · ${state.thoughts.some((t) => t.kind === "reject" && t.incident === inc._id && (!t.system || t.system === s.system)) ? "it lied" : "failed"}, retrying</span></li>`;
     if (s.status === "sent" || s.status === "unknown") return `<li><span class="wait">…</span><span>${n > 1 ? `<b class="no">Rejected a lie</b>, re-checking` : "Re-checking"}</span></li>`;
-    if (s.status === "awaiting_approval" || s.destructive && !s.approval_id && s.status === "planned") return `<li><span class="wait">⏸</span><span>Needs a human OK</span></li>`;
+    if (s.status === "awaiting_approval" || s.destructive && !s.approval_id && s.status === "planned") return `<li><span class="wait">?</span><span>Needs a human OK</span></li>`;
     return `<li><span class="wait">–</span><span>Not yet</span></li>`;
   }).join("");
   const lies = steps.filter((s) => (s.attempts || []).length > 1).length;
