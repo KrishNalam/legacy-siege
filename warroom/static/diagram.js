@@ -706,7 +706,8 @@ function rosterRowsHtml(n = 5) {
 }
 
 // ================================================================== level 0: four boxes · zoom in / out
-// CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES, THE GARDENER below Legacy pointing up into it.
+// CHAOS MONKEY → LEGACY SYSTEMS ← THE BEES (the swarm), THE GARDENER below Legacy pointing up into it: a separate
+// system OUTSIDE the swarm; help/repeats, pause and tools/known fixes are arrows across the swarm boundary.
 const BOXR = {
   chaos: { x: 40, y: 104, w: 360, h: 420 }, legacy: { x: 500, y: 104, w: 600, h: 420 },
   bees: { x: 1200, y: 104, w: 360, h: 420 }, gardener: { x: 580, y: 608, w: 440, h: 206 },
@@ -763,10 +764,10 @@ function watchForPulses(m, prev) {
   if (m.coll === "incidents" && m.doc?.status === "resolved" && prev?.status !== "resolved") pulse("fix", "var(--green)");
 }
 
-// the Bees box's hive grid: one cell per agent
+// the Bees box's hive grid: one cell per swarm agent (the Gardener is a separate system outside the swarm)
 function hiveCells() {
   const R = state.roster instanceof Map ? state.roster : null;
-  return [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"))
+  return [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener")
     .sort((a, b) => String(a._id).localeCompare(String(b._id), undefined, { numeric: true }))
     .map((a) => {
       const r = R?.get(a._id), role = a.role || roleOf(a._id);
@@ -809,7 +810,7 @@ function renderOverview() {
   const since = (runStartedAt() || 0) - 5000;
   const inc = focusIncident(), live = inc?.active ? inc : null;
   const ds = duels(), lt = lastThoughts(since);
-  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"));
+  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener"); // swarm only
   const dead = agents.filter((a) => a.status === "dead").length, working = agents.filter((a) => a.status === "working" || a.phase).length;
   const { rejects, lieSys } = liesTonight(since, live);
   const hos = nightIncidents().flatMap((i) => i.handoffs || []).length;
@@ -864,7 +865,7 @@ function renderOverview() {
   // THE GARDENER
   const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
   const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="${pos(B.gardener)}">
-    <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">PERMANENT FIXES</span></div>
+    <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">OUTSIDE THE SWARM</span></div>
     <div class="gsteps">${["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"].map((n, i) => `<span class="${u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "cur" : ""}">${n}</span>`).join("")}</div>
     ${liveLine("gardener", u ? (u.status === "proven" ? `<span class="g">${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}: ATTACK REPLAYED, NOTHING BROKE</span>` : esc((gThought ? (translate(gThought)?.text || "").replace(/<[^>]+>/g, "") : String(u.status)).toUpperCase())) : '<span class="dim">WAITING FOR A REPEAT</span>')}
     <div class="look" style="height:24px;line-height:22px"><span>4</span>LOOK INSIDE +</div></div>`;
@@ -883,11 +884,14 @@ function renderOverview() {
     lie: { d: `M${bx - 6} 330 L${lx2 + 12} 330`, cls: `${rejects.length ? "red" : ""} ${lieFresh ? "on" : ""}`, label: rejects.length ? "LIE CAUGHT" : "CHECKS", lx: (bx + lx2) / 2, ly: 322 },
     kill: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y - 6} L${B.chaos.x + B.chaos.w / 2} 92 L${B.bees.x + B.bees.w / 2} 92 L${B.bees.x + B.bees.w / 2} ${B.bees.y - 12}`, cls: `red ${killFresh ? "on" : ""}`, label: "KILLS A BEE", lx: 800, ly: 88 },
     code: { d: `M800 ${gy - 6} L800 ${B.legacy.y + B.legacy.h + 12}`, cls: `${deployed ? "amb" : ""} ${u?.status === "deployed" ? "on" : ""}`, label: deployed ? `NEW CODE V${u.version_after ?? 2}` : "NEW CODE", lx: 810, ly: (gy + B.legacy.y + B.legacy.h) / 2 + 4, anchor: "start" },
-    req: { d: `M${B.bees.x + B.bees.w / 2} ${B.bees.y + B.bees.h + 6} L${B.bees.x + B.bees.w / 2} ${gy + 60} L${B.gardener.x + B.gardener.w + 12} ${gy + 60}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "SAME FAILURE ×2", lx: B.bees.x + B.bees.w / 2 - 10, ly: gy + 52, anchor: "end" },
+    req: { d: `M${B.bees.x + B.bees.w / 2} ${B.bees.y + B.bees.h + 6} L${B.bees.x + B.bees.w / 2} ${gy + 60} L${B.gardener.x + B.gardener.w + 12} ${gy + 60}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "ASKS FOR HELP · REPEATS", lx: B.bees.x + B.bees.w / 2 - 10, ly: gy + 52, anchor: "end" },
+    tools: { d: `M${B.gardener.x + B.gardener.w + 6} ${gy + 110} L1460 ${gy + 110} L1460 ${B.bees.y + B.bees.h + 20}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: "TOOLS + KNOWN FIXES → SCOUTS", lx: B.gardener.x + B.gardener.w + 20, ly: gy + 102, anchor: "start" },
+    pause: { d: `M${B.gardener.x + B.gardener.w + 6} ${gy + 160} L1530 ${gy + 160} L1530 ${B.bees.y + B.bees.h + 20}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: "PAUSE WHILE UPGRADING", lx: B.gardener.x + B.gardener.w + 20, ly: gy + 152, anchor: "start" },
     prove: { d: `M${B.chaos.x + B.chaos.w / 2} ${B.chaos.y + B.chaos.h + 6} L${B.chaos.x + B.chaos.w / 2} ${gy + 60} L${B.gardener.x - 12} ${gy + 60}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? "REPLAYED: NOTHING BROKE" : "PROOF: REPLAY", lx: B.chaos.x + B.chaos.w / 2 + 10, ly: gy + 52 },
   };
   const mk = (cls) => (cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i");
   const W = [{ k: "defs", html: `<defs>${[["r", "var(--red)"], ["a", "var(--amber)"], ["g", "var(--green)"], ["i", "var(--faint)"]].map(([n, c]) => `<marker id="ah-${n}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("")}</defs>` }];
+  W.push({ k: "swarm-edge", html: `<g><rect class="swarm-edge" x="${B.bees.x - 16}" y="${B.bees.y - 4}" width="${B.bees.w + 30}" height="${B.bees.h + 18}"/><text class="wl swarm-edge-l" x="${B.bees.x - 10}" y="${B.bees.y + B.bees.h + 34}" text-anchor="end">THE SWARM = DOTTED LINE ↗</text></g>` });
   for (const [k, w] of Object.entries(WIRES)) W.push({ k, html: `<g><path id="wire-${k}" class="w ${w.cls}" d="${w.d}" marker-end="url(#ah-${mk(w.cls)})"/><text class="wl ${w.cls.replace(/\bon\b/, "")}" x="${w.lx}" y="${w.ly}" text-anchor="${w.anchor || "middle"}">${esc(w.label)}</text></g>` });
   const now = Date.now();
   for (let i = pulses.length - 1; i >= 0; i--) if (now - pulses[i].at > 1400) pulses.splice(i, 1);
@@ -969,7 +973,7 @@ const HOW = {
     ],
     e: [["sent", "req", ""], ["req", "write", ""], ["write", "test", ""], ["test", "ok", ""], ["ok", "deploy", ""], ["deploy", "legacy", "NEW CODE", "amb"],
       ["legacy", "prove", "ATTACK AGAIN", "red"], ["prove", "stale", "", "faint"]],
-    note: "CLAUDE ONLY EXPLAINS THE FIX · NOTHING SHIPS WITHOUT TESTS AND A HUMAN OK · IT IS PROVEN BY THE SAME ATTACK",
+    note: "A SEPARATE SYSTEM OUTSIDE THE SWARM · CLAUDE ONLY EXPLAINS THE FIX · NOTHING SHIPS WITHOUT TESTS AND A HUMAN OK · PROVEN BY THE SAME ATTACK",
   },
 };
 let mode = "live"; // live | how
@@ -1104,7 +1108,7 @@ function renderDiagram() {
   const rid = runId();
   $("#ex-title").textContent = TITLE[zoom];
   $("#z-back").hidden = zoom === "overview";
-  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"));
+  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener"); // swarm only
   $("#ex-a-l").textContent = zoom === "overview" ? `${agents.filter((a) => a.status !== "dead").length} AGENTS ALIVE` : "";
   const t0 = runStartedAt();
   const el = rid && t0 ? Math.max(0, Math.floor((serverNow() - t0) / 1000)) : null;

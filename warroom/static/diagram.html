@@ -99,7 +99,7 @@
     <div class="det-h"><h2>HOW TO USE THIS SCREEN</h2><button class="x" id="help-x" aria-label="close">×</button></div>
     <div class="det-body">
       <h3>The picture</h3>
-      <p>Four boxes. <b>CHAOS MONKEY</b> is us: we attack the <b>LEGACY SYSTEMS</b> of an old bank on purpose (a website, a Unix file server, a 1987 mainframe). <b>THE BEES</b> are AI agents that watch those systems and fix what broke, live. <b>THE GARDENER</b> turns a failure that keeps coming back into new, tested code. Arrows light up as it happens: red = an attack lands, green = a fix is verified, orange = new code deployed. Everything you see is read live from MongoDB.</p>
+      <p>Four boxes. <b>CHAOS MONKEY</b> is us: we attack the <b>LEGACY SYSTEMS</b> of an old bank on purpose (a website, a Unix file server, a 1987 mainframe). <b>THE BEES</b> are AI agents that watch those systems and fix what broke, live. <b>THE GARDENER</b> is a separate system <i>outside</i> the swarm: it turns a failure that keeps coming back into new, tested code. Its links to the Bees are arrows across the swarm boundary: the Bees ask it for help and hand it repeats, it pauses them while it upgrades, and it pushes tools and known fixes back to the Scouts. Arrows light up as it happens: red = an attack lands, green = a fix is verified, orange = new code deployed. Everything you see is read live from MongoDB.</p>
       <h3>Looking inside</h3>
       <table>
         <tr><td>Click a box · keys 1 2 3 4</td><td>Zoom in: 1 Chaos Monkey (every attack and the defence that answered it) · 2 Legacy systems (the cascade, what each system claims, the lie) · 3 the Bees (each agent, the system it is working on, its moves on a timeline) · 4 the Gardener (the code fix, step by step).</td></tr>

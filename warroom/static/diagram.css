@@ -62,6 +62,8 @@ button { font: inherit; color: inherit; }
 .w.red { stroke: var(--red); }
 .w.amb { stroke: var(--amber); }
 .w.grn { stroke: var(--green); }
+.swarm-edge { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 4; }
+.swarm-edge-l { fill: var(--muted); }
 .w.dbl { stroke-width: 3; }
 .w.dbl-in { stroke: var(--paper); stroke-width: 1; }
 @keyframes march { to { stroke-dashoffset: -27; } }
