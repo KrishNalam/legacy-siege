@@ -87,8 +87,8 @@ def test_sentinel2_pushes_known_fix_to_scout(db, monkeypatch):
     agent = SimpleNamespace(id="sentinel-1", think=Mock())
     sentinel.push_known_fixes(agent, {"mainframe": 1})
     sentinel.push_known_fixes(agent, {"mainframe": 1})
+    assert sentinel.known_fix_for([root], {"mainframe": 1})["_id"] == "PB-0001"  # early part naming the root
     assert db.incidents.find_one({"_id": "INC-0002"})["known_fix"]["playbook_id"] == "PB-0001"
     assert "known_fix" not in db.incidents.find_one({"_id": "INC-0003"})
     assert agent.think.call_count == 1 and "Sentinel #2 → scout-1" in agent.think.call_args.args[0]
-    assert sentinel.known_fix_for([root], {"mainframe": 1})["_id"] == "PB-0001"  # early part naming the root
     assert sentinel.known_fix_for([root], {"mainframe": 2}) is None  # learned on v1, mainframe is v2 now

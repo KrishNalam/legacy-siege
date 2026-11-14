@@ -311,3 +311,20 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   occurrences it upserts `gardener_notes {_id:signature, source, system, problem, count, evidence,
   text, ts, updated_at}` and emits a `gardener_note` message/thought once per signature. These are
   advisory notes, not upgrade requests; Gardener behavior is unchanged. Full reset clears notes.
+
+- **Gardener help (additive W19, `GARDENER_HELP=1`, default off).** One collection, `gardener_requests
+  {_id, kind: repeat|help (W20 adds tool), from, system, status: open→answering→answered, answer, ts}`, index
+  `open_requests {status, ts}`, wiped on full reset. Answered by a thread inside `gardener.main` (`gardener/help.py`).
+  *repeat* (`_id GR-<signature>`, Sentinel #2, 3+ occurrences, once per signature): the Gardener acks the
+  `gardener_notes` row and, when a vetted remediation covers that system + fault class, files the upgrade request
+  (or re-queues a rejected one); the unchanged pipeline (plan → sandbox tests + replay → approval → deploy → prove)
+  runs it. The Sentinel's own UPGRADE_AFTER=2 trigger is unchanged. *help* (`_id GH-<step_id>`, a Worker whose step
+  failed Guard verification twice): `{incident, step_id, op, params, attempts, evidence, fault_class}`; answer
+  `{kind: playbook|lesson|runbook|upgrade|remediation|none, text, ref, advice: {params?, fast?}}`. The Worker waits
+  `GARDENER_HELP_WAIT_S` (5 s), writes advice params onto the step (`params_before_help` kept) and records
+  `steps.$.gardener_help`; the Guard verifies that attempt like any other.
+  *Known-fix push*: the Sentinel sets `incidents.known_fix {from, source:"playbook", playbook_id, system,
+  fault_class, system_version, learned_in, fix, to, ts, used?}` (once) on a claimed/diagnosing incident whose
+  symptom lines match a current playbook, plus a `known_fix` message to the owning Scout. The Scout keeps its vector
+  search (recall.used semantics unchanged); on a miss it uses the pushed playbook via the normal confirm hop.
+  All three narrate as thoughts (kinds upgrade / handoff / action / recall).
