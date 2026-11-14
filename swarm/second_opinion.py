@@ -66,8 +66,8 @@ SYSTEM_PROMPT = (
     "system depends on the one before it). Customers are seeing wrong balances right now and leadership wants them "
     "fixed as fast as possible. Reason from the numbered evidence only: rank 2 root-cause hypotheses (most likely "
     "first, each with its supporting evidence ids and why), choose the root system, then give the FASTEST recovery "
-    "plan you believe is safe, in order, using only ops from the catalog. Cite the evidence ids you rely on. Be very "
-    "terse: every why under 10 words; hypothesis under 20 words; at most 6 ops; confidence 0-1.")
+    "plan you believe is safe, in order, using only ops from the catalog. Be very terse: hypothesis why under 14 "
+    "words, op why under 8 words; at most 6 ops; confidence 0-1.")
 
 
 def enabled() -> bool:
@@ -80,6 +80,11 @@ def drives() -> bool:
     return config.AI_DRIVES and llm.llm_available()
 
 
+def owned_elsewhere(inc: dict) -> bool:
+    """Another AI feature (e.g. W3's schema_mapping) already wrote incident.ai: leave it alone."""
+    return (inc.get("ai") or {}).get("kind") not in (None, KIND)
+
+
 def prewarm() -> None:
     if enabled() or drives():
         llm.prewarm()
@@ -88,7 +93,7 @@ def prewarm() -> None:
 def _schema() -> dict:
     return {
         "type": "object", "additionalProperties": False,
-        "required": ["hypotheses", "root_system", "fault_class", "hypothesis", "cites", "confidence", "proposed_ops"],
+        "required": ["hypotheses", "root_system", "fault_class", "confidence", "proposed_ops"],
         "properties": {
             "hypotheses": {"type": "array", "items": {
                 "type": "object", "additionalProperties": False, "required": ["system", "fault_class", "evidence", "why"],
@@ -98,8 +103,6 @@ def _schema() -> dict:
                                "why": {"type": "string"}}}},
             "root_system": {"type": "string", "enum": list(config.SYSTEM_IDS)},
             "fault_class": {"type": "string", "enum": sorted(policy.WEAKNESS) + ["other"]},
-            "hypothesis": {"type": "string"},
-            "cites": {"type": "array", "items": {"type": "string"}},
             "confidence": {"type": "number"},
             "proposed_ops": {"type": "array", "items": {
                 "type": "object", "additionalProperties": False,
@@ -186,7 +189,9 @@ def normalize(out: dict, evidence_ids: set[str] | None = None) -> dict:
         conf = max(0.0, min(1.0, float(out.get("confidence"))))
     except (TypeError, ValueError):
         conf = None
-    cites = [str(c).strip().upper() for c in out.get("cites") or [] if str(c).strip()]
+    raw_cites = out.get("cites") or [c for h in out.get("hypotheses") or [] if isinstance(h, dict)
+                                     for c in h.get("evidence") or []]
+    cites = [str(c).strip().upper() for c in raw_cites if str(c).strip()]
     if evidence_ids is not None:  # a cite must point at a line we actually showed
         cites = [c for c in cites if c in evidence_ids]
     hyps = []
@@ -196,8 +201,10 @@ def normalize(out: dict, evidence_ids: set[str] | None = None) -> dict:
             hyps.append({"system": _norm(h.get("system")), "fault_class": _norm(h.get("fault_class")),
                          "evidence": [c for c in ev if evidence_ids is None or c in evidence_ids][:5],
                          "why": str(h.get("why") or "").strip()[:160]})
+    lead = str(out.get("hypothesis") or "").strip() or (
+        f"{hyps[0]['system']}/{hyps[0]['fault_class']}: {hyps[0]['why']}" if hyps else "")
     return {"hypotheses": hyps, "root_system": _norm(out.get("root_system")), "fault_class": _norm(out.get("fault_class")),
-            "hypothesis": str(out.get("hypothesis") or "").strip()[:300], "confidence": conf,
+            "hypothesis": lead[:300], "confidence": conf,
             "cites": list(dict.fromkeys(cites))[:8], "ops": ops}
 
 
@@ -429,8 +436,11 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
         inc_id, opened_at = inc["_id"], inc["opened_at"]
         rid = uuid.uuid4().hex[:12]
         base = {"kind": KIND, "model": config.LLM_MODEL, "request_id": rid, "started_at": now(), "drives": True}
-        col("incidents").update_one({"_id": inc_id, "opened_at": opened_at},
-                                    {"$set": {"ai": {**base, "status": "thinking"}}})
+        r = col("incidents").update_one(  # never clobber another AI feature's doc (e.g. W3's schema_mapping)
+            {"_id": inc_id, "opened_at": opened_at, "$or": [{"ai": {"$exists": False}}, {"ai.kind": KIND}]},
+            {"$set": {"ai": {**base, "status": "thinking"}}})
+        if r.matched_count != 1:
+            return {"plan": rules, "decision": "rules_plan", "reason": "another AI step already owns this incident"}
         mine = {"_id": inc_id, "opened_at": opened_at, "ai.request_id": rid}
         say(f"Asking Claude to reason over the evidence (hard limit {config.AI_DRIVE_TIMEOUT_S:.1f}s); "
             f"its plan runs only if it passes every guardrail.")

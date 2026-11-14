@@ -257,7 +257,7 @@ def build_graph(agent: Agent):
             if not raw:
                 return escalate(config, inc_id, f"no fix plan for {state['fault_class']}")
             drove = None
-            if not state.get("hit") and second_opinion.drives():
+            if not state.get("hit") and second_opinion.drives() and not second_opinion.owned_elsewhere(inc):
                 # AI_DRIVES: Claude reasons over the evidence; its plan runs only if it passes every guardrail.
                 # (A usable recall hit skips this: a fresh playbook already says what to do.)
                 drove = second_opinion.decide(agent.id, inc, state, raw, state["root"], state["fault_class"],
@@ -274,7 +274,7 @@ def build_graph(agent: Agent):
                 "fault_class": state["fault_class"], "root_cause": state.get("root_cause"),
                 "metrics.diagnosis_s": state.get("diag_s", 0.0), "metrics.hops": len(state.get("path") or [])}})
             # Claude's independent second opinion, judged against this plan in a background thread (never awaited)
-            if drove is None:
+            if drove is None and not second_opinion.owned_elsewhere(inc):
                 second_opinion.start(agent.id, inc, state, plan_steps, state["root"], state["fault_class"])
             desc = "; ".join(f"{s['op']}{' (needs approval)' if s['destructive'] else ''}" for s in plan_steps)
             who = "Claude's plan" if drove and drove["decision"] == "ai_plan" else "Plan"

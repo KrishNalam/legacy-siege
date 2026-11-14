@@ -62,7 +62,7 @@ EMBED_COOLDOWN_S = _f("EMBED_COOLDOWN_S", 30)  # after a Voyage failure, skip Vo
 AI_SECOND_OPINION = os.environ.get("AI_SECOND_OPINION", "").strip().lower() in ("1", "true", "yes", "on")
 # Claude reasons at plan time and its plan RUNS when it passes every guardrail (else the rules plan runs). Off by default.
 AI_DRIVES = os.environ.get("AI_DRIVES", "").strip().lower() in ("1", "true", "yes", "on")
-AI_DRIVE_TIMEOUT_S = _f("AI_DRIVE_TIMEOUT_S", 5.0)
+AI_DRIVE_TIMEOUT_S = _f("AI_DRIVE_TIMEOUT_S", 6.0)  # Haiku answers in ~3-4.5 s under load
 
 
 def pace(seconds: float) -> float:

@@ -227,7 +227,7 @@ def test_order_follows_the_plan_chain_for_other_faults():
 def claude(ops, root="mainframe", fc="batch_abort"):
     return {"hypotheses": [{"system": root, "fault_class": fc, "evidence": ["E1"], "why": "batch abended"},
                            {"system": "unix", "fault_class": "cron_stop", "evidence": [], "why": "ruled out"}],
-            "root_system": root, "fault_class": fc, "hypothesis": "h", "cites": ["E1"], "confidence": 0.9,
+            "root_system": root, "fault_class": fc, "confidence": 0.9,
             "proposed_ops": [{"target": t, "op": o, "why": "w", "risk": "destructive" if o == "restart_batch" else "safe",
                               "params": [{"name": a, "value": b} for a, b in p.items()]} for t, o, p in ops]}
 
@@ -301,3 +301,18 @@ def test_guardrails_fence_redact_validate_timeout(monkeypatch):
     assert llm.guarded_json("t", "s", "p", {"type": "object", "required": ["b"]}, timeout=1)[1]["outcome"] == "schema"
     assert llm.guarded_json("t", "s", "p", {"type": "object", "required": ["a"]}, timeout=1)[0] == {"a": 1}
     assert llm.guard_stats().get("t.timeout", 0) >= 1
+
+
+def test_never_clobbers_schema_mapping(inc, monkeypatch):
+    doc, state = inc
+    col("incidents").update_one({"_id": "INC-0099"}, {"$set": {"ai": {"kind": "schema_mapping", "hypothesis": "w3"}}})
+    d = col("incidents").find_one({"_id": "INC-0099"})
+    assert so.owned_elsewhere(d)
+    monkeypatch.setattr(so.llm, "guarded_json", lambda *a, **k: (claude(GOOD), {"outcome": "ok", "latency_ms": 1}))
+    r = so.decide("scout-1", d, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
+    assert r["decision"] == "rules_plan"
+    monkeypatch.setattr(so.llm, "llm_available", lambda: True)
+    monkeypatch.setattr(so.config, "AI_SECOND_OPINION", True)
+    so.start("scout-1", d, state, PLAN, "mainframe", "batch_abort")
+    time.sleep(0.3)
+    assert col("incidents").find_one({"_id": "INC-0099"})["ai"] == {"kind": "schema_mapping", "hypothesis": "w3"}
