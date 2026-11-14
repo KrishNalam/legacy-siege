@@ -299,8 +299,8 @@ def atlas() -> dict:
     out = []
     for logical, colls in WATCHED.items():
         db, _ = _db(logical)
-        validators = {c["name"]: bool(c.get("options", {}).get("validator"))
-                      for c in db.list_collections(filter={"name": {"$in": colls}})}
+        options = {c["name"]: c.get("options", {}) for c in db.list_collections(filter={"name": {"$in": colls}})}
+        validators = {n: bool(o.get("validator")) for n, o in options.items()}
         for name in colls:
             coll = db[name]
             sample = coll.find_one(sort=[("_id", DESCENDING)])  # binaries/embeddings are stripped by to_json
@@ -308,10 +308,20 @@ def atlas() -> dict:
                         "count": coll.estimated_document_count(), "validator": validators.get(name, False),
                         "indexes": _index_info(coll) if name in validators else [],
                         "search_indexes": _search_indexes(coll) if name == "playbooks" else [],
+                        "pre_images": bool((options.get(name, {}).get("changeStreamPreAndPostImages") or {})
+                                           .get("enabled")),
                         "sample": sample})
     host = urlsplit(config.MONGODB_URI).hostname or "?"
     port = urlsplit(config.MONGODB_URI).port
     return to_json({"collections": out, "uri_host": f"{host}:{port}" if port else host})
+
+
+@router.get("/spine")
+def spine() -> dict:
+    """MongoDB-computed learning curve ($setWindowFields), p50/p90 per round ($percentile) and the lease
+    chain of custody (change-stream pre-images) in two $facet round trips. Read-only; see warroom/spine.py."""
+    from . import spine as spine_analytics  # noqa: PLC0415
+    return to_json(spine_analytics.analytics())
 
 
 @router.get("/memory")
