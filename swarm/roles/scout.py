@@ -261,20 +261,12 @@ def build_graph(agent: Agent):
                 "params": s["params"], "destructive": bool(s["destructive"] or (s["system"], s["op"]) in policy.DESTRUCTIVE),
                 "task_id": None, "status": "planned", "action_id": None, "attempts": [], "agent": None,
                 "evidence": None, "approval_id": None, "ts": now()} for i, s in enumerate(raw, 1)]
-            memory = []
-            if lessons.enabled():  # failure memory: annotate steps with what failed before (stored on the incident)
-                try:
-                    _, memory = lessons.for_plan(plan_steps, sysc.version, inc_id)
-                except Exception:
-                    memory = []
             fenced(config, inc_id, {"$set": {
                 "steps": plan_steps, "status": "fixing", "root_cause_system": state["root"],
                 "fault_class": state["fault_class"], "root_cause": state.get("root_cause"),
                 "metrics.diagnosis_s": state.get("diag_s", 0.0), "metrics.hops": len(state.get("path") or [])}})
             desc = "; ".join(f"{s['op']}{' (needs approval)' if s['destructive'] else ''}" for s in plan_steps)
             say(inc_id, f"Plan, {len(plan_steps)} steps: {desc}.", system=state["root"])
-            for line in memory:
-                say(inc_id, line, kind="recall", system=state["root"], pause=False)
         return {}
 
     def next_group(st: list[dict]) -> list[dict]:
@@ -296,9 +288,32 @@ def build_graph(agent: Agent):
         a = col("approvals").find_one({"_id": step["approval_id"]})
         return bool(a and a["status"] == "approved")
 
+    def apply_lessons(config, inc: dict) -> dict:
+        """Failure memory, once per incident right after the plan: annotate the planned steps with what failed
+        before (stored on the incident, so a Nurse resuming this graph reads the same lessons) and say so."""
+        if inc.get("lessons_checked") or not inc.get("steps"):
+            return inc
+        plan_steps = [dict(s) for s in inc["steps"]]
+        try:
+            _, lines = lessons.for_plan(plan_steps, sysc.version, inc["_id"])
+        except Exception:
+            lines = []
+        sets = {"lessons_checked": now()}
+        for i, s in enumerate(plan_steps):
+            if s.get("lessons"):
+                sets[f"steps.{i}.lessons"] = s["lessons"]
+                if s.get("distrust_ack"):
+                    sets[f"steps.{i}.distrust_ack"] = True
+        fenced(config, inc["_id"], {"$set": sets})
+        for line in lines:
+            say(inc["_id"], line, kind="recall", system=inc.get("root_cause_system"), pause=False)
+        return inc_doc(inc["_id"])
+
     def dispatch(state: ScoutState, config) -> dict:
         inc_id = state["incident"]
         inc = inc_doc(inc_id)
+        if lessons.enabled():
+            inc = apply_lessons(config, inc)
         group = next_group(inc.get("steps") or [])
         if not group:
             return {"outcome": "resolve"}
