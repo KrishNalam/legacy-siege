@@ -221,7 +221,7 @@ PERSONAS: dict[str, Persona] = {p.id: p for p in [
     Persona("red-hacker", "Hacker", "walks in through the planted vulns",
             "an intruder mid-job: detect, patch, retest", tuple(VULN_OF), 40, hacker_menu, hacker_policy),
     Persona("red-drifter", "Drifter", "silently renames fields under the Hive",
-            "Q3 adapt when fields change underneath it", ("schema_drift",), 55, drifter_menu, drifter_policy),
+            "Q3 adapt when fields change underneath it", ("schema_drift", "workflow_drift"), 55, drifter_menu, drifter_policy),
 ]}
 
 KEYS = ("fault", "target", "victim", "blame", "to")
