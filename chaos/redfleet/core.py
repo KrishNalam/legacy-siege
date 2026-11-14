@@ -103,7 +103,7 @@ def scout(agent_id: str) -> dict:
         systems["unix"]["feed_field"] = feed["field"]   # what the Drifter renames next
     mine, fleet = [], []
     if run_id:
-        for e in w.chaos_events.find({"run_id": run_id, "by": {"$regex": "^red-"}},
+        for e in w.chaos_events.find({"run_id": run_id, "by": {"$regex": "^red-"}, "kind": {"$ne": "decision"}},
                                      {"fault": 1, "target": 1, "status": 1, "ts": 1, "by": 1, "outcome": 1, "lesson": 1,
                                       "params.playbook": 1}).sort("ts", 1):
             row = {"fault": e["fault"], "target": e.get("target"), "status": e.get("status"), "ts": e.get("ts"),

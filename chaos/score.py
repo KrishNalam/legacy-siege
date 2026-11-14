@@ -20,7 +20,7 @@ def _faults_pipeline(match: dict, limit: int) -> list[dict]:
         {"$limit": limit},
         {"$lookup": {
             "from": "chaos_events", "localField": "_id", "foreignField": "run_id", "as": "ev",
-            "pipeline": [{"$sort": {"ts": 1}}, {"$project": {"fault": 1, "target": 1, "manual": 1, "status": 1}}],
+            "pipeline": [{"$match": {"kind": {"$ne": "decision"}}}, {"$sort": {"ts": 1}}, {"$project": {"fault": 1, "target": 1, "manual": 1, "status": 1}}],
         }},
         {"$project": {
             "_id": 0, "run_id": "$_id", "scenario": 1, "round": 1, "seed": 1, "started_at": 1, "ended_at": 1,

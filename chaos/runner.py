@@ -244,7 +244,7 @@ def refresh_outcomes(limit: int = 12) -> list[dict]:
     Called by the opt-in Strikers' OBSERVE so seeded/manual attacks also acquire outcomes.
     """
     from .redfleet.learning import outcome
-    events = list(_events().find({"status": {"$in": ["ok", "failed"]}}).sort("ts", -1).limit(limit))
+    events = list(_events().find({"status": {"$in": ["ok", "failed"]}, "kind": {"$ne": "decision"}}).sort("ts", -1).limit(limit))
     for event in events:
         observed = outcome(event)
         _events().update_one({"_id": event["_id"]}, {"$set": {"outcome": observed}})
