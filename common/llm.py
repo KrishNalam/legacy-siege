@@ -141,7 +141,9 @@ def _anthropic():
         if _client is None:
             import anthropic
 
-            _client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=0)
+            # LangSmith wraps the client object in place (no-op when tracing is off), so per-call timeouts are
+            # passed as request options below rather than via with_options() (which would return an unwrapped copy).
+            _client = tracing.wrap_anthropic(anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, max_retries=0))
         return _client
 
 
@@ -159,10 +161,10 @@ def prewarm() -> None:
 
 
 def _anthropic_json(system: str, prompt: str, schema: dict, max_tokens: int, timeout: float) -> tuple[str, str]:
-    msg = _anthropic().with_options(timeout=timeout).messages.create(
+    msg = _anthropic().messages.create(
         model=config.LLM_MODEL, max_tokens=max_tokens, thinking={"type": "disabled"},
         output_config={"effort": "low", "format": {"type": "json_schema", "schema": schema}},
-        system=system, messages=[{"role": "user", "content": prompt}])
+        system=system, messages=[{"role": "user", "content": prompt}], timeout=timeout)
     text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip()
     return text, {"end_turn": "ok", "refusal": "refusal", "max_tokens": "truncated"}.get(msg.stop_reason, "error")
 
