@@ -338,12 +338,14 @@ function seatModel(a, since, lt, inc) {
   if (role === "guard" && t?.kind === "reject" && serverNow() - ts(t.ts) < 15000) { cls = "work caught"; ph = "CAUGHT A LIE"; }
   else if (role === "guard" && t?.kind === "verify" && fresh) { cls += " ok"; ph = "VERIFIED ✓"; }
   if (t?.kind === "handoff" && fresh && role === "nurse") { cls = "work saved"; ph = "TOOK OVER A JOB"; }
-  if (a.status === "dead") { cls = "dead"; ph = "† KILLED"; }
+  const ro = state.roster instanceof Map ? state.roster.get(a._id) : null; // W22 comms roster, when it is on
+  if (a.status === "dead") { cls = "dead"; ph = ro?.taken_over_by?.to ? `† KILLED · JOB → ${U(agentName(ro.taken_over_by.to))}` : "† KILLED"; }
   if (lt.last && t && lt.last._id === t._id && fresh) cls += " turn";
   let tx = t ? (translate(t)?.text || "") : "";
   tx = tx.replace(/<[^>]+>/g, "");
   if (!tx) tx = a.status === "dead" ? "Its process was killed." : role === "nurse" ? "Waits to take over a dead agent’s job." : "";
-  return { id: a._id, role, sys, cls, ph, tx, life, name: agentName(a._id) };
+  const boss = ro?.parent && a.status !== "dead" && cls.startsWith("work") ? ` · FOR ${U(agentName(ro.parent))}` : "";
+  return { id: a._id, role, sys, cls, ph, tx, life, name: agentName(a._id), boss };
 }
 
 function sysModel(s, inc, lieSys, lieFresh) {
@@ -489,7 +491,7 @@ function renderStrips(since) {
 }
 
 function renderBoard() {
-  const ds = duels().slice(-5);
+  const ds = duels().slice(-4);
   let html = `<div class="du head" style="top:0"><span class="who">ATTACKER</span><span>ATTACK</span><span class="ar"></span><span>DEFENCE</span></div>`;
   if (!ds.length) html += `<div class="du" style="top:22px"><span class="who" style="background:var(--faint)">—</span><span class="dim">EVERY ATTACK WE LAUNCH</span><span class="ar">→</span><span class="dim">AND HOW THE AGENTS ANSWERED IT</span></div>`;
   ds.forEach((d, i) => {
@@ -500,9 +502,10 @@ function renderBoard() {
   const r = rounds(), liveR2 = [...state.incidents.values()].find((i) => i.active && i.round === 2);
   const t1 = r[1]?.ttr, t2 = r[2]?.ttr ?? (liveR2 ? (serverNow() - ts(liveR2.opened_at)) / 1000 : null);
   const max = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / max) * 220);
-  const y = 22 * 6 + 8;
+  const y = 22 * 5 + 8;
   html += `<div class="score" style="top:${y}px"><span class="dim">TIME TO FIX</span><span>NIGHT 1 ${t1 != null ? secs(t1).toUpperCase() : "—"}</span>${t1 != null ? `<span class="bar2" style="width:${bw(t1)}px"></span>` : ""}</div>`;
   html += `<div class="score" style="top:${y + 22}px"><span class="dim" style="visibility:hidden">TIME TO FIX</span><span>NIGHT 2 ${t2 != null ? secs(t2).toUpperCase() : "—"}</span>${t2 != null ? `<span class="bar2 r2" style="width:${bw(t2)}px"></span>` : ""}${r[1] && r[2] && r[2].ttr < r[1].ttr ? `<span class="x">${(r[1].ttr / r[2].ttr).toFixed(1)}× FASTER · ${Math.round(r[2].hops)} CHECK, NOT ${Math.round(r[1].hops)}</span>` : r[1] && !r[2] ? '<span class="dim">SAME ATTACK NEXT NIGHT. FASTER?</span>' : ""}</div>`;
+  html += `<div class="eta" data-eta="bees" style="top:${y + 50}px"></div>`; // slot: W24 progress + ETA (PROGRESS_ETA)
   const host = $("#board");
   if (host.dataset.html !== html) { host.innerHTML = html; host.dataset.html = html; }
 }
@@ -524,13 +527,8 @@ function patch(host, items, svg = false) {
 }
 
 let lieShownAt = 0;
-function renderDiagram() {
-  // fit the sheet
-  const fit = $("#fit"), fr = $("#frame");
-  const s = Math.min(fit.clientWidth / FW, fit.clientHeight / FH);
-  fr.style.transform = `translate(${Math.max(0, (fit.clientWidth - FW * s) / 2)}px, ${Math.max(0, (fit.clientHeight - FH * s) / 2)}px) scale(${s})`;
-
-  const rid = runId(), since = (runStartedAt() || 0) - 5000;
+function renderBees() {
+  const since = (runStartedAt() || 0) - 5000;
   const inc = focusIncident(), live = inc?.active ? inc : null;
   const lt = lastThoughts(since);
   const seats = seatMap();
@@ -552,7 +550,7 @@ function renderDiagram() {
     const m = seatModel(a, since, lt, inc); seatModels[id] = m;
     const bar = Array.from({ length: 10 }, (_, i) => `<i class="${i < m.life ? "f" : ""}"></i>`).join("");
     nodes.push({ k: `seat:${id}`, html: `<div class="seat ${m.cls}" data-id="${esc(id)}" style="left:${p[0]}px;top:${p[1]}px"><div class="who"><span>${U(m.name)}</span><span class="gl">${GLYPH[m.role] || "·"}</span></div>
-      <div class="rl">${TAG[m.role] || U(m.role)}</div><div class="bar" title="moves tonight">${bar}</div><div class="ph">${esc(m.ph)}</div><div class="tx">${esc(m.tx)}</div></div>` });
+      <div class="rl">${TAG[m.role] || U(m.role)}${m.boss}</div><div class="bar" title="moves tonight">${bar}</div><div class="ph">${esc(m.ph)}</div><div class="tx">${esc(m.tx)}</div></div>` });
   }
   // attacker box: the personas who struck tonight
   const ds = duels();
@@ -598,7 +596,7 @@ function renderDiagram() {
   hitSys.forEach((s2, i) => {
     const b = sysBox(s2), sx = ATK.x + ATK.w, sy = ATK.y + 20 + 8 * i, cx = sx + 24 + 8 * i, cy = CT - 4 - 6 * i, ex = b.x + b.w - 24 - 8 * i;
     const hurt = (state.systems.get(s2)?.status || "up") !== "up" || (live && live.root_cause_system === s2);
-    path(`atk:${s2}`, `M${sx} ${sy} L${cx} ${sy} L${cx} ${cy} L${ex} ${cy} L${ex} ${b.y - 8}`, `red ${hurt ? "on" : ""}`, i === 0 ? "ATTACKS" : "", cx + 6, cy - 4);
+    path(`atk:${s2}`, `M${sx} ${sy} L${cx} ${sy} L${cx} ${cy} L${ex} ${cy} L${ex} ${b.y - 8}`, `red ${hurt ? "on" : ""}`, i === 0 ? "ATTACKS" : "", sx + 4, sy - 5);
   });
   // attacker → killed agent
   for (const d of ds) {
@@ -630,15 +628,232 @@ function renderDiagram() {
   patch($("#wires"), W, true);
   patch($("#nodes"), nodes);
 
-  // headings
-  const busyN = [...state.agents.values()].filter((a) => a.status === "working").length;
-  $("#ex-a-l").textContent = `${[...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && a.status !== "dead").length} AGENTS ALIVE · ${busyN} WORKING`;
-  const t0 = runStartedAt();
-  const el = rid && t0 ? Math.max(0, Math.floor((serverNow() - t0) / 1000)) : null;
-  $("#clock").textContent = rid ? `NIGHT ${state.current?.round ?? "?"} · T+${el != null ? `${String(Math.floor(el / 60)).padStart(2, "0")}:${String(el % 60).padStart(2, "0")}` : "—"}` : "NO NIGHT RUNNING";
   renderStrips(since);
   renderBoard();
   void lastSeenThought;
+}
+
+
+// ================================================================== level 0: three boxes · zoom in / out
+const BOXR = { chaos: { x: 50, y: 150, w: 380, h: 600 }, bees: { x: 550, y: 150, w: 500, h: 600 }, gardener: { x: 1170, y: 150, w: 380, h: 600 } };
+const FULL = { x: 20, y: 136, w: 1560, h: 712 };
+const ZOOMS = ["overview", "chaos", "bees", "gardener"];
+const TITLE = { overview: "EXHIBIT A: THE WHOLE NIGHT IN THREE BOXES", chaos: "EXHIBIT A.1: INSIDE CHAOS MONKEY", bees: "EXHIBIT A.2: INSIDE THE BEES", gardener: "EXHIBIT A.3: INSIDE THE GARDENER" };
+let zoom = (() => { try { const z = new URLSearchParams(location.search).get("zoom"); return ZOOMS.includes(z) ? z : "overview"; } catch { return "overview"; } })();
+let zooming = false;
+function setZoom(z) {
+  if (!ZOOMS.includes(z) || z === zoom || zooming) return;
+  const from = zoom, lens = $("#lens");
+  const a = z === "overview" ? FULL : BOXR[z], b = z === "overview" ? BOXR[from] : FULL;
+  const place = (r) => { lens.style.left = `${r.x}px`; lens.style.top = `${r.y}px`; lens.style.width = `${r.w}px`; lens.style.height = `${r.h}px`; };
+  zooming = true;
+  for (const v of ZOOMS) $(`#v-${v}`).hidden = true;
+  lens.classList.remove("go"); place(a); lens.hidden = false;
+  void lens.offsetWidth; // start from a, then move to b in stepped frames
+  lens.classList.add("go"); place(b);
+  setTimeout(() => { lens.hidden = true; zooming = false; zoom = z; try { history.replaceState(null, "", z === "overview" ? location.pathname : `?zoom=${z}`); } catch { /* file:// */ } render(); }, 380);
+}
+
+// the Bees box's hive grid: one cell per agent
+function hiveCells() {
+  const R = state.roster instanceof Map ? state.roster : null;
+  return [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"))
+    .sort((a, b) => String(a._id).localeCompare(String(b._id), undefined, { numeric: true }))
+    .map((a) => {
+      const r = R?.get(a._id), role = a.role || roleOf(a._id);
+      const cls = a.status === "dead" ? "dead" : (r?.took_over && a.status !== "idle") ? "took" : a.status === "working" || a.phase ? "work" : a.status === "standby" ? "stand" : "idle";
+      return `<i class="hc ${cls}" title="${esc(agentName(a._id))}">${GLYPH[role] || "·"}</i>`;
+    }).join("");
+}
+function miniChain(inc) {
+  const live = inc?.active ? inc : null;
+  return CHAIN.map((s) => {
+    const d = state.systems.get(s), st = d?.status || "?", root = live && live.root_cause_system === s;
+    const cls = root ? "bad" : st === "up" ? "ok" : st === "down" ? "bad" : "warn";
+    const w = root ? "ROOT CAUSE" : st === "up" ? ((d?.version || 1) > 1 ? `UP V${d.version}` : "UP") : st === "down" ? "DOWN" : "TROUBLE";
+    return `<span class="mc ${cls}"><span class="mn">${U(sn(s))}</span><b>${w}</b></span>`;
+  }).join('<span class="mca">═</span>');
+}
+const tickMark = (s) => s.status === "verified" ? '<b class="g">✓</b>' : s.status === "failed" ? '<b class="r">X</b>' : ["sent", "unknown"].includes(s.status) ? "<b>›</b>" : '<b class="dim">·</b>';
+
+function renderOverview() {
+  const rid = runId(), since = (runStartedAt() || 0) - 5000;
+  const inc = focusIncident(), live = inc?.active ? inc : null;
+  const ds = duels(), lt = lastThoughts(since);
+  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"));
+  const dead = agents.filter((a) => a.status === "dead").length, working = agents.filter((a) => a.status === "working" || a.phase).length;
+  const lies = state.thoughts.filter((t) => t.kind === "reject" && ts(t.ts) >= since && !String(t.agent || "").startsWith("red-")).length;
+  const hos = nightIncidents().flatMap((i) => i.handoffs || []).length;
+  const recalled = nightIncidents().some((i) => i.recall?.used);
+  const steps = inc?.steps || [];
+  const last = lt.last && !String(lt.last.agent || "").startsWith("red-") ? lt.last : [...state.thoughts].reverse().find((t) => ts(t.ts) >= since && !String(t.agent || "").startsWith("red-"));
+  const lastTx = last ? (translate(last)?.text || "").replace(/<[^>]+>/g, "") : "";
+  const r = rounds(), liveR2 = [...state.incidents.values()].find((i) => i.active && i.round === 2);
+  const t1 = r[1]?.ttr, t2 = r[2]?.ttr ?? (liveR2 ? (serverNow() - ts(liveR2.opened_at)) / 1000 : null);
+  const mx = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / mx) * 200);
+  const look = (k, n) => `<div class="look"><span>${n}</span>LOOK INSIDE +</div>`;
+  const B = BOXR;
+  const lieFresh = state.thoughts.some((t) => t.kind === "reject" && serverNow() - ts(t.ts) < 12000);
+  const killFresh = ds.some((d) => d.e.fault === "agent_kill" && d.e.result?.agent && serverNow() - ts(d.e.done_at || d.e.ts) < 20000);
+  const beesBusy = !!live || working > 0;
+
+  // CHAOS MONKEY
+  const struck = new Map(); for (const d of ds) struck.set(d.who, (struck.get(d.who) || 0) + 1);
+  const ROSTER = [["SABOTEUR", "BREAKS OLD SYSTEMS"], ["LIAR", "SAYS “DONE”, DOES NOTHING"], ["ASSASSIN", "KILLS AN AGENT MID-JOB"], ["HACKER", "WALKS IN THROUGH OLD HOLES"], ["DRIFTER", "RENAMES DATA FIELDS"]];
+  const chaos = `<div class="big chaos ${ds.length ? "hot" : ""}" data-zoom="chaos" style="left:${B.chaos.x}px;top:${B.chaos.y}px;width:${B.chaos.w}px;height:${B.chaos.h}px">
+    <div class="bh"><span class="bt">CHAOS MONKEY</span><span class="dim">THE ATTACKERS · US</span></div>
+    <div class="bs">WE ATTACK THE BANK ON PURPOSE. EACH ATTACKER HAS ONE TRICK.</div>
+    <div class="bl-k">ATTACKERS</div>
+    ${ROSTER.map(([n, d]) => `<div class="bl per ${struck.has(n) ? "on" : ""}"><span class="pn">${n}</span><span>${d}</span><span class="pc">${struck.has(n) ? `×${struck.get(n)}` : ""}</span></div>`).join("")}
+    <div class="bl-k">ATTACK <span class="ar">→</span> DEFENCE${ds.length ? ` · ${ds.length} TONIGHT` : ""}</div>
+    ${ds.length ? ds.slice(-4).map((d) => `<div class="duo"><div><span class="pn">${esc(d.who)}</span> ${esc(d.atk)}</div><div class="def ${d.def.c}">↳ ${esc(d.def.t)}</div></div>`).join("") : '<div class="bl dim">PRESS START: TONIGHT’S ATTACKS AND HOW THE BEES ANSWERED EACH ONE SHOW HERE.</div>'}
+    ${look("chaos", 1)}</div>`;
+
+  // THE BEES
+  const ok = steps.filter((s) => s.status === "verified").length;
+  const bees = `<div class="big bees ${beesBusy ? "hot" : ""}" data-zoom="bees" style="left:${B.bees.x}px;top:${B.bees.y}px;width:${B.bees.w}px;height:${B.bees.h}px">
+    <div class="bh"><span class="bt">THE BEES</span><span class="dim">THE AI SWARM · ${agents.length - dead} ALIVE · ${working} WORKING</span></div>
+    <div class="bs">AI AGENTS THAT FIND WHAT REALLY BROKE, FIX IT, AND CHECK THE FIX IS TRUE.</div>
+    <div class="bl-k">THE BANK THEY GUARD</div>
+    <div class="chainm">${miniChain(inc)}</div>
+    <div class="bl-k">THE HIVE · ONE SQUARE PER AGENT</div>
+    <div class="hive">${hiveCells()}</div>
+    <div class="bl hl dim"><i class="hc work">W</i> WORKING <i class="hc idle">W</i> IDLE <i class="hc dead">W</i> KILLED <i class="hc took">N</i> TOOK OVER</div>
+    <div class="bl-k">RIGHT NOW</div>
+    <div class="bl now2">${last ? `<span class="pn2">${U(agentName(last.agent))}</span> ${esc(lastTx)}` : '<span class="dim">ALL QUIET.</span>'}</div>
+    <div class="bl-k">TONIGHT’S CASE${steps.length ? ` · ${ok} OF ${steps.length} FIXES VERIFIED` : ""}</div>
+    <div class="bl">${steps.length ? steps.slice(0, 5).map((s) => `${tickMark(s)} ${U(sop(s.op))}${(s.attempts || []).length > 1 ? ' <b class="r">LIED FIRST</b>' : ""}`).join("&nbsp;&nbsp;") : inc?.status === "resolved" ? '<span class="g">FIXED. LESSON SAVED IN MONGODB.</span>' : '<span class="dim">NO CASE OPEN.</span>'}</div>
+    <div class="cnt"><span class="${lies ? "r" : ""} ${lieFresh ? "flash" : ""}">LIES CAUGHT <b>${lies}</b></span><span class="${dead ? "r" : ""} ${killFresh ? "flash" : ""}">KILLED <b>${dead}</b></span><span class="${hos ? "a" : ""}">TAKEOVERS <b>${hos}</b></span><span class="${recalled ? "a" : ""}">REMEMBERED <b>${recalled ? "YES" : "—"}</b></span></div>
+    <div class="ttf"><span class="dim">TIME TO FIX</span><span>NIGHT 1 ${t1 != null ? secs(t1).toUpperCase() : "—"}</span>${t1 != null ? `<i style="width:${bw(t1)}px"></i>` : ""}</div>
+    <div class="ttf"><span class="dim" style="visibility:hidden">TIME TO FIX</span><span>NIGHT 2 ${t2 != null ? secs(t2).toUpperCase() : "—"}</span>${t2 != null ? `<i class="g2" style="width:${bw(t2)}px"></i>` : ""}${r[1] && r[2] && r[2].ttr < r[1].ttr ? `<span class="x">${(r[1].ttr / r[2].ttr).toFixed(1)}× FASTER</span>` : ""}</div>
+    ${look("bees", 2)}</div>`;
+
+  // THE GARDENER
+  const u = latestUpgrade();
+  const STEPS = [["requested", "SAME FAILURE TWICE: FILE A REQUEST"], ["planning", "WRITE THE CODE FIX"], ["testing", "TEST IT IN A SANDBOX"], ["awaiting_approval", "WAIT FOR YOUR OK"], ["deploying", "DEPLOY THE NEW CODE"], ["deployed", "PROVE IT: REPLAY THE ATTACK"]];
+  const order = ["requested", "planning", "testing", "awaiting_approval", "deploying", "deployed", "proven"];
+  const at = u ? order.indexOf(u.status) : -1;
+  const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
+  const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="left:${B.gardener.x}px;top:${B.gardener.y}px;width:${B.gardener.w}px;height:${B.gardener.h}px">
+    <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">PERMANENT FIXES</span></div>
+    <div class="bs">WHEN THE SAME FAILURE COMES BACK, IT WRITES NEW CODE SO IT CAN’T HAPPEN AGAIN.</div>
+    <div class="bl-k">THE STEPS</div>
+    ${STEPS.map(([k, t], i) => { const st = u?.status === "rejected" ? "" : at > i ? "done" : at === i ? "now" : ""; return `<div class="bl gs ${st}"><b>${st === "done" ? "✓" : st === "now" ? "›" : String(i + 1)}</b> ${t}</div>`; }).join("")}
+    <div class="bl gs ${u?.status === "proven" ? "done" : ""}"><b>${u?.status === "proven" ? "✓" : "7"}</b> FIXED FOR GOOD</div>
+    <div class="bl-k">STATUS</div>
+    <div class="gv">${u ? (u.status === "proven" ? `${U(sn(u.system))} V${u.version_before ?? 1} → V${u.version_after ?? 2}` : u.status === "rejected" ? "FIX REJECTED" : U(String(u.status).replace(/_/g, " "))) : "WAITING FOR A REPEAT FAILURE"}</div>
+    <div class="bl dim">${u?.status === "proven" ? "THE SAME ATTACK CAME BACK. NOTHING BROKE." : gThought ? esc((translate(gThought)?.text || "").replace(/<[^>]+>/g, "")) : "NIGHT 1 + NIGHT 2 SAME FAILURE → A CODE FIX."}</div>
+    ${look("gardener", 3)}</div>`;
+
+  patch($("#ov-nodes"), [{ k: "chaos", html: chaos }, { k: "bees", html: bees }, { k: "gard", html: gard }]);
+
+  // the lines between the boxes
+  const W = [];
+  const lineH = (k, x1, x2, y, cls, label, rev = false) => W.push({ k, html: `<g><path class="w ${cls}" d="M${rev ? x2 : x1} ${y} L${rev ? x1 + 8 : x2 - 8} ${y}" marker-end="url(#ah-${cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i"})"/><text class="wl ${cls.replace(/\bon\b/, "")}" x="${(x1 + x2) / 2}" y="${y - 7}" text-anchor="middle">${esc(label)}</text></g>` });
+  const cx1 = B.chaos.x + B.chaos.w + 4, bx1 = B.bees.x - 4, bx2 = B.bees.x + B.bees.w + 4, gx1 = B.gardener.x - 4;
+  const atkNow = ds.some((d) => d.e.fault !== "agent_kill" && serverNow() - ts(d.e.ts) < 25000) || !!live;
+  W.push({ k: "defs", html: `<defs>${[["r", "var(--red)"], ["a", "var(--amber)"], ["g", "var(--green)"], ["i", "var(--faint)"]].map(([n, c]) => `<marker id="ah-${n}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("")}</defs>` });
+  lineH("atk", cx1, bx1, 250, `red ${atkNow ? "on" : ""}`, ds.some((d) => d.e.fault !== "agent_kill") ? "ATTACKS" : "ATTACKS");
+  lineH("kill", cx1, bx1, 330, `red ${killFresh ? "on" : ""}`, "KILLS AN AGENT");
+  lineH("lie", cx1, bx1, 410, `${lies ? "grn" : ""} ${lieFresh ? "on" : ""}`, lies ? "LIE CAUGHT" : "LIES", true);
+  const upgReq = !!u, deployed = u && ["deployed", "proven"].includes(u.status);
+  lineH("req", bx2, gx1, 250, `${upgReq ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, "SAME FAILURE ×2");
+  lineH("code", bx2, gx1, 330, `${deployed ? "grn" : ""} ${u?.status === "deployed" ? "on" : ""}`, deployed ? `NEW CODE V${u.version_after ?? 2}` : "NEW CODE", true);
+  // the proof: the attack is replayed against the new code (runs under the boxes)
+  const proving = u?.status === "deployed", proven = u?.status === "proven";
+  const yb = B.bees.y + B.bees.h + 20;
+  W.push({ k: "prove", html: `<g><path class="w ${proven ? "grn" : proving ? "red on" : ""}" d="M${B.gardener.x + 60} ${B.gardener.y + B.gardener.h} L${B.gardener.x + 60} ${yb} L${B.chaos.x + B.chaos.w - 60} ${yb} L${B.chaos.x + B.chaos.w - 60} ${B.chaos.y + B.chaos.h + 6}"/><text class="wl ${proven ? "grn" : proving ? "red" : ""}" x="800" y="${yb + 14}" text-anchor="middle">${proven ? "PROVEN: THE ATTACK WAS REPLAYED AND NOTHING BROKE" : proving ? "PROVING: CHAOS MONKEY REPLAYS THE ATTACK…" : "THE PROOF: THE ATTACK IS REPLAYED AGAINST THE NEW CODE"}</text></g>` });
+  patch($("#ov-wires"), W, true);
+}
+
+// ================================================================== level 1: inside Chaos Monkey
+function renderChaos() {
+  const ds = duels();
+  const PERS = [["SABOTEUR", "Legacy breakage: crashed batches, full disks, dead scheduled jobs, stuck sessions."], ["ASSASSIN", "Really kills (SIGKILL) an agent's process in the middle of a job."],
+    ["LIAR", "Makes a system answer “done” without doing anything, or apply late."], ["HACKER", "Walks in through holes planted in the old systems."], ["DRIFTER", "Silently renames data fields under the agents."]];
+  const struck = new Map(); for (const d of ds) struck.set(d.who, (struck.get(d.who) || 0) + 1);
+  const clock = (iso) => { const d = new Date(iso); return isNaN(d) ? "" : d.toLocaleTimeString([], { hour12: false }); };
+  const rows = ds.slice(-15);
+  const html = `<div class="zc">
+    <div class="zcol" style="left:60px;top:150px;width:470px">
+      <div class="bl-k">THE ATTACKERS · US</div>
+      ${PERS.map(([n, d]) => `<div class="pz ${struck.has(n) ? "on" : ""}"><div><span class="pn">${n}</span><span class="pc">${struck.has(n) ? `${struck.get(n)} TONIGHT` : "NOT TONIGHT"}</span></div><div class="pd">${esc(d)}</div></div>`).join("")}
+      <div class="bl-k" style="margin-top:14px">HOW THE BEES DEFEND</div>
+      <div class="pd">Every “done” is re-checked by the Guard, every job is saved in MongoDB so a nurse can take it over, every fix is remembered for next time, and a repeat failure becomes new code.</div>
+    </div>
+    <div class="zcol" style="left:580px;top:150px;width:980px">
+      <div class="bl-k">ATTACK <span class="ar">→</span> DEFENCE · EVERY ATTACK TONIGHT AND WHAT ANSWERED IT</div>
+      <div class="dz head"><span>TIME</span><span>ATTACKER</span><span>ATTACK</span><span></span><span>DEFENCE</span></div>
+      ${rows.length ? rows.map((d) => `<div class="dz"><span class="dim">${clock(d.e.ts)}</span><span class="who">${esc(d.who)}</span><span>${esc(d.atk)}</span><span class="ar">→</span><span class="def ${d.def.c}">${esc(d.def.t)}</span></div>`).join("") : '<div class="dz"><span></span><span class="who" style="background:var(--faint)">—</span><span class="dim">NO ATTACKS YET TONIGHT.</span><span></span><span class="dim">PRESS START.</span></div>'}
+    </div>
+    <div class="eta" data-eta="chaos" style="left:580px;top:700px;width:980px"></div>
+  </div>`;
+  const host = $("#chaos-body");
+  if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }
+}
+
+// ================================================================== level 1: inside the Gardener
+function renderGardener() {
+  const u = latestUpgrade();
+  const order = ["requested", "planning", "testing", "awaiting_approval", "deploying", "deployed", "proven"];
+  const NAMES = ["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"];
+  const WHY = ["Same failure twice → the Lookout files a request", "Reads the old code, writes a small fix", "Runs the tests and replays the attack in a sandbox", "Nothing ships without a human OK", "Installs the code and bumps the version", "Chaos Monkey replays the original attack", "The attack came back. Nothing broke."];
+  const at = u ? order.indexOf(u.status) : -1;
+  const x0 = 60, wd = 200, gap = 13;
+  const stages = NAMES.map((n, i) => { const st = u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "now" : ""; return `<div class="gz ${st}" style="left:${x0 + i * (wd + gap)}px;top:160px;width:${wd}px"><div class="gzn"><b>${st === "done" ? "✓" : i + 1}</b> ${n}</div><div class="pd">${WHY[i]}</div></div>`; }).join("");
+  const thoughts = state.thoughts.filter((t) => roleOf(t.agent) === "gardener" || t.kind === "upgrade").slice(-9);
+  const tests = u?.tests ? ((u.tests.pytest_passed ?? u.tests.passed) ? '<span class="g">PASSED</span>' : '<span class="r">FAILED</span>') : "—";
+  const kv = [["SYSTEM", u ? U(sn(u.system)) : "—"], ["WEAKNESS", u ? esc(u.weakness || "") : "—"], ["EVIDENCE", u ? esc((u.evidence || []).join(" · ")) : "—"],
+    ["CODE CHANGE", u?.diff_lines ? `${u.diff_lines} LINES` : u?.diff ? `${String(u.diff).split("\n").length} LINES` : "—"], ["TESTS", tests],
+    ["APPROVAL", u?.approval_id ? esc(state.approvals.get(u.approval_id)?.status?.toUpperCase() || u.approval_id) : "—"],
+    ["VERSION", u ? `V${u.version_before ?? "?"} → ${u.version_after ? `V${u.version_after}` : "…"}` : "—"],
+    ["PROOF", u?.prove ? (u.status === "proven" ? '<span class="g">ATTACK REPLAYED · NO INCIDENT</span>' : "WATCHING…") : "—"]];
+  const html = `<div class="zc">
+    <svg class="wires" viewBox="0 0 1600 900" style="position:absolute;left:0;top:0;width:1600px;height:900px"><path class="w ${at >= 0 ? "amb" : ""}" d="M${x0} 214 L${x0 + 7 * (wd + gap) - gap} 214"/></svg>
+    ${stages}
+    <div class="zcol" style="left:60px;top:330px;width:700px"><div class="bl-k">THE CODE FIX</div>${kv.map(([k, v]) => `<div class="kv"><span class="dim">${k}</span><span>${v}</span></div>`).join("")}</div>
+    <div class="zcol" style="left:820px;top:330px;width:740px"><div class="bl-k">WHAT THE GARDENER IS DOING</div>${thoughts.length ? thoughts.map((t) => `<div class="kv"><span class="dim">${new Date(t.ts).toLocaleTimeString([], { hour12: false })}</span><span>${esc((translate(t)?.text || "").replace(/<[^>]+>/g, ""))}</span></div>`).join("") : '<div class="pd">Waiting: after the same failure is fixed on two nights, the Gardener writes a permanent code fix.</div>'}</div>
+    <div class="eta" data-eta="gardener" style="left:60px;top:700px;width:1500px"></div>
+  </div>`;
+  const host = $("#gard-body");
+  if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }
+}
+
+function renderDiagram() {
+  const fit = $("#fit"), fr = $("#frame");
+  const s = Math.min(fit.clientWidth / FW, fit.clientHeight / FH);
+  fr.style.transform = `translate(${Math.max(0, (fit.clientWidth - FW * s) / 2)}px, ${Math.max(0, (fit.clientHeight - FH * s) / 2)}px) scale(${s})`;
+  const rid = runId();
+  $("#ex-title").textContent = TITLE[zoom];
+  $("#z-back").hidden = zoom === "overview";
+  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-"));
+  $("#ex-a-l").textContent = zoom === "overview" ? `${agents.filter((a) => a.status !== "dead").length} AGENTS ALIVE` : "";
+  const t0 = runStartedAt();
+  const el = rid && t0 ? Math.max(0, Math.floor((serverNow() - t0) / 1000)) : null;
+  $("#clock").textContent = rid ? `NIGHT ${state.current?.round ?? "?"} · T+${el != null ? `${String(Math.floor(el / 60)).padStart(2, "0")}:${String(el % 60).padStart(2, "0")}` : "—"}` : "NO NIGHT RUNNING";
+  if (zooming) return;
+  for (const v of ZOOMS) { const el2 = $(`#v-${v}`); if (el2.hidden !== (v !== zoom)) el2.hidden = v !== zoom; }
+  ({ overview: renderOverview, chaos: renderChaos, bees: renderBees, gardener: renderGardener })[zoom]();
+}
+
+function bindZoom() {
+  // pointerdown, not click: a box can be re-rendered between press and release, which would swallow a click
+  $("#ov-nodes").addEventListener("pointerdown", (e) => { const b = e.target.closest("[data-zoom]"); if (b && e.button === 0) setZoom(b.dataset.zoom); });
+  $("#z-back").addEventListener("click", () => setZoom("overview"));
+  const help = () => { $("#help").hidden = !$("#help").hidden; };
+  $("#btn-help").addEventListener("click", help);
+  document.querySelectorAll("[data-help]").forEach((b) => b.addEventListener("click", help));
+  $("#help-x").addEventListener("click", () => ($("#help").hidden = true));
+  $("#help").addEventListener("click", (e) => { if (e.target.id === "help") $("#help").hidden = true; });
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey || /input|select|textarea/i.test(e.target.tagName)) return;
+    if (e.key === "Escape") { if (!$("#help").hidden) $("#help").hidden = true; else if ($("#details").hidden) setZoom("overview"); }
+    else if (e.key === "0") setZoom("overview");
+    else if (e.key === "1") setZoom("chaos");
+    else if (e.key === "2") setZoom("bees");
+    else if (e.key === "3") setZoom("gardener");
+    else if (e.key === "?" || e.key.toLowerCase() === "h") help();
+  });
 }
 
 // ------------------------------------------------------------------ buttons
@@ -725,5 +940,6 @@ on("status", (s) => { const c = $("#conn"); c.classList.toggle("live", s === "li
 on("tick", render);
 
 bind();
+bindZoom();
 connect();
-window.__diagram = { state, render, translate, duels };
+window.__diagram = { state, render, translate, duels, setZoom, get zoom() { return zoom; }, get zooming() { return zooming; } };

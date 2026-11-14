@@ -21,6 +21,7 @@
         <button id="btn-kill" class="btn" title="Kill the worker that is in the middle of a job (K)">KILL A WORKER</button>
         <button id="btn-queen" class="btn" title="Kill the queen, the coordinator; the backup queen takes over (Q)">KILL THE QUEEN</button>
         <button id="btn-next" class="btn" title="N">NEXT NIGHT</button>
+        <button id="btn-help" class="btn" title="What every button does (?)">? HELP</button>
         <span class="more">
           <button id="btn-more" class="btn" aria-haspopup="true">RESET +</button>
           <div id="more-pop" class="pop" hidden>
@@ -41,14 +42,33 @@
   </header>
 
   <main class="screen">
-    <div class="l row" style="top:104px"><span id="ex-a-l" class="dim">THE HIVE</span><span>EXHIBIT A: THE AGENTS AT WORK</span><span id="clock" class="dim">—</span></div>
-    <svg id="wires" class="wires" viewBox="0 0 1600 900" aria-hidden="true"></svg>
-    <div id="nodes"></div>
-    <div class="l rule" style="top:578px"><span>========================================================================================================================================================================================================</span></div>
-    <div class="l row" style="top:604px"><span class="dim">EVERY MARK IS A REAL WRITE IN MONGODB</span><span>EXHIBIT B: WHO DID WHAT TONIGHT</span><span class="dim" id="ex-b-r">&nbsp;</span></div>
-    <div id="strips"></div>
-    <div id="board"></div>
-    <div class="l legend" style="top:832px"><span><b class="k">!</b> ALARM&nbsp;&nbsp;H CHECK A SYSTEM&nbsp;&nbsp;S SEND A FIX&nbsp;&nbsp;V VERIFIED&nbsp;&nbsp;<b class="x">X</b> CAUGHT A LIE&nbsp;&nbsp;A ASK A HUMAN&nbsp;&nbsp;R REMEMBERED&nbsp;&nbsp;<b class="k">†</b> KILLED&nbsp;&nbsp;T TOOK OVER&nbsp;&nbsp;M SAVED TO MEMORY</span></div>
+    <div class="l row" style="top:104px"><span class="crumbs"><button id="z-back" class="btn sm" hidden title="Back to the three boxes (Esc)">&lt; OVERVIEW</button><span id="ex-a-l" class="dim"></span></span><span id="ex-title">EXHIBIT A: THE WHOLE NIGHT IN THREE BOXES</span><span id="clock" class="dim">—</span></div>
+
+    <!-- level 0: three boxes. Click one (or press 1 2 3) to zoom in. -->
+    <section id="v-overview" class="layer">
+      <svg id="ov-wires" class="wires" viewBox="0 0 1600 900" aria-hidden="true"></svg>
+      <div id="ov-nodes"></div>
+      <div class="l hint" style="top:812px"><span>CLICK A BOX (OR PRESS 1 · 2 · 3) TO LOOK INSIDE&nbsp;&nbsp;·&nbsp;&nbsp;ESC COMES BACK&nbsp;&nbsp;·&nbsp;&nbsp;<button class="lnk" data-help>? HELP: WHAT EVERY BUTTON DOES</button></span></div>
+    </section>
+
+    <!-- level 1: inside the Bees (the agents as seats around the systems they work on) -->
+    <section id="v-bees" class="layer" hidden>
+      <svg id="wires" class="wires" viewBox="0 0 1600 900" aria-hidden="true"></svg>
+      <div id="nodes"></div>
+      <div class="l rule" style="top:578px"><span>========================================================================================================================================================================================================</span></div>
+      <div class="l row" style="top:604px"><span class="dim">EVERY MARK IS A REAL WRITE IN MONGODB</span><span>EXHIBIT B: WHO DID WHAT TONIGHT</span><span class="dim" id="ex-b-r">&nbsp;</span></div>
+      <div id="strips"></div>
+      <div id="board"></div>
+      <div class="l legend" style="top:832px"><span><b class="k">!</b> ALARM&nbsp;&nbsp;H CHECK A SYSTEM&nbsp;&nbsp;S SEND A FIX&nbsp;&nbsp;V VERIFIED&nbsp;&nbsp;<b class="x">X</b> CAUGHT A LIE&nbsp;&nbsp;A ASK A HUMAN&nbsp;&nbsp;R REMEMBERED&nbsp;&nbsp;<b class="k">†</b> KILLED&nbsp;&nbsp;T TOOK OVER&nbsp;&nbsp;M SAVED TO MEMORY</span></div>
+    </section>
+
+    <!-- level 1: inside Chaos Monkey (who attacks, and the defence that answered each attack) -->
+    <section id="v-chaos" class="layer" hidden><div id="chaos-body"></div></section>
+
+    <!-- level 1: inside the Gardener (a repeated failure becomes new, tested, approved, proven code) -->
+    <section id="v-gardener" class="layer" hidden><div id="gard-body"></div></section>
+
+    <div id="lens" class="lens" hidden></div>
     <div class="l now" style="top:862px"><span class="now-k">NOW</span><span id="now" class="now-t" aria-live="polite">CONNECTING TO THE LIVE FEED…</span></div>
   </main>
 
@@ -66,6 +86,33 @@
   <div class="det-box">
     <div class="det-h"><h2>DETAILS</h2><button class="x" id="det-x" aria-label="close">×</button></div>
     <div id="det-body" class="det-body"></div>
+  </div>
+</div>
+
+<div id="help" class="details" hidden>
+  <div class="det-box help-box">
+    <div class="det-h"><h2>HOW TO USE THIS SCREEN</h2><button class="x" id="help-x" aria-label="close">×</button></div>
+    <div class="det-body">
+      <h3>The picture</h3>
+      <p>Three boxes. <b>CHAOS MONKEY</b> is us: we attack an old bank on purpose. <b>THE BEES</b> are AI agents that find and fix what broke, live. <b>THE GARDENER</b> turns a failure that keeps coming back into new, tested code. Lines between the boxes light up when one acts on another. Everything you see is read live from MongoDB.</p>
+      <h3>Looking inside</h3>
+      <table>
+        <tr><td>Click a box · keys 1 2 3</td><td>Zoom in: 1 Chaos Monkey (every attack and the defence that answered it) · 2 the Bees (each agent, the system it is working on, its moves on a timeline) · 3 the Gardener (the code fix, step by step).</td></tr>
+        <tr><td>&lt; OVERVIEW · Esc · 0</td><td>Zoom back out to the three boxes.</td></tr>
+      </table>
+      <h3>Buttons (top right)</h3>
+      <table>
+        <tr><td>START · S</td><td>Starts Night 1: the attack begins. After a night it reads START OVER (wipes everything, runs Night 1 again).</td></tr>
+        <tr><td>KILL A WORKER · K</td><td>Really kills (SIGKILL) the worker agent that is in the middle of a fix. Glows red when one is mid-job. A nurse agent takes over its job from the saved progress in MongoDB.</td></tr>
+        <tr><td>KILL THE QUEEN · Q</td><td>Kills the coordinator; the backup queen notices the silence and takes over.</td></tr>
+        <tr><td>NEXT NIGHT · N</td><td>Night 2 = the same attack again: the Bees remember it and fix it faster. Night 3 = the attack after the Gardener's upgrade: nothing breaks.</td></tr>
+        <tr><td>RESET + · R</td><td>RESET THIS NIGHT keeps what the Bees learned. FULL RESET wipes everything back to before Night 1. Also: run any night, DETAILS (MongoDB, memory search, numbers), the classic war room.</td></tr>
+        <tr><td>APPROVE / DENY</td><td>Risky steps and code deploys wait for a human. A yellow form pops up; nothing risky happens until you answer.</td></tr>
+        <tr><td>? HELP · ?</td><td>This sheet.</td></tr>
+      </table>
+      <h3>Colours</h3>
+      <p><span style="background:#ff4b55;color:#fff;padding:0 .5ch">RED</span> an attack, a killed agent, a lie caught · <span style="color:#1a9e4b">GREEN</span> verified, fixed · <span style="background:#f0a030;padding:0 .5ch">AMBER</span> memory, a takeover · <span style="background:#ffc400;padding:0 .5ch">YELLOW</span> waiting for your OK. A filled (inverted) name means that agent is working right now.</p>
+    </div>
   </div>
 </div>
 
