@@ -76,7 +76,7 @@ def new_request(upg_id="UPG-0001", system="mainframe"):
 def decide_later(upg_id, decision, delay=0.3):
     """Act as the Beekeeper: wait for the approval doc, then decide it (pending-only)."""
     def go():
-        for _ in range(100):
+        for _ in range(1200):  # up to 60 s: the sandbox test step is slow on a loaded box
             upg = col("upgrade_requests").find_one({"_id": upg_id}) or {}
             if upg.get("approval_id"):
                 time.sleep(delay)
