@@ -216,7 +216,8 @@ class Agent:
             col("agents").update_one({"_id": self.id}, {"$set": {**fields, "last_seen": now()}})
 
     def pause_point(self) -> None:
-        """GARDENER_PAUSE=1: hold here while the Gardener upgrades a system. Heartbeats and work-lease
+        """GARDENER_PAUSE=1: hold here while the Gardener (a separate system outside the
+        swarm) upgrades a system. Heartbeats and work-lease
         renewals keep running on their own thread, so nobody is declared dead and nothing is taken over.
         The pause is a lease (common/pause.py): if the Gardener dies, it lapses and we carry on."""
         if not pause.enabled():
