@@ -16,15 +16,15 @@ def complete(system: str, prompt: str, max_tokens: int = 200) -> str | None:
     try:
         import anthropic
 
-        c = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=config.LLM_TIMEOUT_S, max_retries=1)
-        msg = c.messages.create(
-            model=config.LLM_MODEL,
-            max_tokens=max_tokens,
-            thinking={"type": "disabled"},
-            output_config={"effort": "low"},
-            system=system,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        with anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=config.LLM_TIMEOUT_S, max_retries=1) as c:
+            msg = c.messages.create(
+                model=config.LLM_MODEL,
+                max_tokens=max_tokens,
+                thinking={"type": "disabled"},
+                output_config={"effort": "low"},
+                system=system,
+                messages=[{"role": "user", "content": prompt}],
+            )
         if msg.stop_reason == "refusal":
             return None
         return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip() or None
