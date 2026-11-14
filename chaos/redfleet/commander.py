@@ -29,6 +29,7 @@ from common import config, llm
 from common.db import now, world
 from common.events import think
 
+from .. import faults
 from . import core, learning
 from .personas import ARMED, KEYS, PERSONAS, SPOILER, VULN_OF, validate
 
@@ -131,6 +132,8 @@ COMBOS = {
                             "Do they trust read-back over logs while a worker dies mid-step?"),
     "break-then-drift": ("break {s} mid-repair, then rename the unix balance field",
                          "Compound faults: re-plan plus adapt to a changed layout"),
+    "poison-then-break": ("poison the remembered {fc} repair (aimed at {wrong}), then cause {fc} again",
+                          "Memory vs read-back: the Guard must reject the recalled wrong-system repair and re-plan"),
     "kill-then-exploit": ("SIGKILL a busy worker, then walk in through {vuln}",
                           "An intruder during a takeover: detect, patch, retest"),
 }
@@ -185,6 +188,14 @@ def combos(snap: dict, cfg: core.Settings, findings: dict | None = None) -> list
     if SPOILER.get(s) and "schema_drift" not in (estate.get("weak", {}).get("unix") or []):
         add("break-then-drift", [("red-saboteur", item("red-saboteur", fault=SPOILER[s], target=s)),
                                  ("red-drifter", item("red-drifter", fault="schema_drift", target="unix"))], s=s)
+    for m in menus.get("red-memory", []):   # poison a learned repair, then make the Hive need it again
+        fc = m.get("fault_class")
+        again = item("red-saboteur", fault=fc) or item("red-hacker", fault=fc)
+        if again:
+            who = "red-saboteur" if again["fault"] in PERSONAS["red-saboteur"].faults else "red-hacker"
+            add("poison-then-break", [("red-memory", m), (who, again)], fc=fc,
+                wrong=faults.WRONG_SYSTEM.get(again["target"], "mainframe"))
+            break
     hack = next((m for m in menus.get("red-hacker", [])), None)
     if hack:
         add("kill-then-exploit", [("red-assassin", item("red-assassin", fault="agent_kill")),

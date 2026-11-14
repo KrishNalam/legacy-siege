@@ -143,3 +143,16 @@ def test_ordered_victim_is_kept_when_still_on_the_menu():
     assert strike["victim"] == "worker-web-1" and strike["params"]["selector"] == {"agent": "worker-web-1"}
     strike, _ = commander.order_strike("red-assassin", {**order, "victim": "worker-gone-9"}, s, cfg())
     assert strike["victim"] == "worker-mainframe-1"   # victim left: the worker mid-send now
+
+
+def test_poison_then_break_combo_needs_the_switch_and_a_poisonable_repair(monkeypatch):
+    monkeypatch.setenv("RED_FLEET_AGENTS", "red-memory,red-saboteur")
+    learned = [{"id": "PB-0003", "fault_class": "disk_fill", "system": "unix"}]
+    assert commander.combos(snap(poisonable=learned), cfg()) == []          # CHAOS_POISON_MEMORY off
+    monkeypatch.setenv("CHAOS_POISON_MEMORY", "1")
+    got = commander.combos(snap(poisonable=learned), cfg())
+    assert [o["combo"] for o in got] == ["poison-then-break"]
+    assert got[0]["steps"] == [{"persona": "red-memory", "fault": "poison_memory", "target": "swarm", "victim": "PB-0003"},
+                               {"persona": "red-saboteur", "fault": "disk_fill", "target": "unix"}]
+    strike, _ = commander.order_strike("red-memory", {**got[0]["steps"][0], "reason": "r"}, snap(poisonable=learned), cfg())
+    assert strike["params"] == {"playbook": "PB-0003"}
