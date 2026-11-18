@@ -23,7 +23,7 @@ PROCS = [
     ("systems", [PY, "-m", "uvicorn", "systems.app:app", "--host", "0.0.0.0", "--port",
                  os.environ.get("SYSTEMS_PORT", "8701"), "--log-level", "warning"]),
     ("warroom", [PY, "-m", "uvicorn", "warroom.server:app", "--host", "0.0.0.0", "--port",
-                 os.environ.get("WARROOM_PORT") or os.environ.get("PORT") or "8700", "--log-level", "warning"]),
+                 str(config.WARROOM_PORT), "--log-level", "warning"]),
     ("swarm", [PY, "-m", "swarm.supervisor"]),
     ("gardener", [PY, "-m", "gardener.main"]),
 ]
@@ -70,7 +70,7 @@ def main() -> None:
     running: dict[str, subprocess.Popen] = {}
     restarts: dict[str, list[float]] = {name: [] for name, _ in PROCS}
 
-    def stop(*_):
+    def stop(*_, code: int = 0):
         # every group we ever started (current ones; replaced ones were already ended before relaunch)
         for name, p in list(running.items()):
             try:
@@ -79,7 +79,7 @@ def main() -> None:
                 pass
         for name, p in list(running.items()):
             end_group(p.pid, grace=8.0, leader=p)
-        sys.exit(0)
+        sys.exit(code)
 
     # cleanup handlers BEFORE anything is launched: a Ctrl-C during startup must not orphan children
     signal.signal(signal.SIGTERM, stop)
@@ -110,7 +110,7 @@ def main() -> None:
             restarts[name] = recent + [time.monotonic()]
             if len(recent) >= 5:
                 print(f"{name} crash-looping (exit {p.returncode}); see logs/{name}.log — stopping", flush=True)
-                stop()
+                stop(code=1)
             # its children may still be alive in its process group (e.g. a crashed supervisor's agents):
             # end that group first, or every restart would add another full set of agents
             if group_alive(p.pid):

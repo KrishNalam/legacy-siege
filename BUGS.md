@@ -2,7 +2,27 @@
 
 Review date: 2026-11-18. Commit reviewed: `ba36a0d` (main, clean, same as `origin/main`).
 Most severe first. Each entry gives the place, a concrete failure, the severity, how it was checked, and a suggested fix.
-No code was changed.
+
+## Status (2026-11-18, branch `fix/readme-and-bugs`)
+
+| # | status |
+|---|---|
+| 1 | **Fixed.** `revert()` only restores a backup when the file is byte-for-byte the Gardener's patch of it; hand edits are left alone. New test `test_revert_leaves_hand_edited_file_alone`. |
+| 2 | **Fixed for `run.py --reset` / `setup_db --reset`** (they now revert too). "Next round" still keeps the patch by design (HANDOFF #6). |
+| 3 | **Fixed.** `deployed` is resumed on Gardener start (unless reverted), and `run()` re-proves when there's no verdict yet. |
+| 4 | **Fixed for the Queen** (`handled` keyed by id + `opened_at`). The Guard's narration sets are unchanged (cosmetic). |
+| 5 | Open (needs a run-epoch design). |
+| 6 | **Fixed.** Compose pins the in-container ports. |
+| 7 | **Fixed.** Crash-loop exit is 1. |
+| 8 | **Fixed.** One clear error line on a MongoDB without Atlas Search. |
+| 9 | **Fixed.** `config.WARROOM_PORT` honours `PORT`; `run.py` uses it. |
+| 10 | Open. |
+| 11 | **Fixed.** `common/tests/conftest.py` isolates the DBs. |
+| 12 | **Fixed.** Accepts 1/true/yes/on. |
+| 13 | Open. |
+| 14 | **Partly fixed.** Default is now `localhost` (no private IP); the variable is still unused. |
+
+The MongoDB-backed suites and `scripts.demo_check` have **not** been re-run on these fixes yet.
 
 How things were checked:
 - **Reproduced**: shown on a scratch copy against a local MongoDB 8.0 replica set.
@@ -133,7 +153,6 @@ The full stack could not run here (see the note at the end), so no entry was che
 ### Not bugs, but worth knowing
 
 - `common/db.py:81-98` (partition helpers) is never called (CONTRACTS says so). It is dead code.
-- `.dockerignore` excludes `deploy/README.md`, which does not exist.
 - `scripts/tests/test_cut_video.py` needs `docs/video-script.md`. That file exists in the repo; I left it out of my copy on purpose.
 
 ### What could not be checked here

@@ -23,7 +23,7 @@ from .pipeline import AGENT, ROLE
 
 log = logging.getLogger("gardener")
 POLL_S = 5.0
-IN_FLIGHT = ["planning", "testing", "awaiting_approval", "deploying"]
+IN_FLIGHT = ["planning", "testing", "awaiting_approval", "deploying", "deployed"]  # deployed: prove may not have finished
 
 
 def register() -> None:
@@ -107,7 +107,7 @@ def serve() -> None:
     pipeline.say("Gardener online in the workshop; watching upgrade_requests")
     stream = open_stream()  # opened before the first scan so nothing is missed in between
     try:
-        for doc in col("upgrade_requests").find({"status": {"$in": IN_FLIGHT}}).sort("ts", 1):
+        for doc in col("upgrade_requests").find({"status": {"$in": IN_FLIGHT}, "reverted_at": {"$exists": False}}).sort("ts", 1):
             pipeline.say(f"resuming {doc['_id']} from status {doc['status']}", doc.get("system"))
             run_safely(doc["_id"])
         while True:

@@ -57,7 +57,7 @@ class Settings:
 
 def live_db_refusal() -> str | None:
     """The one hard rule: never attack the live demo databases unless explicitly allowed."""
-    if os.environ.get("RED_FLEET_ALLOW_LIVE", "").strip() == "1":
+    if os.environ.get("RED_FLEET_ALLOW_LIVE", "").strip().lower() in ("1", "true", "yes", "on"):
         return None
     if config.WORLD_DB == "world" or config.SWARM_DB == "swarm":
         return ("refusing the live world/swarm DBs; use an isolated stack (WORLD_DB/SWARM_DB) "
