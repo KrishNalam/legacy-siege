@@ -47,7 +47,7 @@ SUMMARY = """() => {
 
 def main():
     with sync_playwright() as p:
-        br = p.chromium.launch(executable_path="/usr/bin/google-chrome", headless=True,
+        br = p.chromium.launch(headless=True,
                                args=["--disable-gpu-sandbox", "--force-color-profile=srgb"])
         page = br.new_page(viewport={"width": 1920, "height": 1080})
         page.on("console", lambda m: logs.append(f"console.{m.type}: {m.text}") if m.type in ("error", "warning") else None)

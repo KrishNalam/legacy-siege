@@ -22,7 +22,7 @@ Most severe first. Each entry gives the place, a concrete failure, the severity,
 | 13 | Open. |
 | 14 | **Partly fixed.** Default is now `localhost` (no private IP); the variable is still unused. |
 
-The MongoDB-backed suites and `scripts.demo_check` have **not** been re-run on these fixes yet.
+Re-tested on Atlas Local 8.0 (2026-11-18): every suite passes run on its own (common 12, systems 29, chaos 81, gardener 33, warroom 23, scripts 30, swarm 119 + 1 skipped), and `scripts.demo_check` is 26/26. Running the non-swarm suites in one pytest call gives 12 gardener errors + 1 chaos failure, identically on `main` (cross-suite DB/port interference, not these fixes).
 
 How things were checked:
 - **Reproduced**: shown on a scratch copy against a local MongoDB 8.0 replica set.

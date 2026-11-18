@@ -2,11 +2,8 @@
 
 A team of AI agents keeps a fake bank's legacy systems running while a chaos monkey attacks the systems and the agents.
 
-<!-- SCREENSHOT: war room /diagram view mid Night 1: portal and unix degraded, bees walking the chain, activity stream visible.
-     Save it as docs/screenshots/hero-diagram-night1.png, then uncomment the two lines below.
-![The /diagram war room during Night 1: the Chaos Monkey has hit the mainframe, the portal and unix are degraded, and the bees are tracing the fault upstream](docs/screenshots/hero-diagram-night1.png)
+![The /diagram war room during Night 1: the Chaos Monkey has hit the mainframe, the portal and unix show trouble, and a scout is tracing the fault upstream](docs/screenshots/hero-diagram-night1.png)
 *Night 1 in the `/diagram` view. Everything on screen is read live from MongoDB.*
--->
 
 ## Highlights
 
@@ -73,25 +70,17 @@ The demo is three "nights" of the same attack. In the `/diagram` view:
 
 **Reset +** offers "Reset this night" (keeps what the bees learned) and "Full reset" (wipes everything, including memory, and undoes the Gardener's patch).
 
-<!-- SCREENSHOT: Guard stamping "ACK ≠ APPLIED" on the mainframe step in Night 1 -->
-<!-- SCREENSHOT: Nurse takeover right after "Kill a worker" (dead worker greyed out, nurse holding the ticket) -->
-<!-- SCREENSHOT: Gardener approval dialog showing the diff and test results after Night 2 -->
+| | |
+|---|---|
+| ![The guard catches a lie: quarantine_record said applied but the read-back shows nothing changed](docs/screenshots/05-ack-not-applied.png) *The guard catches a system that lied about a fix.* | ![A nurse takes over a killed worker's ticket from its MongoDB checkpoint](docs/screenshots/08-nurse-takeover.png) *A worker is killed mid-fix; a nurse resumes it from its checkpoint.* |
+| ![Night 2: vector search recalls last night's playbook and skips the chain walk](docs/screenshots/10-recall-golden-path.png) *Night 2: the playbook is recalled, so 1 hop instead of 3.* | ![The Gardener asks for approval to deploy a 27-line patch, with tests and replay passed](docs/screenshots/12-gardener-approval.png) *The Gardener asks before deploying its patch.* |
+
+These are from the classic view at `/`; the `/diagram` view shows the same run.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  Chaos[Chaos Monkey<br/>seeded faults + SIGKILL] -->|breaks| Sys[Legacy systems :8701<br/>mainframe → unix → portal]
-  Chaos -->|kills| Bees
-  Bees[The Bees<br/>12 agent processes] -->|read health, send fixes| Sys
-  Bees <-->|leases, checkpoints,<br/>ledger, playbooks| DB[(MongoDB)]
-  Bees -->|repeat fault| Gardener[Gardener<br/>patch → test → approve → deploy → prove]
-  Gardener -->|hot reload| Sys
-  Gardener <--> DB
-  Sys <--> DB
-  DB -->|change streams| War[War room :8700]
-  War -->|buttons: nights, kill, approve, reset| Chaos
-```
+![Architecture: the swarm, the legacy estate, the Red attackers, the Gardener and the war room, all reading and writing MongoDB](docs/diagrams/architecture-v3.png)
+*Every part talks to the others only through the systems' HTTP API and MongoDB. More diagrams: [`docs/diagrams/`](docs/diagrams/README.md).*
 
 `run.py` starts four processes: the systems API, the war room, the swarm supervisor and the Gardener. It restarts any of them that crashes.
 The supervisor starts one process per agent and replaces dead agents after 15 s.
