@@ -1,13 +1,13 @@
-"""Scout — owns one incident end to end (thread "<incident>:scout").
+"""Investigator — owns one incident end to end (thread "<incident>:investigator").
 
     observe -> recall --usable hit--> confirm --fits--> plan
                  \\                       \\--doesn't fit--\\
                   \\--no hit-----------------------------> diagnose (one hop per run, loops) -> classify -> plan
     plan -> dispatch <-> approve (LangGraph interrupt until the Beekeeper decides)
-            dispatch <-> await_group (workers act, guard verifies)
+            dispatch <-> await_group (operators act, verifier verifies)
             dispatch -> resolve (all steps verified AND all affected systems healthy) -> playbook
 
-All incident writes are fenced on the incident lease {owner, generation}. If the scout dies, a Nurse
+All incident writes are fenced on the incident lease {owner, generation}. If the investigator dies, a Recovery
 claims the expired lease and resumes this same graph thread from its last MongoDB checkpoint.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from common.db import col, next_id, now, txn
 from common.events import say as bus
 
 from .. import leases, policy, recall, recovery, scale, second_opinion, settings, steps, workflow
-from upgrader import help as gardener_help
+from upgrader import help as upgrader_help
 
 from ..harness import Agent, checkpointer, log, main_loop, retrying
 from .. import lessons
@@ -54,8 +54,8 @@ def _who(config) -> tuple[str, int]:
     return c["agent"], int(c["generation"])
 
 
-def scout_config(inc_id: str, agent_id: str, generation: int) -> dict:
-    return {"configurable": {"thread_id": f"{inc_id}:scout", "agent": agent_id, "generation": generation},
+def investigator_config(inc_id: str, agent_id: str, generation: int) -> dict:
+    return {"configurable": {"thread_id": f"{inc_id}:investigator", "agent": agent_id, "generation": generation},
             "recursion_limit": 500}
 
 
@@ -101,20 +101,20 @@ def build_graph(agent: Agent):
             pass  # node re-ran after a resume: the task already exists
         if scale.enabled():  # dynamic scaling: spawn the specialist this task needs if none is free
             try:
-                rid = scale.ensure_worker(agent.id, doc)
-            except Exception as e:  # never block the incident on scaling; a nurse picks the task up anyway
+                rid = scale.ensure_operator(agent.id, doc)
+            except Exception as e:  # never block the incident on scaling; a recovery picks the task up anyway
                 rid = None
-                agent.think(f"Spawn request for {task_id} failed ({type(e).__name__}); a nurse will cover it.",
+                agent.think(f"Spawn request for {task_id} failed ({type(e).__name__}); a recovery will cover it.",
                             incident=inc["_id"], pause=False)
             if rid:
-                agent.think(f"Spawning a {specialty} worker for {task_id} ({rid}).", kind="spawn",
+                agent.think(f"Spawning a {specialty} operator for {task_id} ({rid}).", kind="spawn",
                             incident=inc["_id"], system=fields.get("system"), pause=False)
 
     def escalate(config, inc_id: str, reason: str) -> dict:
         fenced(config, inc_id, {"$set": {"status": "failed", "active": False, "closed_at": now(),
                                           "failure": reason}})
         say(inc_id, f"Escalating {inc_id} to the Beekeeper: {reason}", pause=False)
-        bus(agent.id, "queen", "escalate", {"incident": inc_id, "reason": reason})
+        bus(agent.id, "coordinator", "escalate", {"incident": inc_id, "reason": reason})
         return {"outcome": "failed"}
 
     # ------------------------------------------------------------------ nodes
@@ -152,7 +152,7 @@ def build_graph(agent: Agent):
             system=inc["system"])
         if progress.enabled():  # PROGRESS_ETA: time to resolve, learned from past incidents on this system
             est = progress.estimate("swarm", "incident", inc["system"])
-            progress.emit(agent.id, "scout", f"{inc_id}: resolving {inc['system']} · {progress.eta_text(est)}",
+            progress.emit(agent.id, "investigator", f"{inc_id}: resolving {inc['system']} · {progress.eta_text(est)}",
                           action_type="incident", system=inc["system"], incident=inc_id, eta=est)
         return {"started": time.time(), "symptom_text": policy.symptom_text(inc.get("symptoms") or []),
                 "path": [], "findings": {}, "hit": None}
@@ -160,12 +160,12 @@ def build_graph(agent: Agent):
     def diag_eta(inc_id: str, system: str, how: str) -> None:
         if progress.enabled():
             est = progress.estimate("swarm", f"diagnose:{how}", system)
-            progress.emit(agent.id, "scout", f"{inc_id}: diagnosing from {system} ({how}) · {progress.eta_text(est)}",
+            progress.emit(agent.id, "investigator", f"{inc_id}: diagnosing from {system} ({how}) · {progress.eta_text(est)}",
                           action_type=f"diagnose:{how}", system=system, incident=inc_id, eta=est)
 
     def diag_done(inc_id: str, how: str, diag_s: float) -> None:
         if progress.enabled():  # keyed by the symptom system, like the ETA asked for at the start
-            progress.record("swarm", f"diagnose:{how}", inc_doc(inc_id)["system"], "scout", diag_s, "ok",
+            progress.record("swarm", f"diagnose:{how}", inc_doc(inc_id)["system"], "investigator", diag_s, "ok",
                             incident=inc_id)
 
     def recall_node(state: ScoutState, config) -> dict:
@@ -181,7 +181,7 @@ def build_graph(agent: Agent):
             except Exception:
                 skipped = []
         vetoed = []
-        try:  # provenance: a remembered fix that the Guard never verified is tampered memory (poison)
+        try:  # provenance: a remembered fix that the Verifier never verified is tampered memory (poison)
             usable, vetoed = recovery.vet_recall(inc_id, hits, summary, usable, q, agent.id)
         except Exception as e:
             log(agent.id, f"memory provenance check skipped: {type(e).__name__}: {e}")
@@ -196,33 +196,33 @@ def build_graph(agent: Agent):
         for line in skipped:
             say(inc_id, line, kind="recall", system=inc["system"], pause=False)
         if usable:
-            kf = (inc.get("known_fix") or {}) if gardener_help.enabled() else {}
+            kf = (inc.get("known_fix") or {}) if upgrader_help.enabled() else {}
             agree = bool(kf) and (kf.get("playbook_id") == usable["_id"]
                                   or (kf.get("system"), kf.get("fault_class")) == (usable["system"], usable["fault_class"]))
             if agree:
                 fenced(config, inc_id, {"$set": {"known_fix.used": True}})
             say(inc_id, f"Recall hit {usable['_id']} (score {usable['score']:.2f}, {usable['system']} "
                         f"v{usable['system_version']}): {usable['fault_class']} — skipping the chain walk"
-                        + (" (Sentinel #2 pushed the same fix)." if agree else "."),
+                        + (" (Monitor #2 pushed the same fix)." if agree else "."),
                 kind="recall", system=usable["system"])
             diag_eta(inc_id, inc["system"], "recall")
             return {"hit": {"playbook_id": usable["_id"], "system": usable["system"],
                             "fault_class": usable["fault_class"], "fix": usable.get("fix") or []},
                     "diag_started": time.time(), "current": usable["system"]}
-        pushed = (inc.get("known_fix") or {}) if gardener_help.enabled() else {}
-        if pushed.get("playbook_id"):  # Sentinel #2 pushed a verified fix for these exact symptoms
+        pushed = (inc.get("known_fix") or {}) if upgrader_help.enabled() else {}
+        if pushed.get("playbook_id"):  # Monitor #2 pushed a verified fix for these exact symptoms
             pb = col("playbooks").find_one({"_id": pushed["playbook_id"], "stale": False}, {"embedding": 0})
             try:
                 cur = sysc.version(pushed["system"])
             except Exception:
                 cur = None
             if pb and pb.get("system_version") == cur:
-                say(inc_id, f"No vector hit, but Sentinel #2 pushed {pb['_id']} ({pb.get('fault_class')} on "
+                say(inc_id, f"No vector hit, but Monitor #2 pushed {pb['_id']} ({pb.get('fault_class')} on "
                             f"{pb['system']}, from {pb.get('incident')}) — using it instead of walking the chain.",
                     kind="recall", system=pb["system"])
                 fenced(config, inc_id, {"$set": {"known_fix.used": True}})
                 return {"hit": {"playbook_id": pb["_id"], "system": pb["system"], "fault_class": pb.get("fault_class"),
-                                "fix": pb.get("fix") or [], "via": "sentinel-2"},
+                                "fix": pb.get("fix") or [], "via": "monitor-2"},
                         "diag_started": time.time(), "current": pb["system"]}
         if summary:
             best = summary[0]
@@ -240,7 +240,7 @@ def build_graph(agent: Agent):
         return {"hit": None, "diag_started": time.time(), "current": inc["system"]}
 
     def hop(config, state: ScoutState, sys: str, mode: str = "walk") -> tuple[dict, list[str]]:
-        """One diagnosis hop = one diagnose task for a specialist worker on `sys`."""
+        """One diagnosis hop = one diagnose task for a specialist operator on `sys`."""
         inc_id = state["incident"]
         inc = inc_doc(inc_id)
         path = list(state.get("path") or [])
@@ -251,9 +251,9 @@ def build_graph(agent: Agent):
         new_task(inc, task_id, "diagnose", policy.SPECIALTY[sys], system=sys, mode=mode)
         agent.set(target=sys, phase="diagnosing")
         if mode == "confirm":  # recall path: one quick confirmatory read, no deliberation pause
-            say(inc_id, f"Confirm hop: one {policy.SPECIALTY[sys]} worker read of {sys}.", system=sys, pause=False)
+            say(inc_id, f"Confirm hop: one {policy.SPECIALTY[sys]} operator read of {sys}.", system=sys, pause=False)
         else:
-            say(inc_id, f"Hop {n}: sending a {policy.SPECIALTY[sys]} worker to examine {sys}.", system=sys)
+            say(inc_id, f"Hop {n}: sending a {policy.SPECIALTY[sys]} operator to examine {sys}.", system=sys)
         t = wait_task(inc_id, task_id)
         path.append(sys)
         fenced(config, inc_id, {"$set": {"diagnosis_path": path, "metrics.hops": len(path)}})
@@ -303,7 +303,7 @@ def build_graph(agent: Agent):
         culprits = [s for s in path if (findings.get(s) or {}).get("fault_class")]
         if not culprits:
             if recovery.enabled() and path and all((findings.get(s) or {}).get("status") == "up" for s in path):
-                # SWARM_RECOVERY: a transient blip (another incident's fix landed meanwhile): nothing is wrong
+                # AGENTS_RECOVERY: a transient blip (another incident's fix landed meanwhile): nothing is wrong
                 # any more, so close it as self-healed instead of handing the Beekeeper a false alarm
                 fenced(config, inc_id, {"$set": {"status": "resolved", "active": False, "closed_at": now(),
                                                   "resolution": "self_healed", "lease_until": leases.EPOCH}})
@@ -334,17 +334,17 @@ def build_graph(agent: Agent):
             if not state.get("hit") and second_opinion.drives() and not second_opinion.owned_elsewhere(inc):
                 # AI_DRIVES: Claude reasons over the evidence; its plan runs only if it passes every guardrail.
                 # (A usable recall hit skips this: a fresh playbook already says what to do.)
-                agent.check("incidents", inc_id)  # a scout that lost its lease must not flash a stale card
+                agent.check("incidents", inc_id)  # an investigator that lost its lease must not flash a stale card
                 drove = second_opinion.decide(agent.id, inc, state, raw, state["root"], state["fault_class"],
                                               say=lambda t: say(inc_id, t, system=state["root"], pause=False))
                 raw = drove["plan"]
-            from .. import platform
-            tool_hit = platform.lookup(state['fault_class'], state.get('params') or {}, sysc.version,
+            from .. import toolsmith
+            tool_hit = toolsmith.lookup(state['fault_class'], state.get('params') or {}, sysc.version,
                                        received=tool_delivery.refresh(agent))
             if tool_hit and (drove is None or raw == policy.fix_plan(state['fault_class'], state.get('params') or {})):
                 tool, raw = tool_hit
                 raw = [{**s, 'tool_id': tool['_id']} for s in raw]
-                say(inc_id, f"Scout selected platform tool {tool['name']} ({tool['source']}).", kind="recall", pause=False)
+                say(inc_id, f"Investigator selected toolsmith tool {tool['name']} ({tool['source']}).", kind="recall", pause=False)
             raw, wf_lines = workflow.with_memory(raw, sysc.ops)  # WORKFLOW_DRIFT: learned prerequisites up front
             plan_steps = [{
                 "step_id": f"{inc_id}-s{i}", "n": i, "desc": s["desc"], "system": s["system"], "op": s["op"],
@@ -368,7 +368,7 @@ def build_graph(agent: Agent):
         return {}
 
     def next_group(st: list[dict]) -> list[dict]:
-        """Next batch of steps one worker can take: same specialty, in order; a destructive step always
+        """Next batch of steps one operator can take: same specialty, in order; a destructive step always
         starts its own batch so its approval is requested right before it runs."""
         pending = [s for s in sorted(st, key=lambda s: s["n"])
                    if s["status"] != "verified" and not s.get("superseded_by_replan")]
@@ -389,7 +389,7 @@ def build_graph(agent: Agent):
 
     def apply_lessons(config, inc: dict) -> dict:
         """Failure memory, once per incident right after the plan: annotate the planned steps with what failed
-        before (stored on the incident, so a Nurse resuming this graph reads the same lessons) and say so."""
+        before (stored on the incident, so a Recovery resuming this graph reads the same lessons) and say so."""
         if inc.get("lessons_checked") or not inc.get("steps"):
             return inc
         plan_steps = [dict(s) for s in inc["steps"]]
@@ -439,7 +439,7 @@ def build_graph(agent: Agent):
                array_filters=[{"g.step_id": {"$in": ids}}])
         agent.set(target=first["system"], phase="fixing")
         say(inc_id, f"Dispatching {', '.join(s['op'] for s in group)} to a {policy.SPECIALTY[first['system']]} "
-                    f"worker ({task_id}).", kind="action", system=first["system"])
+                    f"operator ({task_id}).", kind="action", system=first["system"])
         return {"outcome": "await"}
 
     def replan_memory(state, config, inc):
@@ -459,7 +459,7 @@ def build_graph(agent: Agent):
                         "status": "planned", "action_id": None, "attempts": [], "agent": None,
                         "evidence": None, "approval_id": None, "ts": now()})
         # One server-side pipeline update: flags whatever is unverified *at write time* and appends the new
-        # steps, so a Guard verdict that lands between our read and this write is never overwritten.
+        # steps, so a Verifier verdict that lands between our read and this write is never overwritten.
         fenced(config, inc["_id"], [{"$set": {
             "steps": {"$concatArrays": [
                 {"$map": {"input": "$steps", "as": "s", "in": {"$cond": [
@@ -467,12 +467,12 @@ def build_graph(agent: Agent):
                     {"$mergeObjects": ["$$s", {"superseded_by_replan": True}]}, "$$s"]}}},
                 {"$literal": new}]},
             "memory_replanned": True, "status": "fixing"}}])
-        say(inc["_id"], "The Guard rejected the recalled repair. Replacing unverified work with a fresh policy plan; "
+        say(inc["_id"], "The Verifier rejected the recalled repair. Replacing unverified work with a fresh policy plan; "
                         "keeping the failed attempts as evidence.", kind="action", pause=False)
         return {"outcome": "await"}
 
     def recover(config, inc: dict, failed_task: dict) -> dict:
-        """SWARM_RECOVERY: the fix task ran out of attempts (or timed out). Back off, re-read the system,
+        """AGENTS_RECOVERY: the fix task ran out of attempts (or timed out). Back off, re-read the system,
         and re-dispatch the unverified steps with a fresh attempt budget instead of giving up."""
         inc_id = inc["_id"]
         rnd = inc.get("recovery_rounds", 0) + 1
@@ -492,7 +492,7 @@ def build_graph(agent: Agent):
             kind="action", system=sys, pause=False)
         agent.nap(wait_s)
         agent.check("incidents", inc_id)
-        # re-read after the nap: a Guard verdict may have landed while we backed off
+        # re-read after the nap: a Verifier verdict may have landed while we backed off
         inc = inc_doc(inc_id)
         todo = [s for s in sorted(inc.get("steps") or [], key=lambda s: s["n"])
                 if s["step_id"] in ids and s["status"] != "verified"]
@@ -540,7 +540,7 @@ def build_graph(agent: Agent):
             appended = new_steps[n_old:]
             # One server-side pipeline update (like the memory replan): steps are flagged superseded only if still
             # unverified *at write time*, and a retry copy is dropped when its original got verified meanwhile, so
-            # a Guard verdict landing during the backoff nap is never overwritten or redone.
+            # a Verifier verdict landing during the backoff nap is never overwritten or redone.
             unverified = {"$and": [{"$in": ["$$s.step_id", superseded]}, {"$ne": ["$$s.status", "verified"]}]}
             verified_ids = {"$map": {"input": {"$filter": {"input": "$steps", "as": "v",
                                                            "cond": {"$eq": ["$$v.status", "verified"]}}},
@@ -613,7 +613,7 @@ def build_graph(agent: Agent):
         agent.set(phase="verifying", target=state["root"])
         watch = sorted(set(inc.get("affected") or []) | {state["root"]}, key=policy.rank)
         verified = "Current plan" if inc.get("memory_replanned") else "Every step"
-        say(inc_id, f"{verified} verified by the Guard. Waiting for {', '.join(watch)} to report healthy.")
+        say(inc_id, f"{verified} verified by the Verifier. Waiting for {', '.join(watch)} to report healthy.")
         t0 = time.monotonic()
         deadline, health, next_look = t0 + settings.RESOLVE_TIMEOUT_S, {}, t0 + recovery.HEALTH_GRACE_S
         while time.monotonic() < deadline:
@@ -622,7 +622,7 @@ def build_graph(agent: Agent):
             if all(v == "up" for v in health.values()):
                 break
             if recovery.enabled() and inc.get("recovery_rounds", 0) < recovery.ROUNDS and time.monotonic() >= next_look:
-                # SWARM_RECOVERY: every step verified, yet a system stays down: something new hit it (a re-struck
+                # AGENTS_RECOVERY: every step verified, yet a system stays down: something new hit it (a re-struck
                 # fault, a second attack). Re-diagnose and fix that instead of waiting out the timeout.
                 next_look = time.monotonic() + recovery.HEALTH_GRACE_S
                 inc = inc_doc(inc_id)
@@ -658,7 +658,7 @@ def build_graph(agent: Agent):
                 col("playbooks").update_one({"_id": state["hit"]["playbook_id"]},
                                             {"$inc": {"uses": 1}, "$set": {"last_used_at": closed}}, session=s)
         txn(fn)
-        progress.record("swarm", "incident", inc["system"], "scout", metrics["ttr_s"], "resolved", incident=inc_id,
+        progress.record("swarm", "incident", inc["system"], "investigator", metrics["ttr_s"], "resolved", incident=inc_id,
                         fault_class=state["fault_class"])
         say(inc_id, f"Resolved {inc_id} in {metrics['ttr_s']:.0f}s ({metrics['hops']} hops, {metrics['steps']} steps, "
                     f"{metrics['attempts']} attempts). Saved playbook {pb['_id']} for {state['root']} "
@@ -691,9 +691,9 @@ def build_graph(agent: Agent):
 
 
 def drive(agent: Agent, graph, inc_id: str, generation: int) -> dict | None:
-    """Run (or resume) the scout graph for an incident, servicing approval interrupts by polling
-    swarm.approvals. Shared by scouts and by nurses that take over a dead scout's incident."""
-    cfg = scout_config(inc_id, agent.id, generation)
+    """Run (or resume) the investigator graph for an incident, servicing approval interrupts by polling
+    swarm.approvals. Shared by investigators and by recovery agents that take over a dead investigator's incident."""
+    cfg = investigator_config(inc_id, agent.id, generation)
     snap = graph.get_state(cfg)
     if snap.values and not snap.next:
         return snap.values
@@ -720,7 +720,7 @@ def claim_query(agent_id: str) -> dict:
 
 
 def claim_sort() -> list:
-    """Oldest first. SWARM_COMMS=1: the incident the Queen assigned me (her priority pick) before any older
+    """Oldest first. AGENTS_COMMS=1: the incident the Coordinator assigned me (her priority pick) before any older
     unassigned one (the query only matches assigned_to == me or None, and null sorts lowest)."""
     return ([("assigned_to", -1)] if comms.enabled() else []) + [("opened_at", 1)]
 
@@ -729,7 +729,7 @@ def run(agent: Agent) -> None:
     graph = build_graph(agent)
     second_opinion.prewarm()  # no-op unless an AI switch is on and a key is set
     def tick():
-        # Take an incident the queen assigned to me — or any unassigned one if the queen is slow/absent.
+        # Take an incident the coordinator assigned to me — or any unassigned one if the coordinator is slow/absent.
         inc = leases.claim(col("incidents"), claim_query(agent.id), agent.id,
                            extra_set={"status": "claimed", "claimed_at": now()}, sort=claim_sort())
         if not inc:

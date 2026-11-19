@@ -4,7 +4,7 @@ Every decision is a ``world.chaos_events`` document with ``kind: "decision"`` (n
 ``target``), so it sits next to the attacks it explains. Consumers that count or draw *attacks* filter it out
 with ``NOT_DECISION``.
 
-    log_decision("red-planner", "campaign_brief", run_id="RUN-0001", reason="...", focus="guard")
+    log_decision("red-planner", "campaign_brief", run_id="RUN-0001", reason="...", focus="verifier")
 """
 from __future__ import annotations
 

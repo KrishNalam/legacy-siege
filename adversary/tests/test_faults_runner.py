@@ -15,7 +15,7 @@ def test_library_has_every_contract_fault():
     expected = {"batch_abort", "disk_fill", "cron_stop", "session_leak", "lying_success", "slow_apply",
                 "sqli_exploit", "config_exploit", "agent_kill", "agent_freeze", "lie_to_agent", "schema_drift",  # schema_drift: additive (§8)
                 "false_log", "credential_exploit",  # Red fleet: additive (§8)
-                "poison_memory",  # W18 Memory Striker, CHAOS_POISON_MEMORY (default off)
+                "poison_memory",  # W18 Memory Striker, ADVERSARY_POISON_MEMORY (default off)
                 "workflow_drift"}  # W26 workflow drift: additive, switch WORKFLOW_DRIFT
     assert set(faults.FAULTS) == expected
     for f in faults.FAULTS.values():
@@ -177,10 +177,10 @@ def test_every_event_says_who_what_why(systems):
 
 def test_poison_is_opt_in_wrong_system_and_reset_restores_real_memory(monkeypatch):
     from common.db import swarm
-    monkeypatch.delenv("CHAOS_POISON_MEMORY", raising=False)
+    monkeypatch.delenv("ADVERSARY_POISON_MEMORY", raising=False)
     with pytest.raises(faults.FaultError):
         runner.fire("poison_memory")
-    monkeypatch.setenv("CHAOS_POISON_MEMORY", "1")
+    monkeypatch.setenv("ADVERSARY_POISON_MEMORY", "1")
     batch = {"_id": "PB-batch", "fault_class": "batch_abort", "system": "mainframe", "stale": False,
              "fix": [{"system": "mainframe", "op": "quarantine_record", "params": {"record_id": "TX123456"}}]}
     swarm().playbooks.insert_one(batch)
@@ -206,20 +206,20 @@ def test_poison_is_opt_in_wrong_system_and_reset_restores_real_memory(monkeypatc
 
 
 def test_agent_lie_uses_vetted_log_hook_only_when_enabled(systems, monkeypatch):
-    monkeypatch.delenv("CHAOS_AGENT_LIE", raising=False)
+    monkeypatch.delenv("ADVERSARY_AGENT_LIE", raising=False)
     with pytest.raises(faults.FaultError):
         runner.fire("lie_to_agent")
-    monkeypatch.setenv("CHAOS_AGENT_LIE", "1")
+    monkeypatch.setenv("ADVERSARY_AGENT_LIE", "1")
     assert runner.fire("lie_to_agent", "unix")["status"] == "ok"
     assert systems.calls == [("/unix/_chaos/false_log", {"params": {"prompt_injection": True}})]
 
 
 @pytest.mark.parametrize("fault", ["false_log", "credential_exploit"])
 def test_red_fleet_system_attacks_require_master_switch(fault, systems, monkeypatch):
-    monkeypatch.delenv("RED_FLEET", raising=False)
+    monkeypatch.delenv("ADVERSARY", raising=False)
     with pytest.raises(faults.FaultError, match="switched off"):
         runner.fire(fault)
     assert not systems.calls
-    monkeypatch.setenv("RED_FLEET", "1")
+    monkeypatch.setenv("ADVERSARY", "1")
     assert runner.fire(fault)["status"] == "ok"
     assert len(systems.calls) == 1

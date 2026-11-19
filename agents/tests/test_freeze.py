@@ -1,4 +1,4 @@
-"""A live but SIGSTOPped worker must lose its task to a fenced Nurse."""
+"""A live but SIGSTOPped operator must lose its task to a fenced Recovery."""
 import os
 import signal
 
@@ -7,19 +7,19 @@ import pytest
 from agents.tests.conftest import reset_runtime, run_until_resolved, start_swarm, wait_for
 
 
-def test_frozen_worker_nurse_takeover_and_resume(db, fake):
+def test_frozen_operator_recovery_takeover_and_resume(db, fake):
     from common.db import col
     reset_runtime()
     fake.post('/_admin/reset')
-    hive = start_swarm({'STEP_HOLD_S': '1.5', 'SWARM_LEASE_DEADLINE': '1'}, log_name='freeze')
+    hive = start_swarm({'STEP_HOLD_S': '1.5', 'AGENTS_LEASE_DEADLINE': '1'}, log_name='freeze')
     victim = None
     try:
         fake.post('/mainframe/_chaos/batch_abort', json={'params': {}})
-        victim = wait_for(lambda: col('agents').find_one({'role': 'worker', 'phase': 'step_sent'}), 60, .05)
+        victim = wait_for(lambda: col('agents').find_one({'role': 'operator', 'phase': 'step_sent'}), 60, .05)
         old_task = col('tasks').find_one({'_id': victim['task']})
         os.kill(victim['pid'], signal.SIGSTOP)
         inc = run_until_resolved(1)
-        assert any(h['from'] == victim['_id'] and h['to'].startswith('nurse-') for h in inc['handoffs'])
+        assert any(h['from'] == victim['_id'] and h['to'].startswith('recovery-') for h in inc['handoffs'])
         task = col('tasks').find_one({'_id': victim['task']})
         assert task['generation'] >= 2
         from common.db import txn

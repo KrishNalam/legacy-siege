@@ -1,8 +1,8 @@
-"""Gardener pipeline: plan -> test -> gate -> deploy -> prove (+ revert for demo resets).
+"""Upgrader pipeline: plan -> test -> gate -> deploy -> prove (+ revert for demo resets).
 
 Every step is a plain function taking an upgrade id, reading the upgrade request from
 MongoDB and writing its result back, so any process (upgrader.main, the war room, a
-test) can drive any step and a crashed Gardener resumes from the stored status.
+test) can drive any step and a crashed Upgrader resumes from the stored status.
 
     swarm.upgrade_requests.status:
       requested -> planning -> testing -> awaiting_approval -> deploying -> deployed -> proven
@@ -39,16 +39,16 @@ from common.llm import complete
 from . import patcher, remediations, testing
 from .patcher import PatchError
 
-log = logging.getLogger("gardener")
+log = logging.getLogger("upgrader")
 
-AGENT, ROLE = "gardener-1", "gardener"
+AGENT, ROLE = "upgrader-1", "upgrader"
 SYSTEMS_DIR = config.ROOT / "systems"
 BACKUP_DIR = Path(__file__).resolve().parent / "backups"
 PROVE_FAULT = "batch_abort"
 PROVE_WINDOW_S = config.PROVE_WINDOW_S  # env PROVE_WINDOW_S (default 30)
 WATCHED_SYSTEMS = ["mainframe", "unix", "portal"]
 TERMINAL = {"proven", "rejected"}
-PAUSE_MIN_S = float(os.environ.get("GARDENER_PAUSE_MIN_S") or 4)  # long enough to see on screen
+PAUSE_MIN_S = float(os.environ.get("UPGRADER_PAUSE_MIN_S") or 4)  # long enough to see on screen
 
 
 class Rejected(Exception):
@@ -71,7 +71,7 @@ def say(text: str, system: str | None = None) -> None:
 
 
 def set_phase(phase: str | None, upgrade: str | None = None, target: str = "workshop") -> None:
-    """Mirror progress onto the Gardener's agent doc (no-op if upgrader.main isn't registered)."""
+    """Mirror progress onto the Upgrader's agent doc (no-op if upgrader.main isn't registered)."""
     col("agents").update_one({"_id": AGENT}, {"$set": {
         "phase": phase, "upgrade": upgrade, "target": target,
         "status": "working" if phase else "idle", "last_seen": now()}})
@@ -121,7 +121,7 @@ def http_post(path: str, json: dict | None = None, timeout: float = 15) -> dict:
 
 
 def _write_atomic(path: Path, text: str) -> None:
-    tmp = path.with_name(f".{path.name}.gardener.tmp")
+    tmp = path.with_name(f".{path.name}.upgrader.tmp")
     tmp.write_text(text)
     os.replace(tmp, path)  # atomic on POSIX: the reloader never sees a half-written file
 
@@ -229,7 +229,7 @@ def explain(upg: dict, patch: Patch, ev: dict) -> str:
 
 # ------------------------------------------------------------------ 1. plan
 def _pick_kind(upg: dict) -> dict:
-    """GARDENER_HELP=1: no vetted code remediation for this problem but an accepted platform tool covers
+    """UPGRADER_HELP=1: no vetted code remediation for this problem but an accepted toolsmith tool covers
     it -> the upgrade ships that tool instead (remediation_kind 'tool'). Otherwise unchanged."""
     if upg.get("remediation_kind") or not _help_enabled():
         return upg
@@ -439,11 +439,11 @@ def deploy(upg_id: str) -> dict:
     except PatchError as e:
         reject(upg_id, str(e), system)
 
-    # GARDENER_PAUSE=1: every agent (swarm + Red fleet) holds still while the file is swapped and reloaded.
+    # UPGRADER_PAUSE=1: every agent (swarm + Red fleet) holds still while the file is swapped and reloaded.
     # A lease, renewed while we work: if this process dies here, everyone resumes within the lease.
-    with pause.hold(AGENT, system, upg_id, f"Gardener upgrading {system}", min_s=PAUSE_MIN_S) as paused:
+    with pause.hold(AGENT, system, upg_id, f"Upgrader upgrading {system}", min_s=PAUSE_MIN_S) as paused:
         if paused:
-            say(f"Gardener upgrading {system} — all agents paused", system)
+            say(f"Upgrader upgrading {system} — all agents paused", system)
         if patcher.sha256(patch.path.read_text()) != patcher.sha256(patch.patched):
             backup = Path(upg["backup"]) if upg.get("backup") else _backup(system, patch.original)
             col("upgrade_requests").update_one({"_id": upg_id}, {"$set": {"backup": str(backup)}})
@@ -573,7 +573,7 @@ def run(upg_id: str, approval_timeout: float | None = None, prove_window_s: floa
     """Drive an upgrade from its current status to the end. Safe to call again after a crash."""
     def stage(i: int, name: str, label: str, record_it: bool = True):
         """PROGRESS_ETA (off = no-op): step i/5 with an ETA learned from past upgrades of this system."""
-        return progress.track("swarm", f"upgrade:{name}", system, ROLE, agent=AGENT, label=f"Gardener {upg_id}: {label}",
+        return progress.track("swarm", f"upgrade:{name}", system, ROLE, agent=AGENT, label=f"Upgrader {upg_id}: {label}",
                               step=i, of=5, record_it=record_it)
 
     try:
@@ -622,7 +622,7 @@ def latest_backup(system: str) -> Path | None:
 
 
 def _backup_behind(system: str, current: str) -> Path | None:
-    """The backup whose Gardener patch is exactly `current`, newest first (None if `current` isn't our patch).
+    """The backup whose Upgrader patch is exactly `current`, newest first (None if `current` isn't our patch).
 
     This is what makes revert safe: a file someone edited by hand (or a newer checkout) never matches,
     so an old backup can't overwrite it.
@@ -638,9 +638,9 @@ def _backup_behind(system: str, current: str) -> Path | None:
 
 
 def revert(system: str = "mainframe", reload: bool = True) -> dict:
-    """Undo a Gardener deploy (demo reset): restore systems/<system>.py from the backup it was patched from.
+    """Undo an Upgrader deploy (demo reset): restore systems/<system>.py from the backup it was patched from.
 
-    Only touches the file when it is byte-for-byte the Gardener's patch of a backup; anything else
+    Only touches the file when it is byte-for-byte the Upgrader's patch of a backup; anything else
     (the legacy code, or a hand edit) is left alone.
     """
     path = inside_systems(SYSTEMS_DIR / f"{system}.py")
@@ -648,7 +648,7 @@ def revert(system: str = "mainframe", reload: bool = True) -> dict:
     backup = _backup_behind(system, current)
     if backup is None:
         return {"reverted": False, "changed": False,
-                "reason": f"systems/{system}.py is not a Gardener patch; left as is"}
+                "reason": f"systems/{system}.py is not an Upgrader patch; left as is"}
     _write_atomic(path, backup.read_text())
     resp = None
     if reload:

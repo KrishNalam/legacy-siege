@@ -1,4 +1,4 @@
-"""Minimal legacy mainframe for Gardener tests. Follows the validate_record contract.
+"""Minimal legacy mainframe for Upgrader tests. Follows the validate_record contract.
 
 NIGHTBAT: records are fixed-width 80-char lines; a record that passes validation but
 carries non-numeric data in the zoned amount field ABENDs the batch (S0C7).

@@ -29,7 +29,7 @@ SCENARIOS: list[dict] = [
     },
     {
         "_id": "bank-night-3", "seed": 1003,
-        "title": "Bank night 3 — replay after the Gardener's upgrade (expect no incident)",
+        "title": "Bank night 3 — replay after the Upgrader's upgrade (expect no incident)",
         "steps": [{"t": 0, "fault": "batch_abort", "target": "mainframe", "params": {}}],
     },
     {
@@ -40,7 +40,7 @@ SCENARIOS: list[dict] = [
     {"_id": "free-play", "seed": 0, "title": "Free play — manual chaos buttons only", "steps": []},
 ]
 
-# SCHEMA_DRIFT_DEMO=1 (default off) ends night 3 with the schema-drift beat, after the Gardener's 30 s prove
+# SCHEMA_DRIFT_DEMO=1 (default off) ends night 3 with the schema-drift beat, after the Upgrader's 30 s prove
 # window. Off for scripts.demo_check: its night-3 check expects no incident at all.
 DRIFT_STEP = {"t": 45, "fault": "schema_drift", "target": "unix", "params": {}}
 if os.environ.get("SCHEMA_DRIFT_DEMO", "").lower() in ("1", "true", "on", "yes"):

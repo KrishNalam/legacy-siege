@@ -8,7 +8,7 @@ swarm walk the dependency chain instead of reading one red light.
 
 Planted fragility: the posting step converts the zoned-decimal amount field; a
 non-numeric byte there is a data exception (S0C7) that ABENDs the whole batch.
-Planted weakness: :func:`validate_record` accepts everything (the Gardener's target).
+Planted weakness: :func:`validate_record` accepts everything (the Upgrader's target).
 Planted vuln: the OPERATOR account still has its factory-default password.
 
 Workflow drift (``workflow_drift`` chaos, additive): "JES2 maintenance" changes the operator workflow. From then
@@ -36,8 +36,22 @@ MEMO_FIELD = slice(51, 80)      # free text
 
 
 def validate_record(record: str) -> bool:
-    """Legacy: no validation. Every record is accepted into NIGHTBAT."""
-    return True
+    """Upgrader remediation batch_validation: reject malformed NIGHTBAT records.
+
+    Fixed-width record of RECORD_LEN chars, numeric account, signed numeric amount.
+    A bad record is rejected here instead of ABENDing the batch (S0C7).
+    """
+    if not isinstance(record, str) or len(record) != RECORD_LEN:
+        return False
+    account = record[ACCOUNT_FIELD].strip()
+    amount = record[AMOUNT_FIELD].strip()
+    if not (account.isascii() and account.isdigit()):
+        return False
+    if amount[:1] in ("+", "-"):
+        amount = amount[1:]
+    elif amount[-1:] in ("+", "-"):
+        amount = amount[:-1]
+    return amount.isascii() and amount.isdigit()
 
 
 def format_record(rec_id: str, date: str, debit: str, credit: str, amount: int | str,
@@ -50,7 +64,7 @@ def format_record(rec_id: str, date: str, debit: str, credit: str, amount: int |
 
 
 # A record the legacy posting step cannot convert (S0C7). validation_enabled in /state is
-# "does validate_record reject this?" — it flips to True once the Gardener's patch is live.
+# "does validate_record reject this?" — it flips to True once the Upgrader's patch is live.
 BAD_SAMPLE_RECORD = format_record("TX999999", "20261114", "4211000101", "4211000102", "12,345.0O",
                                   memo="SAMPLE BAD AMOUNT")
 ACCOUNTS = ["4211000101", "4211000102", "4211000103", "4211000104", "4211000105"]

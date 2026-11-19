@@ -4,7 +4,7 @@
            holder's lease_until has passed; bumps `generation` (the fencing token).
 * renew / release: conditional on {owner, generation}; a replaced holder matches nothing.
 * fence:   inside a transaction, a no-op-ish write on the lease doc conditional on {owner, generation}.
-           If a nurse has claimed the doc meanwhile, the write matches 0 docs (or write-conflicts) and the
+           If a recovery has claimed the doc meanwhile, the write matches 0 docs (or write-conflicts) and the
            whole transaction aborts — so a stale holder can never write steps or ledger rows.
 """
 from __future__ import annotations
@@ -48,7 +48,7 @@ def claim(coll: Collection, query: dict, owner: str, lease_s: float | None = Non
 
 def takeover(coll: Collection, _id, prev_owner: str | None, prev_gen: int, owner: str,
              extra_set: dict | None = None) -> dict | None:
-    """Claim an *expired* lease from a known previous holder (nurse takeover). Exactly one nurse wins."""
+    """Claim an *expired* lease from a known previous holder (recovery takeover). Exactly one recovery wins."""
     return coll.find_one_and_update(
         {"_id": _id, "owner": prev_owner, "generation": prev_gen, "lease_until": {"$lt": now()}},
         {"$set": {"owner": owner, "lease_until": until(), **(extra_set or {})}, "$inc": {"generation": 1}},

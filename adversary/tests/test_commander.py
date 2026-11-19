@@ -1,4 +1,4 @@
-"""Red Commander + Scouts (RED_COMMANDER=1): off contract, vetted combos only, and a full campaign
+"""Red Commander + Investigators (ADVERSARY_COMMANDER=1): off contract, vetted combos only, and a full campaign
 (plan -> Striker executes each step through runner.fire -> reflect) against MongoDB + the fake systems hook."""
 from __future__ import annotations
 
@@ -20,10 +20,10 @@ def cfg(**kw) -> Settings:
 
 @pytest.fixture
 def fast(monkeypatch):
-    for k in ("RED_COMMANDER_FIRST_S", "RED_COMMANDER_STEP_GAP_S", "RED_COMMANDER_OBSERVE_S", "RED_COMMANDER_COOLDOWN_S"):
+    for k in ("ADVERSARY_COMMANDER_FIRST_S", "ADVERSARY_COMMANDER_STEP_GAP_S", "ADVERSARY_COMMANDER_OBSERVE_S", "ADVERSARY_COMMANDER_COOLDOWN_S"):
         monkeypatch.setenv(k, "0")
-    monkeypatch.setenv("RED_COMMANDER", "1")
-    monkeypatch.setenv("RED_FLEET_AGENTS", "red-saboteur,red-drifter,red-liar")
+    monkeypatch.setenv("ADVERSARY_COMMANDER", "1")
+    monkeypatch.setenv("ADVERSARY_AGENTS", "red-saboteur,red-drifter,red-liar")
     monkeypatch.setattr(commander.llm, "llm_available", lambda: False)
     from adversary.redfleet import agent as agent_mod
     monkeypatch.setattr(agent_mod.llm, "llm_available", lambda: False)
@@ -42,7 +42,7 @@ def _night_with_pending_mainframe_step():
 
 
 def test_off_by_default_strikers_ignore_orders(systems, monkeypatch, fast):
-    monkeypatch.delenv("RED_COMMANDER")
+    monkeypatch.delenv("ADVERSARY_COMMANDER")
     assert not commander.enabled()
     run_id = _night_with_pending_mainframe_step()
     world().red_agents.update_one({"_id": "red-saboteur"}, {"$set": {"order": {
@@ -53,21 +53,21 @@ def test_off_by_default_strikers_ignore_orders(systems, monkeypatch, fast):
 
 
 def test_combos_are_vetted_and_feasible(monkeypatch):
-    monkeypatch.setenv("RED_FLEET", "1")   # false_log is a fleet-only fault; the Commander only runs inside the fleet
-    monkeypatch.setenv("CHAOS_AGENT_FREEZE", "1")
-    monkeypatch.delenv("RED_FLEET_AGENTS", raising=False)
+    monkeypatch.setenv("ADVERSARY", "1")   # false_log is a fleet-only fault; the Commander only runs inside the fleet
+    monkeypatch.setenv("ADVERSARY_AGENT_FREEZE", "1")
+    monkeypatch.delenv("ADVERSARY_AGENTS", raising=False)
     s = snap(agents=HIVE, mid_send=[a for a in HIVE if a["phase"] == "step_sent"], incidents=[INC])
     got = {o["combo"]: o for o in commander.combos(s, cfg())}
     assert {"lie-then-freeze", "lie-then-kill", "false-log-then-kill", "break-then-drift"} <= set(got)
     lf = got["lie-then-freeze"]["steps"]
     assert lf[0] == {"persona": "red-liar", "fault": "lying_success", "target": "unix"}   # INC's pending step is on unix
-    assert lf[1]["persona"] == "red-assassin" and lf[1]["fault"] == "agent_freeze" and lf[1]["victim"] == "worker-mainframe-1"
-    monkeypatch.setenv("RED_FLEET_AGENTS", "red-liar,red-saboteur")   # Strikers that aren't running get no steps
+    assert lf[1]["persona"] == "red-assassin" and lf[1]["fault"] == "agent_freeze" and lf[1]["victim"] == "operator-mainframe-1"
+    monkeypatch.setenv("ADVERSARY_AGENTS", "red-liar,red-saboteur")   # Strikers that aren't running get no steps
     assert {o["combo"] for o in commander.combos(s, cfg())} == set()
 
 
 def test_claude_pick_must_be_on_the_menu(systems, monkeypatch, fast):
-    monkeypatch.setenv("RED_FLEET", "1")   # false_log is a fleet-only fault; the Commander only runs inside the fleet
+    monkeypatch.setenv("ADVERSARY", "1")   # false_log is a fleet-only fault; the Commander only runs inside the fleet
     _night_with_pending_mainframe_step()
     monkeypatch.setattr(commander.llm, "llm_available", lambda: True)
     monkeypatch.setattr(commander.llm, "complete", lambda *a, **k: '{"combo": "nuke-it", "reason": "x"}')
@@ -80,8 +80,8 @@ def test_claude_pick_must_be_on_the_menu(systems, monkeypatch, fast):
     world().red_agents.update_many({}, {"$unset": {"order": ""}})
     monkeypatch.setattr(commander.llm, "complete", lambda *a, **k:
                         '{"combo": "false-log-then-kill", "reason": "logs lie because"}')
-    monkeypatch.setenv("RED_FLEET_AGENTS", "red-liar,red-assassin")
-    swarm().agents.insert_one({"_id": "worker-mainframe-1", "role": "worker", "status": "working", "phase": "step_sent",
+    monkeypatch.setenv("ADVERSARY_AGENTS", "red-liar,red-assassin")
+    swarm().agents.insert_one({"_id": "operator-mainframe-1", "role": "operator", "status": "working", "phase": "step_sent",
                                "specialty": "mainframe", "incident": "INC-0001", "last_seen": now()})
     c.step()
     camp = world().red_agents.find_one({"_id": commander.COMMANDER_ID})["campaign"]
@@ -92,10 +92,10 @@ def test_full_campaign_plan_execute_reflect(systems, fast):
     run_id = _night_with_pending_mainframe_step()
     c = commander.Commander(cfg())
     sab, dri = Attacker(PERSONAS["red-saboteur"], cfg()), Attacker(PERSONAS["red-drifter"], cfg())
-    c.step()                                            # OBSERVE (scouts post) -> THINK -> ACT: step 1 assigned
+    c.step()                                            # OBSERVE (investigators post) -> THINK -> ACT: step 1 assigned
     board = {d["_id"]: d for d in world().red_agents.find()}
-    assert board["red-scout-hive"]["findings"]["pending_step_systems"] == ["mainframe"]
-    assert "findings" in board["red-scout-systems"]
+    assert board["red-recon-hive"]["findings"]["pending_step_systems"] == ["mainframe"]
+    assert "findings" in board["red-recon-systems"]
     camp = board[commander.COMMANDER_ID]["campaign"]
     assert camp["combo"] == "break-then-drift" and camp["planner"] == "policy"
     assert board["red-saboteur"]["order"]["status"] == "assigned" and board["red-drifter"]["order"]["status"] == "queued"
@@ -120,7 +120,7 @@ def test_full_campaign_plan_execute_reflect(systems, fast):
 
 
 def test_unexecuted_step_expires_and_campaign_aborts(systems, fast, monkeypatch):
-    monkeypatch.setenv("RED_COMMANDER_STEP_TIMEOUT_S", "0")
+    monkeypatch.setenv("ADVERSARY_COMMANDER_STEP_TIMEOUT_S", "0")
     _night_with_pending_mainframe_step()
     c = commander.Commander(cfg())
     c.step()
@@ -129,27 +129,27 @@ def test_unexecuted_step_expires_and_campaign_aborts(systems, fast, monkeypatch)
     c.step()                                            # nobody executed step 1 -> aborted
     c.step()                                            # reflect on the aborted campaign
     reg = world().red_agents.find_one({"_id": commander.COMMANDER_ID})
-    assert reg["last_reflection"]["outcome_summary"] == {"landed": "0/2", "guard_caught": None, "recovery_s": None,
-                                                         "nurse_handoffs": 0, "aborted": True}
+    assert reg["last_reflection"]["outcome_summary"] == {"landed": "0/2", "verifier_caught": None, "recovery_s": None,
+                                                         "recovery_handoffs": 0, "aborted": True}
     assert "order" not in world().red_agents.find_one({"_id": "red-saboteur"})
 
 
 def test_ordered_victim_is_kept_when_still_on_the_menu():
     from .test_redfleet import agent
-    hive = HIVE + [agent("worker-web-1", "worker", phase="investigate", specialty="portal", incident="INC-0001")]
+    hive = HIVE + [agent("operator-web-1", "operator", phase="investigate", specialty="portal", incident="INC-0001")]
     s = snap(agents=hive, incidents=[INC])
-    order = {"fault": "agent_kill", "target": "swarm", "victim": "worker-web-1", "reason": "r"}
+    order = {"fault": "agent_kill", "target": "swarm", "victim": "operator-web-1", "reason": "r"}
     strike, _ = commander.order_strike("red-assassin", order, s, cfg())
-    assert strike["victim"] == "worker-web-1" and strike["params"]["selector"] == {"agent": "worker-web-1"}
-    strike, _ = commander.order_strike("red-assassin", {**order, "victim": "worker-gone-9"}, s, cfg())
-    assert strike["victim"] == "worker-mainframe-1"   # victim left: the worker mid-send now
+    assert strike["victim"] == "operator-web-1" and strike["params"]["selector"] == {"agent": "operator-web-1"}
+    strike, _ = commander.order_strike("red-assassin", {**order, "victim": "operator-gone-9"}, s, cfg())
+    assert strike["victim"] == "operator-mainframe-1"   # victim left: the operator mid-send now
 
 
 def test_poison_then_break_combo_needs_the_switch_and_a_poisonable_repair(monkeypatch):
-    monkeypatch.setenv("RED_FLEET_AGENTS", "red-memory,red-saboteur")
+    monkeypatch.setenv("ADVERSARY_AGENTS", "red-memory,red-saboteur")
     learned = [{"id": "PB-0003", "fault_class": "disk_fill", "system": "unix"}]
-    assert commander.combos(snap(poisonable=learned), cfg()) == []          # CHAOS_POISON_MEMORY off
-    monkeypatch.setenv("CHAOS_POISON_MEMORY", "1")
+    assert commander.combos(snap(poisonable=learned), cfg()) == []          # ADVERSARY_POISON_MEMORY off
+    monkeypatch.setenv("ADVERSARY_POISON_MEMORY", "1")
     got = commander.combos(snap(poisonable=learned), cfg())
     assert [o["combo"] for o in got] == ["poison-then-break"]
     assert got[0]["steps"] == [{"persona": "red-memory", "fault": "poison_memory", "target": "swarm", "victim": "PB-0003"},
@@ -159,7 +159,7 @@ def test_poison_then_break_combo_needs_the_switch_and_a_poisonable_repair(monkey
 
 
 def test_reset_reusing_run_id_does_not_carry_old_campaigns(systems, fast, monkeypatch):
-    monkeypatch.setenv("RED_COMMANDER_MAX", "1")
+    monkeypatch.setenv("ADVERSARY_COMMANDER_MAX", "1")
     run_id = _night_with_pending_mainframe_step()
     old = now() - timedelta(seconds=900)   # last session's RUN-0001, before this night started
     world().red_agents.insert_one({"_id": commander.COMMANDER_ID, "lessons": [{"run_id": run_id, "ts": old}],

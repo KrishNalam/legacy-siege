@@ -1,6 +1,6 @@
 """(2) Round 1 end-to-end against the fake estate, with the real supervisor + 12 agent processes:
 batch_abort cascade -> ONE coalesced incident -> diagnosis walk portal→unix→mainframe -> approval for
-restart_batch -> lying_success caught by the Guard (reject + new attempt) -> resolved -> playbook.
+restart_batch -> lying_success caught by the Verifier (reject + new attempt) -> resolved -> playbook.
 (3) Round 2, same fault: $vectorSearch recall hit is used, fewer hops; the recurrence files an upgrade
 request; a version bump marks playbooks stale."""
 from __future__ import annotations
@@ -44,7 +44,7 @@ def test_round1_cascade_lie_approval_resolve(hive, fake):
     assert ops == ["quarantine_record", "restart_batch", "rerun_transfer", "refresh_cache"]
     assert all(s["status"] == "verified" and s["evidence"] for s in inc["steps"])
 
-    # the lie: first mainframe op ACKed applied:true but did nothing -> Guard rejected -> new attempt
+    # the lie: first mainframe op ACKed applied:true but did nothing -> Verifier rejected -> new attempt
     s1 = inc["steps"][0]
     assert s1["attempts"] == [f"{s1['step_id']}-a1", f"{s1['step_id']}-a2"]
     assert col("ledger").find_one({"action_id": s1["attempts"][0]})["status"] == "failed"
@@ -57,7 +57,7 @@ def test_round1_cascade_lie_approval_resolve(hive, fake):
     # approval gated the destructive step, and was granted before it was sent
     s2 = inc["steps"][1]
     apr = col("approvals").find_one({"_id": s2["approval_id"]})
-    assert apr["status"] == "approved" and apr["relayed_by"] in ("queen-1", "queen-2")
+    assert apr["status"] == "approved" and apr["relayed_by"] in ("coordinator-1", "coordinator-2")
     assert apr["decided_at"] <= col("ledger").find_one({"action_id": s2["action_id"]})["ts"]
     assert col("ledger").find_one({"action_id": s2["action_id"]})["approver"] == "test-beekeeper"
 
@@ -68,9 +68,9 @@ def test_round1_cascade_lie_approval_resolve(hive, fake):
     assert pb and pb["system"] == "mainframe" and pb["system_version"] == 1 and pb["fault_class"] == "batch_abort"
     assert pb["embedding_model"] == "local-hash-v1" and len(pb["embedding"]) == 1024 and pb["stale"] is False
 
-    # waggle narrated it; checkpoints exist for task threads
-    assert wait_for(lambda: col("messages").find_one({"from": "waggle-1", "body": {"$regex": f"{inc['_id']} resolved"}}), 15, what="waggle resolution message")
-    assert col("checkpoints").find_one({"thread_id": f"{inc['_id']}:scout"})
+    # reporter narrated it; checkpoints exist for task threads
+    assert wait_for(lambda: col("messages").find_one({"from": "reporter-1", "body": {"$regex": f"{inc['_id']} resolved"}}), 15, what="reporter resolution message")
+    assert col("checkpoints").find_one({"thread_id": f"{inc['_id']}:investigator"})
     assert col("checkpoints").find_one({"thread_id": s1["task_id"]})
 
 
@@ -101,13 +101,13 @@ def test_round2_recall_is_faster_and_triggers_upgrade(hive, fake):
     assert col("thoughts").find_one({"kind": "recall", "incident": inc["_id"], "text": {"$regex": "Recall hit"}})
     assert col("playbooks").find_one({"_id": pb["_id"]})["uses"] == 1
 
-    # same fault class resolved twice -> Sentinel files ONE upgrade request for the Gardener
+    # same fault class resolved twice -> Monitor files ONE upgrade request for the Upgrader
     upg = wait_for(lambda: col("upgrade_requests").find_one({"fault_class": "batch_abort"}), 15, 0.2, "upgrade request")
     assert upg["system"] == "mainframe" and upg["status"] == "requested"
     assert set(upg["evidence"]) == {first["_id"], inc["_id"]} and "malformed" in upg["weakness"]
     assert col("upgrade_requests").count_documents({}) == 1
 
-    # Gardener-style hot reload bumps the version -> Sentinel marks mainframe playbooks stale
+    # Upgrader-style hot reload bumps the version -> Monitor marks mainframe playbooks stale
     fake.post("/_admin/reload/mainframe")
     wait_for(lambda: col("playbooks").count_documents({"system": "mainframe", "stale": False}) == 0, 15, 0.2,
              "playbooks to go stale")
@@ -144,8 +144,8 @@ def test_denied_approval_fails_step_and_escalates(hive, fake):
 
 
 def test_exploit_seen_in_logs_opens_security_incident_and_probe_verified_fix(hive, fake):
-    """Health never shows an exploit: the Sentinel spots it in the logs, the probe confirms it, and the
-    Guard verifies the fix by re-running the probe."""
+    """Health never shows an exploit: the Monitor spots it in the logs, the probe confirms it, and the
+    Verifier verifies the fix by re-running the probe."""
     from common.db import col
 
     fake.post("/_admin/reset")  # clear the declined cascade from the previous test
@@ -165,7 +165,7 @@ def test_exploit_seen_in_logs_opens_security_incident_and_probe_verified_fix(hiv
 
 
 def test_slow_apply_accepted_is_not_done(hive, fake):
-    """An op that ACKs accepted/applied:false lands SLOW_APPLY_S later: the Guard keeps re-checking instead of
+    """An op that ACKs accepted/applied:false lands SLOW_APPLY_S later: the Verifier keeps re-checking instead of
     rejecting, and verifies once the read-back shows it (no extra attempt)."""
     from common.db import col
 

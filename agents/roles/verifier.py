@@ -1,14 +1,14 @@
-"""Guard bee — the ONLY agent that may mark a step 'verified'.
+"""Verifier bee — the ONLY agent that may mark a step 'verified'.
 
 It never trusts an op's ACK. For every attempt in 'sent' it reads back /state (+ /health, + a security
 probe for security fixes) and checks the op's postcondition from the CONTRACTS ops table:
 
     applied                         -> verified, evidence = the concrete read-back facts
-    ACK applied:true, state unchanged -> reject: "ACK ≠ APPLIED" (attempt failed; worker opens a new one)
+    ACK applied:true, state unchanged -> reject: "ACK ≠ APPLIED" (attempt failed; operator opens a new one)
     accepted, applied:false (slow)  -> keep re-checking up to SLOW_APPLY_S + 10 s, then reject
 
-A change stream on swarm.incidents wakes the guard the moment a step is sent; a periodic sweep backs it up.
-Each judgement is a tiny LangGraph run (read_back -> judge) on thread "<action_id>:guard".
+A change stream on swarm.incidents wakes the verifier the moment a step is sent; a periodic sweep backs it up.
+Each judgement is a tiny LangGraph run (read_back -> judge) on thread "<action_id>:verifier".
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from common.db import col, now
 
 from .. import recovery, schema, settings, steps, verify, workflow
 from ..harness import Agent, checkpointer, log
-from .. import lessons, platform
+from .. import lessons, toolsmith
 
 SENT_STEPS = [
     {"$match": {"active": True, "steps.status": "sent"}},
@@ -60,13 +60,13 @@ def build_graph(agent: Agent):
     def grace(st: dict) -> float:
         """A step whose system lied about this op before (failure memory) gets no benefit of the doubt."""
         if st.get("distrust_ack") and lessons.enabled():
-            return min(settings.GUARD_GRACE_S, 0.5)
-        return settings.GUARD_GRACE_S
+            return min(settings.VERIFIER_GRACE_S, 0.5)
+        return settings.VERIFIER_GRACE_S
 
     def remember(inc: str, st: dict, aid: str, evidence: str) -> None:
         """Failure memory: a rejected attempt becomes a durable lesson tagged with the system version."""
-        platform.judged(agent, inc, st, False)
-        if not (lessons.enabled() or platform.enabled()):
+        toolsmith.judged(agent, inc, st, False)
+        if not (lessons.enabled() or toolsmith.enabled()):
             return
         try:
             rejected = recovery.reject_bad_memory(inc, evidence, agent.id)
@@ -114,7 +114,7 @@ def build_graph(agent: Agent):
         if state["applied"]:
             if steps.verify(inc, st, aid, f"{facts}; health.{sys}={state['health']}", agent.id):
                 agent.think(f"Verified {aid}: {facts}.", kind="verify", incident=inc, system=sys, pause=False)
-                platform.judged(agent, inc, st, True)
+                toolsmith.judged(agent, inc, st, True)
                 if op == "map_field":
                     learn_mapping(inc, st, facts)
                 try:
@@ -126,12 +126,12 @@ def build_graph(agent: Agent):
         resp = st.get("response")
         reason = None
         if resp is None:
-            # Marked sent but no ACK recorded yet (worker may have died before POSTing): a nurse will
+            # Marked sent but no ACK recorded yet (operator may have died before POSTing): a recovery will
             # reconcile and resend the same action_id. Only give up if it has been stuck a long time.
             if _age(st.get("sent_at")) > 3 * shared.LEASE_S + shared.SLOW_APPLY_S + 10:
                 reason = f"no ACK recorded for {aid} and state shows {facts}"
         elif resp.get("error"):
-            if _age(st.get("responded_at")) >= settings.GUARD_GRACE_S:
+            if _age(st.get("responded_at")) >= settings.VERIFIER_GRACE_S:
                 reason = f"no ACK from {sys} ({resp['error'][:60]}); state shows {facts}"
         elif resp.get("accepted") is False:
             reason = f"{sys} refused {op}: {resp.get('message', '')}"[:200]
@@ -147,7 +147,7 @@ def build_graph(agent: Agent):
                     return {"verdict": "rejected"}
                 return {"verdict": "moot"}
         else:  # accepted, not applied yet: accepted is not done
-            # timed from the ACK, not from mark_sent: the POST can go out late (step hold, a nurse's resend)
+            # timed from the ACK, not from mark_sent: the POST can go out late (step hold, a recovery's resend)
             since = st.get("responded_at") or st.get("sent_at")
             if _age(since) > shared.SLOW_APPLY_S + 10:
                 reason = f"{op} accepted but never applied after {int(_age(since))}s: {facts}"
@@ -179,7 +179,7 @@ def build_graph(agent: Agent):
         if not m:
             return
         try:
-            doc = schema.guard_verdict(inc, m["to"], facts, m["version"])
+            doc = schema.verifier_verdict(inc, m["to"], facts, m["version"])
         except Exception:
             doc = None
         n = re.search(r"(\d+/\d+) accounts", facts or "")
@@ -205,7 +205,7 @@ def build_graph(agent: Agent):
 
 
 def provenance(inc: str, m: dict, ai: dict, lined: str) -> str:
-    """The Guard's chain line, naming who really proposed the mapping (memory / Claude / rules)."""
+    """The Verifier's chain line, naming who really proposed the mapping (memory / Claude / rules)."""
     how = ai.get("proposed_by")
     if not how:  # flag off: the unix hop's findings still say who proposed it
         t = col("tasks").find_one({"incident": inc, "kind": "diagnose", "findings.params.to": m["to"]},
@@ -223,7 +223,7 @@ def provenance(inc: str, m: dict, ai: dict, lined: str) -> str:
         head = f"rules: no op for unknown field {m['to']} → Claude proposed {m['from']}→{m['to']}"
     else:
         head = f"rules: no playbook/op for unknown field {m['to']} → type + value match proposed {m['from']}→{m['to']}"
-    return f"{head} → Guard verified ({lined}) → {stored}."
+    return f"{head} → Verifier verified ({lined}) → {stored}."
 
 
 def run(agent: Agent) -> None:
@@ -242,7 +242,7 @@ def run(agent: Agent) -> None:
                         st = p["step"]
                         graph.invoke({"incident": p["incident"], "step_id": st["step_id"], "action_id": st["action_id"],
                                       "verdict": None, "applied": False},
-                                     {"configurable": {"thread_id": f"{st['action_id']}:guard"}}, durability="exit")
+                                     {"configurable": {"thread_id": f"{st['action_id']}:verifier"}}, durability="exit")
                     if pending:
                         busy = True
                     elif busy:

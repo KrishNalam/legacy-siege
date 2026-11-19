@@ -9,7 +9,7 @@ def _incident(_id, run_id, status="resolved", attempts_per_step=(1,), handoffs=0
     return {"_id": _id, "run_id": run_id, "status": status, "system": "portal", "opened_at": now(),
             "steps": [{"step_id": f"{_id}-s{i}", "status": "verified", "evidence": "x", "op": "op", "system": "m",
                        "attempts": [f"{_id}-s{i}-a{k}" for k in range(n)]} for i, n in enumerate(attempts_per_step)],
-            "handoffs": [{"from": "w", "to": "nurse-1"}] * handoffs,
+            "handoffs": [{"from": "w", "to": "recovery-1"}] * handoffs,
             "recall": {"used": metrics.pop("recall_used", False)}, "metrics": metrics}
 
 
@@ -41,12 +41,12 @@ def test_cli_commands(systems, capsys):
     assert cli.main(["run", "bank-night-1"]) == 0
     assert cli.main(["fire", "lying_success", "unix", "--params", '{"count": 2}']) == 0
     assert systems.calls[-1] == ("/unix/_chaos/lying_success", {"params": {"count": 2}})
-    assert cli.main(["kill", "worker", "--phase", "step_sent", "--wait", "0"]) == 0
+    assert cli.main(["kill", "operator", "--phase", "step_sent", "--wait", "0"]) == 0
     assert cli.main(["clear"]) == 0 and systems.calls[-1][0] == "/_chaos/clear"
     assert cli.main(["events", "-n", "5"]) == 0
     assert cli.main(["score"]) == 0
     assert cli.main(["fire", "batch_abort", "portal"]) == 2   # invalid target -> clean error
     out = " ".join(capsys.readouterr().out.split())  # rich wraps long lines at the terminal width
-    assert "batch_abort" in out and "Scorecard" in out and "kill skipped: no worker mid-step" in out
+    assert "batch_abort" in out and "Scorecard" in out and "kill skipped: no operator mid-step" in out
     assert world().chaos_events.count_documents({}) == 4
     assert swarm().stats.find_one({"_id": "current"})["round"] == 1

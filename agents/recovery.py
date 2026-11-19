@@ -1,14 +1,14 @@
 """Visible recovery when an attack (e.g. the Red fleet) outlasts the normal attempt budget.
 
-Switch: ``SWARM_RECOVERY`` (default off, independent of ``RED_FLEET``: a Red stage run keeps the seeded lie and
+Switch: ``AGENTS_RECOVERY`` (default off, independent of ``ADVERSARY``: a Red stage run keeps the seeded lie and
 round-2 timing unless recovery is switched on explicitly).
 
 With it on:
-  * a fix task that ran out of attempts (or timed out) is NOT escalated at once: the scout backs off,
+  * a fix task that ran out of attempts (or timed out) is NOT escalated at once: the investigator backs off,
     re-reads the system, and re-dispatches the unverified steps with a fresh attempt budget
     (``RECOVERY_ROUNDS`` rounds, each ``MAX_ATTEMPTS`` more attempts); only then does it escalate;
-  * before a worker opens a new attempt it reconciles by read-back: if an earlier attempt has landed
-    late (slow_apply), it re-submits that attempt to the Guard instead of sending the op again.
+  * before an operator opens a new attempt it reconciles by read-back: if an earlier attempt has landed
+    late (slow_apply), it re-submits that attempt to the Verifier instead of sending the op again.
 Every decision is narrated, so the attack -> recovery is visible in the war room's thought stream.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ def _on(name: str, default: str = "") -> bool:
 
 
 def enabled() -> bool:
-    return _on("SWARM_RECOVERY")
+    return _on("AGENTS_RECOVERY")
 
 
 ROUNDS = int(_f("RECOVERY_ROUNDS", 3))          # recovery rounds (re-diagnose + fresh budget or replan), then escalate
@@ -108,11 +108,11 @@ def budget(step: dict) -> int:
 
 
 def why_failed(steps: list[dict]) -> str:
-    """Short, plain reason from the Guard's evidence on the failed steps (for the narration)."""
+    """Short, plain reason from the Verifier's evidence on the failed steps (for the narration)."""
     evidence = [str(s.get("evidence") or "") for s in steps]
     parts = []
     if any("ACK ≠ APPLIED" in ev for ev in evidence):
-        parts.append("the system kept ACKing without applying (the Guard caught each one)")
+        parts.append("the system kept ACKing without applying (the Verifier caught each one)")
     if any("never applied" in ev or "no ACK" in ev for ev in evidence):
         parts.append("an accepted op never landed in time")
     return "; ".join(parts) or "the attempts did not take effect"
@@ -151,7 +151,7 @@ def reject_bad_memory(incident: str, evidence: str, agent: str) -> str | None:
     if not canonical or same:
         return None
     col('playbooks').update_one({'_id': pb['_id']}, {'$set': {
-        'stale': True, 'staled_at': now(), 'stale_reason': f'Guard rejected recalled repair: {evidence[:180]}'}})
+        'stale': True, 'staled_at': now(), 'stale_reason': f'Verifier rejected recalled repair: {evidence[:180]}'}})
     lessons.record_misfit(incident, {'playbook_id': pb['_id'], 'system': pb['system'], 'fault_class': fc},
                           rec.get('query', ''), {'facts': [evidence], 'fault_class': 'an unverified repair'}, agent, pb['system_version'])
     col('incidents').update_one({'_id': incident}, {'$set': {'recall.rejected': pb['_id']}})
@@ -166,7 +166,7 @@ def vet_recall(incident: str, hits: list[dict], summary: list[dict], usable: dic
     """Provenance check at recall time for playbooks whose remembered facts are re-derived today
     (wrong-record memory poisoning would otherwise be silently neutralised, never seen).
 
-    A playbook's fix must match the steps the Guard verified in the incident it was learned from. If it
+    A playbook's fix must match the steps the Verifier verified in the incident it was learned from. If it
     doesn't, the memory was tampered with: retire it (stale), store a misfit lesson, and fall back to the
     next usable hit (or the chain walk). Returns (usable, narration lines). Same switches as
     ``reject_bad_memory``.
@@ -201,16 +201,16 @@ def vet_recall(incident: str, hits: list[dict], summary: list[dict], usable: dic
         row.update(usable=False, stale=True, rejected=True)
         rejected.add(pb['_id'])
         good = _verified_twin(pb, verified, sig, row)
-        if good:  # the repair the Guard really verified in that incident is still on file: trust it again
+        if good:  # the repair the Verifier really verified in that incident is still on file: trust it again
             col('playbooks').update_one({'_id': good['_id']}, {'$set': {
                 'stale': False, 'restored_at': now(), 'restored_by': agent,
-                'restored_reason': f"matches the steps the Guard verified in {pb['incident']}"}})
+                'restored_reason': f"matches the steps the Verifier verified in {pb['incident']}"}})
             restored.append({**good, 'stale': False, 'score': row['score'], 'restored_from': pb['_id']})
-            lines.append(f"Rejected memory {pb['_id']}: {evidence}. Its fix doesn't match what the Guard verified; "
-                         f"retiring it as stale. Restored {good['_id']}, the repair the Guard verified in "
+            lines.append(f"Rejected memory {pb['_id']}: {evidence}. Its fix doesn't match what the Verifier verified; "
+                         f"retiring it as stale. Restored {good['_id']}, the repair the Verifier verified in "
                          f"{pb['incident']}, and using that instead.")
         else:
-            lines.append(f"Rejected memory {pb['_id']}: {evidence}. Its fix doesn't match what the Guard verified; "
+            lines.append(f"Rejected memory {pb['_id']}: {evidence}. Its fix doesn't match what the Verifier verified; "
                          "retiring it as stale and planning from today's read-back instead.")
     if usable is not None and usable['_id'] in rejected:
         ok = {r['playbook_id'] for r in summary if r.get('usable')}
@@ -226,7 +226,7 @@ def vet_recall(incident: str, hits: list[dict], summary: list[dict], usable: dic
 
 
 def _verified_twin(bad: dict, verified: list, sig, row: dict) -> dict | None:
-    """Another playbook learned from the SAME incident whose fix is exactly what the Guard verified there and
+    """Another playbook learned from the SAME incident whose fix is exactly what the Verifier verified there and
     that no Hive decision retired (no ``stale_reason``: a version bump or a rejection always records one).
     Same system version as today, so it is as usable as the rejected one would have been."""
     from common.db import col

@@ -1,6 +1,6 @@
 """Opt-in integration: the hive against workstream A's REAL systems app (systems.app:app), isolated DBs.
 
-    SWARM_REAL_SYSTEMS=1 .venv/bin/python -m pytest agents/tests/test_real_systems.py -q
+    AGENTS_REAL_SYSTEMS=1 .venv/bin/python -m pytest agents/tests/test_real_systems.py -q
 
 Skipped by default so the swarm suite stays hermetic while other workstreams change."""
 from __future__ import annotations
@@ -13,8 +13,8 @@ import pytest
 
 from agents.tests.conftest import LOGS, PY, ROOT, reset_runtime, run_until_resolved, start_swarm, wait_for
 
-pytestmark = pytest.mark.skipif(os.environ.get("SWARM_REAL_SYSTEMS") != "1", reason="set SWARM_REAL_SYSTEMS=1")
-PORT = int(os.environ.get("SWARM_REAL_PORT", 18751))
+pytestmark = pytest.mark.skipif(os.environ.get("AGENTS_REAL_SYSTEMS") != "1", reason="set AGENTS_REAL_SYSTEMS=1")
+PORT = int(os.environ.get("AGENTS_REAL_PORT", 18751))
 
 
 @pytest.fixture(scope="module")

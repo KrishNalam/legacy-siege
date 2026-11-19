@@ -14,7 +14,7 @@ its slot, so waiting stretches go fast but nothing is dropped. Captions name the
 Layouts: "script" (default) follows docs/video-script.md, 10 segments
 hook/cascade/ai/lie/kill/code/learn/drift/red/garden = 5/5/9/5/6/8/6/5/6/5 s; "brief" and "doc" are the
 older 7-segment cuts. A beat the recording has no event for (Claude's card needs AI_DRIVES, the drift beat
-`record_demo --drift`, the FREEZE beat RED_FLEET=1) falls back to a fixed window around another beat with a
+`record_demo --drift`, the FREEZE beat ADVERSARY=1) falls back to a fixed window around another beat with a
 plainer caption (marked "fallback" in the plan); `--at BEAT=START-END` points it at real footage instead.
 
 CODE segment (default on, `--no-code` to drop): 8 s (9 s in the old layouts) of syntax-highlighted code cards (scripts/code_cards.py,
@@ -59,7 +59,7 @@ FALLBACK = {
     "schema_drift": ("night2_resolved", "end", 0.0, 6.0,  # the green estate after round 2 (unused in "script")
                      "Schema drift: a renamed feed field is diffed in MongoDB, mapped, verified, remembered"),
     "red_freeze": ("kill_takeover", "end", -8.0, -1.0,
-                   "Red strikers observe → think → strike → reflect; a frozen agent's lease expires, a Nurse takes over"),
+                   "Red strikers observe → think → strike → reflect; a frozen agent's lease expires, a Recovery takes over"),
 }
 
 
@@ -85,7 +85,7 @@ def script_captions(log: dict) -> dict[str, str]:
     dr, ru, red = _beat(log, "schema_drift"), _beat(log, "drift_reused"), _beat(log, "red_freeze")
     rule = f"{ov.get('op') or 'unsafe op'} → {ov.get('rule') or 'P3 blast radius'}"
     field = f"{dr.get('from') or 'balance'} → {dr.get('to') or 'acct_bal'}"
-    who, victim = red.get("by") or "Red striker", red.get("agent") or "a worker"
+    who, victim = red.get("by") or "Red striker", red.get("agent") or "an operator"
     took = f" in {fmt_s(red['takeover_s'])}" if red.get("takeover_s") is not None else ""
     return {
         "hook2": "12 AI agents defend a legacy bank. AI attackers try to break it.",
@@ -95,7 +95,7 @@ def script_captions(log: dict) -> dict[str, str]:
         "drift": f"unix feed schema changed: {field} → MAPPING LEARNED"
                  + (f" (v{dr['version']})" if dr.get("version") else ""),
         "reused": "Same change again → MAPPING REUSED from MongoDB, no Claude call",
-        "red": f"{who} FREEZEs {victim} → its lease expires → a Nurse takes over{took}",
+        "red": f"{who} FREEZEs {victim} → its lease expires → a Recovery takes over{took}",
     }
 
 
@@ -118,11 +118,11 @@ def plan(log: dict, layout: str = "script", cards: list[dict] | None = None) -> 
              f"{fmt_s(n2.get('diagnosis_s'))}, {n1.get('hops', 3)} hops → {n2.get('hops', 1)}")
     cap = {
         "hook": "Chaos Monkey hits a legacy bank. 12 AI agents have to keep it alive.",
-        "cascade": "Scout walks the blame chain portal → unix → mainframe (portal still says 200)",
-        "lie": "Op says applied:true. Guard reads it back: ACK ≠ APPLIED → new attempt",
+        "cascade": "Investigator walks the blame chain portal → unix → mainframe (portal still says 200)",
+        "lie": "Op says applied:true. Verifier reads it back: ACK ≠ APPLIED → new attempt",
         "approval": "Destructive step waits for the Beekeeper's approval before it is sent",
-        "kill": "Real SIGKILL → Nurse resumes from the MongoDB checkpoint",
-        "gardener": "Gardener turns the repeat fault into a code upgrade: v1 → v2, tested + approved",
+        "kill": "Real SIGKILL → Recovery resumes from the MongoDB checkpoint",
+        "upgrader": "Upgrader turns the repeat fault into a code upgrade: v1 → v2, tested + approved",
         "night3": "Night 3: the same attack. Nothing happens.",
         "atlas": "MongoDB is the hive's memory: state, leases, checkpoints, playbooks",
     }
@@ -164,7 +164,7 @@ def plan(log: dict, layout: str = "script", cards: list[dict] | None = None) -> 
             {"key": "learn", "kicker": "4 · THE HIVE LEARNS", "pieces": [
                 ("night2_recall", t(7.0, 7.0), learn), ("night2_resolved", t(2.0, 3.0), learn)]},
             {"key": "garden", "kicker": "5 · FIX IT FOR GOOD", "pieces": [
-                ("gardener", t(4.0, 3.0), cap["gardener"]), ("night3", 2.0, cap["night3"])]},
+                ("upgrader", t(4.0, 3.0), cap["upgrader"]), ("night3", 2.0, cap["night3"])]},
         ]
     return [
         {**hook, "pieces": [("night1_attack", 7.0, cap["hook"])]},
@@ -177,7 +177,7 @@ def plan(log: dict, layout: str = "script", cards: list[dict] | None = None) -> 
         {"key": "learn", "kicker": "4 · THE HIVE LEARNS", "pieces": [
             ("night2_recall", t(6.5, 9.0), learn), ("night2_resolved", t(2.5, 3.0), learn)]},
         {"key": "garden", "kicker": "5 · FIX IT FOR GOOD", "pieces": [
-            ("gardener", t(4.0, 5.0), cap["gardener"]), ("night3", t(2.5, 3.0), cap["night3"]),
+            ("upgrader", t(4.0, 5.0), cap["upgrader"]), ("night3", t(2.5, 3.0), cap["night3"]),
             ("atlas", t(2.5, 4.0), cap["atlas"])]},
     ]
 

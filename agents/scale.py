@@ -1,10 +1,10 @@
-"""Dynamic swarm scaling (switch SWARM_DYNAMIC=1, default off: the fixed roster is unchanged).
+"""Dynamic swarm scaling (switch AGENTS_AUTOSCALE=1, default off: the fixed roster is unchanged).
 
-With the switch on there is no standing pool of scouts and workers:
-  * the Queen asks for a Scout per new incident when no idle scout is free;
-  * a Scout asks for a Worker of the specialty a task needs (a diagnose hop on `unix`, a fix step on
-    `mainframe`, ...) when no idle worker of that kind is free;
-  * spawned bees retire themselves once their incident is closed (or after SWARM_IDLE_S idle).
+With the switch on there is no standing pool of investigators and operators:
+  * the Coordinator asks for an Investigator per new incident when no idle investigator is free;
+  * an Investigator asks for an Operator of the specialty a task needs (a diagnose hop on `unix`, a fix step on
+    `mainframe`, ...) when no idle operator of that kind is free;
+  * spawned bees retire themselves once their incident is closed (or after AGENTS_IDLE_S idle).
 
 A request is a document in swarm.spawn_requests; the supervisor (another process) watches that collection,
 starts the agent (from a pre-warmed process, so a spawn costs milliseconds, not the ~1.6 s Python/LangGraph
@@ -14,7 +14,7 @@ processes and the war room sees bees appear (agents insert) and retire (agents d
     swarm.spawn_requests {_id: "SPW-0001", role, specialty, incident, task, reason, requested_by,
                           status: "pending"|"spawned"|"cancelled", agent_id, pid, warm, note, ts, spawned_at, spawn_ms}
 
-Specialty is free-form: any new task specialty gets its own worker kind (`worker-<specialty>-<n>`).
+Specialty is free-form: any new task specialty gets its own operator kind (`operator-<specialty>-<n>`).
 """
 from __future__ import annotations
 
@@ -31,15 +31,15 @@ from . import settings
 
 
 def enabled() -> bool:
-    return os.environ.get("SWARM_DYNAMIC", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("AGENTS_AUTOSCALE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-MAX_AGENTS = int(env_float("SWARM_MAX_AGENTS", 24))       # hard ceiling on live agent processes (box safety)
-WARM = int(env_float("SWARM_WARM", 2))                    # pre-imported spare processes kept ready
-IDLE_S = env_float("SWARM_IDLE_S", 15)                    # a spawned bee with no work this long retires
-RETIRE_AFTER_S = env_float("SWARM_RETIRE_AFTER_S", 3)     # ...or this long after its incident closed
-SPAWN_GRACE_S = env_float("SWARM_SPAWN_GRACE_S", 8)       # nurses leave work alone while its spawn is under way
-REQUEST_TTL_S = env_float("SWARM_REQUEST_TTL_S", 30)      # a request not served by then is cancelled
+MAX_AGENTS = int(env_float("AGENTS_MAX_AGENTS", 24))       # hard ceiling on live agent processes (box safety)
+WARM = int(env_float("AGENTS_WARM", 2))                    # pre-imported spare processes kept ready
+IDLE_S = env_float("AGENTS_IDLE_S", 15)                    # a spawned bee with no work this long retires
+RETIRE_AFTER_S = env_float("AGENTS_RETIRE_AFTER_S", 3)     # ...or this long after its incident closed
+SPAWN_GRACE_S = env_float("AGENTS_SPAWN_GRACE_S", 8)       # recovery agents leave work alone while its spawn is under way
+REQUEST_TTL_S = env_float("AGENTS_REQUEST_TTL_S", 30)      # a request not served by then is cancelled
 
 
 def _fresh() -> object:
@@ -83,32 +83,32 @@ def _in_flight(role: str, **extra) -> int:
                                                   "ts": {"$gte": cutoff}, **extra})
 
 
-def need_worker(specialty: str) -> bool:
-    """True when the open tasks of this specialty outnumber idle workers plus spawns already under way."""
+def need_operator(specialty: str) -> bool:
+    """True when the open tasks of this specialty outnumber idle operators plus spawns already under way."""
     open_tasks = col("tasks").count_documents({"status": "open", "specialty": specialty})
-    return open_tasks > _idle("worker", specialty=specialty) + _in_flight("worker", specialty=specialty)
+    return open_tasks > _idle("operator", specialty=specialty) + _in_flight("operator", specialty=specialty)
 
 
-def ensure_worker(by: str, task: dict) -> str | None:
-    """Scout side: the task needs a `task.specialty` worker; spawn one unless an idle one is free."""
-    if not enabled() or not need_worker(task["specialty"]):
+def ensure_operator(by: str, task: dict) -> str | None:
+    """Investigator side: the task needs a `task.specialty` operator; spawn one unless an idle one is free."""
+    if not enabled() or not need_operator(task["specialty"]):
         return None
-    return request("worker", by, f"{task['kind']} {task.get('system') or ''} for {task['incident']}".strip(),
+    return request("operator", by, f"{task['kind']} {task.get('system') or ''} for {task['incident']}".strip(),
                    specialty=task["specialty"], incident=task["incident"], task=task["_id"])
 
 
-def ensure_scout(by: str, inc_id: str) -> str | None:
-    """Queen side: one scout per incident; spawn one unless an idle scout is free."""
+def ensure_investigator(by: str, inc_id: str) -> str | None:
+    """Coordinator side: one investigator per incident; spawn one unless an idle investigator is free."""
     if not enabled():
         return None
     unowned = col("incidents").count_documents({"active": True, "status": "open"})
-    if unowned <= _idle("scout") + _in_flight("scout"):
+    if unowned <= _idle("investigator") + _in_flight("investigator"):
         return None
-    return request("scout", by, f"owns {inc_id}", incident=inc_id)
+    return request("investigator", by, f"owns {inc_id}", incident=inc_id)
 
 
 def spawn_pending(task_id: str | None = None, incident: str | None = None) -> bool:
-    """Nurse side: a spawn for this work is under way, so don't steal it (until SPAWN_GRACE_S has passed)."""
+    """Recovery side: a spawn for this work is under way, so don't steal it (until SPAWN_GRACE_S has passed)."""
     if not enabled():
         return False
     q = {"status": {"$in": ["pending", "spawned"]}, "ts": {"$gte": now() - timedelta(seconds=SPAWN_GRACE_S)}}
@@ -121,12 +121,12 @@ def spawn_pending(task_id: str | None = None, incident: str | None = None) -> bo
 
 # ---------------------------------------------------------------------------------------------- retirement
 def _work_waiting(agent) -> bool:
-    if agent.role == "worker":
+    if agent.role == "operator":
         return col("tasks").count_documents({"status": "open", "specialty": agent.specialty}, limit=1) > 0
-    if agent.role == "scout":
+    if agent.role == "investigator":
         return col("incidents").count_documents({"active": True, "status": "open",
                                                  "assigned_to": {"$in": [agent.id, None]}}, limit=1) > 0
-    if agent.role == "nurse":
+    if agent.role == "recovery":
         return col("tasks").count_documents({"status": "open"}, limit=1) > 0
     return False
 
@@ -149,8 +149,8 @@ def maybe_retire(agent) -> None:
             why = f"{agent.last_incident} {(inc or {}).get('status', 'closed')}"
     if not why:
         return
-    # Step out of the idle pool first, THEN look for work: a scout that counted us before this write
-    # left a task we will see below; one that counts after it spawns a fresh worker. No task is stranded.
+    # Step out of the idle pool first, THEN look for work: an investigator that counted us before this write
+    # left a task we will see below; one that counts after it spawns a fresh operator. No task is stranded.
     r = col("agents").update_one({"_id": agent.id, "pid": agent.pid, "status": {"$in": ["idle", "standby"]}},
                                  {"$set": {"phase": "retiring"}})
     if not r.matched_count:

@@ -20,7 +20,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 | Always-on service | `box serve` service **legacy-siege** (runs `run.py`; survives reboots; `box serve logs legacy-siege`, `box serve restart legacy-siege`) |
 | Process logs | `~/projects/legacy-siege/logs/{systems,warroom,swarm,gardener}.log` |
 | Database | **MongoDB Atlas** cluster `main.qa11uno.mongodb.net` (8.0.37 enterprise, 3-node replica set, ~30 ms RTT from the box), DBs `world` (Red) and `swarm` (Blue). Connection string lives only in `.env` (chmod 600, git-ignored) as `MONGODB_URI` (and a copy `ATLAS_MONGODB_URI`). **Not confirmed to be the official Atlas Sandbox** — see open item 2 |
-| Keys in `.env` | `ANTHROPIC_API_KEY` (added and verified 2026-11-14), `GARDENER_SANDBOX_URI` (local container). **No `VOYAGE_API_KEY`** — owner doesn't have one yet |
+| Keys in `.env` | `ANTHROPIC_API_KEY` (added and verified 2026-11-14), `UPGRADER_SANDBOX_URI` (local container). **No `VOYAGE_API_KEY`** — owner doesn't have one yet |
 | Local MongoDB (dev/tests) | docker container `legacy-siege-mongo` (mongodb-atlas-local:8.0) on `localhost:27027` |
 | Design doc | `docs/design-doc.pdf` / `docs/design-doc.txt` (text extraction drops letters 'a'/'g') |
 | Interfaces | `CONTRACTS.md` (frozen contracts between the five workstreams; §8 integrator notes) |
@@ -45,7 +45,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 - **Open the war room:** http://100.105.248.23:8700 → buttons: Night 1, Night 2, Night 3 (replay),
   Kill a worker, fault launcher, Reset (Full / Next round), Atlas.
 - **Views:** `/diagram` (the stage view Krish demos: 4 boxes, zoom 1-4, V = Live / How it works, `?` help),
-  `/why` (pitch page), `/flow`. `/` serves the diagram (`WARROOM_VIEW=flow` switches it). The classic view was removed.
+  `/why` (pitch page), `/flow`. `/` serves the diagram (`CONSOLE_VIEW=flow` switches it). The classic view was removed.
 - **Demo order:** Reset ▸ Full → Night 1 → Approve → Kill a worker (button glows when ready) → wait for
   green → Reset ▸ Next round → Night 2 → Approve → Approve (upgrade) → Night 3 → Atlas.
   Full table: README "The 3-minute demo".
@@ -56,7 +56,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
   `box serve restart legacy-siege`.
 - **Unit tests (use local Mongo so Atlas stays clean):**
   `MONGODB_URI='mongodb://localhost:27027/?directConnection=true' PACE=0 .venv/bin/python -m pytest -q <module>/tests`
-- **Gardener CI sandbox:** `GARDENER_SANDBOX_URI` in `.env` points the Gardener's throwaway test DB at the
+- **Gardener CI sandbox:** `UPGRADER_SANDBOX_URI` in `.env` points the Gardener's throwaway test DB at the
   local container (`localhost:27027`), cutting its test step from ~75 s to ~4 s. If the container is down
   (the box stops idle Docker DBs) it falls back to the live cluster automatically (slower, still passes).
   Restart the container with `docker start legacy-siege-mongo`. Live state is always on `MONGODB_URI`.
@@ -107,7 +107,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
      Don't rewrite history unasked.
    - 1-minute video still to record; lead the pitch with agent behaviour, not "dashboard".
 3. **Timing on Atlas:** the Gardener's test step was the biggest single block (~75 s of the ~114 s Gardener
-   phase), and is now ~4 s via `GARDENER_SANDBOX_URI` (needs a rehearsal to confirm). The rest is fixed waits:
+   phase), and is now ~4 s via `UPGRADER_SANDBOX_URI` (needs a rehearsal to confirm). The rest is fixed waits:
    10 s dead-agent detection (`LEASE_S`), the 30 s prove window, cascade settle, and ~30 ms per MongoDB round
    trip (one 487 ms spike seen). For a 3-minute slot, consider a shorter prove window for the demo.
 4. **PostHog:** the MCP is connected (`posthog-uoft`), but its only project is `uoft-index` (the owner's
@@ -139,13 +139,13 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 
 ## 8. Feature switches (all default OFF; set to 1 in `.env`, restart)
 The 15:00 stage pick and its evidence live in `/srv/shared/legacy-siege-mail/results/STAGE-SWITCHES.md`. On main:
-- Hive: `SWARM_DYNAMIC` (agents scale), `SWARM_COMMS` (agents talk; also the live roster `agents.roster`, `GET /api/roster`), `SWARM_RECOVERY` (re-plan failed fixes; its own
-  switch, RED_FLEET no longer turns it on), `FAILURE_MEMORY` (learn from failures), `SWARM_LEASE_DEADLINE` (local lease
+- Hive: `AGENTS_AUTOSCALE` (agents scale), `AGENTS_COMMS` (agents talk; also the live roster `agents.roster`, `GET /api/roster`), `AGENTS_RECOVERY` (re-plan failed fixes; its own
+  switch, ADVERSARY no longer turns it on), `FAILURE_MEMORY` (learn from failures), `AGENTS_LEASE_DEADLINE` (local lease
   deadline; keep off on stage).
-- Stage: `WARROOM_VIEW` (`diagram|flow`, what `/` serves; not a 0/1 switch), `DEMO_AUTOPLAY` (nights run on their own), `SCHEMA_DRIFT_DEMO` (night-3 field rename; off for demo_check).
-- Chaos: `CHAOS_OUTCOMES`, `CHAOS_AGENT_LIE`, `CHAOS_AGENT_FREEZE`, `CHAOS_POISON_MEMORY` (defence fires only with
-  `SWARM_RECOVERY=1 FAILURE_MEMORY=1`).
-- Red: `RED_FLEET` (stage-safe only tamed: `RED_FLEET_AGENTS=red-assassin RED_FLEET_VICTIMS=worker:step_sent
-  RED_FLEET_MAX_ATTACKS=1 RED_FLEET_SKIP_SCENARIOS=bank-night-2,bank-night-3`; needs `RED_FLEET_ALLOW_LIVE=1` on DBs
-  named world/swarm), `RED_COMMANDER`.
+- Stage: `CONSOLE_VIEW` (`diagram|flow`, what `/` serves; not a 0/1 switch), `DEMO_AUTOPLAY` (nights run on their own), `SCHEMA_DRIFT_DEMO` (night-3 field rename; off for demo_check).
+- Chaos: `ADVERSARY_OUTCOMES`, `ADVERSARY_AGENT_LIE`, `ADVERSARY_AGENT_FREEZE`, `ADVERSARY_POISON_MEMORY` (defence fires only with
+  `AGENTS_RECOVERY=1 FAILURE_MEMORY=1`).
+- Red: `ADVERSARY` (stage-safe only tamed: `ADVERSARY_AGENTS=red-assassin ADVERSARY_VICTIMS=worker:step_sent
+  ADVERSARY_MAX_ATTACKS=1 ADVERSARY_SKIP_SCENARIOS=bank-night-2,bank-night-3`; needs `ADVERSARY_ALLOW_LIVE=1` on DBs
+  named world/swarm), `ADVERSARY_COMMANDER`.
 - MongoDB / AI: `MONGO_SPINE` (pre-images, custody, validators, analytics), `AI_DRIVES`, `AI_SECOND_OPINION` (need the key).

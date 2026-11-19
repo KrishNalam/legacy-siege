@@ -1,6 +1,6 @@
 """Chain of custody for leased work — built from MongoDB change-stream **pre-images** (MONGO_SPINE=1).
 
-Every lease the Hive takes lives in one document (`tasks` for workers, `incidents` for scouts), and every
+Every lease the Hive takes lives in one document (`tasks` for operators, `incidents` for investigators), and every
 Beekeeper decision in `approvals`. `scripts/setup_db.ensure_spine` turns on
 `changeStreamPreAndPostImages` for those collections, so each update event carries the document *as it
 was* (`fullDocumentBeforeChange`) next to the stored post-image *as of that event* (`fullDocument:
@@ -12,10 +12,10 @@ every ownership / generation / status change into one row of `agents.custody`:
      pre_image: bool, cluster_time, ts, seq, prev_hash, hash}
 
 Rows are hash-chained per document (`hash = sha256(prev_hash + row)`) with a unique `{doc_id, seq}` index, so
-the trail for a task reads like a tamper-evident ledger: claimed by worker-mainframe-1 (gen 1) → SIGKILL →
-taken over by nurse-1 (gen 2, the old lease had expired). The server-side `$match` only lets ownership and
+the trail for a task reads like a tamper-evident ledger: claimed by operator-mainframe-1 (gen 1) → SIGKILL →
+taken over by recovery-1 (gen 2, the old lease had expired). The server-side `$match` only lets ownership and
 status changes through (the fencing writes inside every step transaction don't wake it). The resume token is
-persisted in `swarm.stats {_id: "custody_resume"}`. It runs as a thread inside the waggle (no new process).
+persisted in `swarm.stats {_id: "custody_resume"}`. It runs as a thread inside the reporter (no new process).
 """
 from __future__ import annotations
 
@@ -107,7 +107,7 @@ def _digest(prev_hash: str, row: dict) -> str:
 
 def append(row: dict) -> dict:
     """Append to the document's hash chain. The unique {doc_id, seq} index makes a concurrent double-append
-    (e.g. two waggles after a respawn) fail instead of forking the chain; we retry on the new tip."""
+    (e.g. two reporters after a respawn) fail instead of forking the chain; we retry on the new tip."""
     for _ in range(5):
         tip = col("custody").find_one({"doc_id": row["doc_id"]}, sort=[("seq", -1)], projection={"seq": 1, "hash": 1})
         row["seq"] = (tip or {}).get("seq", 0) + 1
@@ -141,7 +141,7 @@ def narrate(row: dict) -> str | None:
 
 
 def run(stop: threading.Event, on_takeover=None, max_await_ms: int = 500) -> None:
-    """Watch until ``stop`` is set. ``on_takeover(text, row)`` is called for takeovers (the waggle narrates)."""
+    """Watch until ``stop`` is set. ``on_takeover(text, row)`` is called for takeovers (the reporter narrates)."""
     while not stop.is_set():
         token = (col("stats").find_one({"_id": TOKEN_ID}) or {}).get("token")
         try:

@@ -1,4 +1,4 @@
-"""One Red attacker: a LangGraph loop  scout -> plan -> strike -> observe  for a single persona.
+"""One Red attacker: a LangGraph loop  investigator -> plan -> strike -> observe  for a single persona.
 
 Every strike goes through ``adversary.runner.fire`` (so it is an ordinary ``world.chaos_events`` document,
 tagged ``by: <persona id>``). Each attacker heartbeats into ``world.red_agents`` so the war room can show
@@ -89,7 +89,7 @@ class Attacker:
         return ok, "policy", rejected
 
     # -------------------------------------------------------------- graph nodes
-    def _scout(self, state: RedState) -> RedState:
+    def _investigator(self, state: RedState) -> RedState:
         if not self._restored:
             self._restored = True
             reg = world().red_agents.find_one({"_id": self.p.id}) or {}
@@ -97,7 +97,7 @@ class Attacker:
             self.fallback_count = reg.get("fallback_count", 0)
             self._pending = reg.get("pending_reflection")
         self._finish_reflection()
-        snap = core.scout(self.p.id)
+        snap = core.investigator(self.p.id)
         order = commander.my_order(self.p.id, snap) if commander.enabled() else None
         if order:
             return {"snap": snap, "order": order, "hold": self._order_gate(snap, order)}
@@ -112,7 +112,7 @@ class Attacker:
         if not snap.get("night_running"):
             return "no night running"
         if snap.get("upgrade_busy"):
-            return "the Gardener is mid-upgrade"
+            return "the Upgrader is mid-upgrade"
         if any(a.get("status") == "firing" for a in snap.get("red_attacks") or []):
             return "my last attack is still in flight"
         return None
@@ -214,7 +214,7 @@ class Attacker:
 
     def _finish_reflection(self, force: bool = False):
         ev = self._pending
-        if not ev or (not force and (now() - ev["ts"]).total_seconds() < float(os.environ.get("RED_FLEET_REFLECT_S", "12"))):
+        if not ev or (not force and (now() - ev["ts"]).total_seconds() < float(os.environ.get("ADVERSARY_REFLECT_S", "12"))):
             return
         if not world().chaos_events.find_one({"_id": ev["_id"], "ts": ev["ts"]}):
             self._pending = None  # reset erased this attack; never attach its lesson to a reused CHX id
@@ -222,7 +222,7 @@ class Attacker:
             return
         evidence = learning.outcome(ev)
         reflection = "Observed Hive read-backs are recorded; recovery remains unknown where no resolution is visible."
-        lesson = "Use observed Guard failures and takeovers to choose the next vetted template; never infer success from an ACK."
+        lesson = "Use observed Verifier failures and takeovers to choose the next vetted template; never infer success from an ACK."
         planner = "policy (no reasoning)"
         if self.cfg.use_llm and llm.llm_available():
             self.llm_calls += 1
@@ -247,13 +247,13 @@ class Attacker:
         from langgraph.graph import END, START, StateGraph
 
         g = StateGraph(RedState)
-        g.add_node("scout", self._scout)
+        g.add_node("investigator", self._investigator)
         g.add_node("plan", self._plan)
         g.add_node("strike", self._strike)
         g.add_node("observe", self._observe)
         g.add_node("reflect", self._reflect)
-        g.add_edge(START, "scout")
-        g.add_conditional_edges("scout", lambda s: END if s.get("hold") else "plan")
+        g.add_edge(START, "investigator")
+        g.add_conditional_edges("investigator", lambda s: END if s.get("hold") else "plan")
         g.add_conditional_edges("plan", lambda s: "strike" if s.get("strike") else END)
         g.add_edge("strike", "observe")
         g.add_edge("observe", "reflect")
@@ -282,10 +282,10 @@ class Attacker:
     def run(self) -> None:
         think(self.p.id, core.ROLE, f"{self.p.name} online: {self.p.motto}.")
         while not self._stop:
-            # GARDENER_PAUSE=1: hold fire while the Gardener upgrades a system (a lease: if the Gardener
+            # UPGRADER_PAUSE=1: hold fire while the Upgrader upgrades a system (a lease: if the Upgrader
             # dies mid-upgrade it lapses and we resume on our own).
             if pause.wait_while_paused(lambda: self._stop, on_pause=lambda d: self._heartbeat(
-                    "paused", f"Gardener upgrading {d.get('system')}", force=True)):
+                    "paused", f"Upgrader upgrading {d.get('system')}", force=True)):
                 continue
             try:
                 self.step()

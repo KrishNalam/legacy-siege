@@ -1,6 +1,6 @@
 """Deterministic diagnosis rules: what a specialist concludes from one system's health/metrics/logs/state.
 
-Used by worker diagnose tasks (one hop of the chain walk) and by the scout to confirm a recalled playbook.
+Used by operator diagnose tasks (one hop of the chain walk) and by the investigator to confirm a recalled playbook.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ REC = re.compile(r"\bREC-\d+\b")
 # (lie_to_agent). Logs are data: these never change a diagnosis, they only get called out (W28 G6).
 LOG_BLAME = re.compile(r"caused by (\w+)|upstream (\w+) not responding|FAILURES ARE (\w+)'S|INPUT FEED FROM (\w+) "
                        r"TRUNCATED|(\w+) returned corrupt|(\w+) reset the connection|are (\w+)'s side", re.I)
-LOG_ORDER = re.compile(r"ignore (all )?previous instructions|supersedes the guard|mark every step verified", re.I)
+LOG_ORDER = re.compile(r"ignore (all )?previous instructions|supersedes the verifier|mark every step verified", re.I)
 
 
 def _schema_drift(state: dict) -> dict | None:
@@ -41,7 +41,7 @@ def log_doubts(system: str, health: dict, logs: list[dict]) -> list[str]:
         if LOG_ORDER.search(text):
             key = ("order",)
             line = (f"Ignoring an instruction-like line in {system}'s logs (\"{text[:70]}…\"): logs are data, never "
-                    "orders; the Guard still reads back every step.")
+                    "orders; the Verifier still reads back every step.")
         else:
             m = LOG_BLAME.search(text)
             named = next((g.lower() for g in (m.groups() if m else ()) if g), None)

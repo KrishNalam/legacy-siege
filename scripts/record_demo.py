@@ -9,7 +9,7 @@ The stack must already be running (`run.py`), and MONGODB_URI / WORLD_DB / SWARM
 databases as that stack (the beat monitor reads MongoDB directly, exactly like scripts.demo_check).
 
 What it does: opens the war room in Playwright Chromium at 1920x1080 with video recording on, then runs the
-demo_check flow unchanged (Reset Full → Night 1 → Approve → Kill a worker → green → Reset Next round →
+demo_check flow unchanged (Reset Full → Night 1 → Approve → Kill an operator → green → Reset Next round →
 Night 2 → Approve ×2 → Night 3), opens the Atlas view, and closes the browser. demo_check's assertions run
 as usual, so the beat log also says whether the take is a valid demo. A monitor thread polls MongoDB
 every 0.25 s and timestamps each moment (cascade, diagnosis, ACK ≠ APPLIED, SIGKILL, handoff, recall,
@@ -17,9 +17,9 @@ upgrade deployed / proven …). All times in the beat log are seconds into the r
 
 Beats for the 10-beat script (docs/video-script.md), stamped whenever the stack produces them:
   ai_checked / ai_overruled  incident.ai (kind second_opinion) decided: Claude's plan runs / an op overruled (AI_DRIVES)
-  schema_drift / drift_reused  sentinel "feed schema changed" → schema_mappings history entry (new / reused);
+  schema_drift / drift_reused  monitor "feed schema changed" → schema_mappings history entry (new / reused);
                              `--drift` plays bank-drift after night 3 so the take has one
-  red_freeze                 a chaos_events agent_freeze fired by a red-* striker → the next Nurse handoff (RED_FLEET=1)
+  red_freeze                 a chaos_events agent_freeze fired by a red-* striker → the next Recovery handoff (ADVERSARY=1)
 Missing ones are cut from a fallback window (scripts.cut_video FALLBACK) or pointed at by hand with --at.
 
 Then cut it: `.venv/bin/python -m scripts.cut_video ~/projects/legacy-siege-media/beats-<ts>.json`.
@@ -115,7 +115,7 @@ class Monitor(threading.Thread):
                 if inc.get("diagnosis_path") and inc.get("root_cause_system"):
                     c.event("diagnosed", once=f"diag:{run}", run=run, path=inc["diagnosis_path"],
                             diagnosis_s=(inc.get("metrics") or {}).get("diagnosis_s"))
-                if s.thoughts.find_one({"incident": iid, "kind": "reject", "agent": "guard-1"}):
+                if s.thoughts.find_one({"incident": iid, "kind": "reject", "agent": "verifier-1"}):
                     c.event("lie_caught", once=f"lie:{run}", run=run)
                 for st in inc.get("steps") or []:
                     if st.get("status") == "verified":
@@ -154,7 +154,7 @@ class Monitor(threading.Thread):
                 if bad:
                     c.event("ai_overruled", once=f"aio:{iid}", incident=iid, op=bad[0].get("op"),
                             target=bad[0].get("target"), rule=bad[0].get("rule"))
-        for th in s.thoughts.find({"agent": {"$regex": "^sentinel"}, "text": {"$regex": "feed schema changed"},
+        for th in s.thoughts.find({"agent": {"$regex": "^monitor"}, "text": {"$regex": "feed schema changed"},
                                    "ts": {"$gt": self.since}}, {"text": 1}):
             c.event("drift_noticed", once=f"drift:{th['_id']}", text=th["text"][:120])
         for m in s.schema_mappings.find({}, {"history": 1}):
@@ -259,7 +259,7 @@ def derive_beats(events: list[dict], offset: float) -> list[dict]:
     add("night1_resolved", t(first("resolved", run=r1), -1.5), t(first("resolved", run=r1), 4))
     add("night2_recall", t(n2), t(first("diagnosed", run=r2), 4))
     add("night2_resolved", t(first("resolved", run=r2), -1.5), t(first("resolved", run=r2), 4))
-    add("gardener", t(upg_apr, -2) or t(first("upgrade_awaiting_approval"), -2),
+    add("upgrader", t(upg_apr, -2) or t(first("upgrade_awaiting_approval"), -2),
         t(first("upgrade_proven"), 2) or t(first("upgrade_deployed"), 6))
     add("night3", t(n3), t(n3_end))
     add("atlas", t(first("atlas_open")), t(first("atlas_close")))
@@ -282,7 +282,7 @@ def ffprobe_duration(p: Path) -> float | None:
 # ---------------------------------------------------------------------------------------------- main
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base", default=os.environ.get("WARROOM_URL", f"http://127.0.0.1:{config.WARROOM_PORT}"))
+    ap.add_argument("--base", default=os.environ.get("CONSOLE_URL", f"http://127.0.0.1:{config.CONSOLE_PORT}"))
     ap.add_argument("--out", type=Path, default=MEDIA)
     ap.add_argument("--chrome", default=os.environ.get("RECORD_CHROME") or find_chromium())
     ap.add_argument("--approve-delay", type=float, default=3.0, help="seconds the Beekeeper modal stays on screen")
@@ -290,7 +290,7 @@ def main() -> int:
     ap.add_argument("--night3-watch", type=float, default=20)
     ap.add_argument("--atlas-s", type=float, default=9, help="seconds on the Atlas view")
     ap.add_argument("--no-reset", action="store_true")
-    ap.add_argument("--keep", action="store_true", help="don't full-reset (Gardener revert) after recording")
+    ap.add_argument("--keep", action="store_true", help="don't full-reset (Upgrader revert) after recording")
     ap.add_argument("--drift", action="store_true",
                     help="after night 3, play bank-drift once so the take has the schema-drift beat")
     a = ap.parse_args()
@@ -326,7 +326,7 @@ def main() -> int:
                 n1 = d.night1(a.night_timeout)
                 if n1:
                     n2 = d.night2(n1, a.night_timeout)
-                    if n2 and d.gardener(a.night_timeout):
+                    if n2 and d.upgrader(a.night_timeout):
                         d.night3(a.night3_watch)
                         ok = True
                         if a.drift:

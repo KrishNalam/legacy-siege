@@ -10,7 +10,7 @@ app = "legacy-siege"
 primary_region = "iad"
 
 [env]
-  WARROOM_PORT = "8700"
+  CONSOLE_PORT = "8700"
   SYSTEMS_PORT = "8701"
   PACE = "1.0"
 

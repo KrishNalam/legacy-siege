@@ -45,7 +45,7 @@ def _incidents_pipeline(run_ids: list[str]) -> list[dict]:
             "takeover_s": "$metrics.takeover_s",
             "attempts": {"$ifNull": ["$metrics.attempts", {"$sum": {
                 "$map": {"input": {"$ifNull": ["$steps", []]}, "in": {"$size": {"$ifNull": ["$$this.attempts", []]}}}}}]},
-            # a lie caught = the Guard proved an attempt did NOT apply, so the step got another attempt
+            # a lie caught = the Verifier proved an attempt did NOT apply, so the step got another attempt
             "lies_caught": {"$sum": {"$map": {"input": {"$ifNull": ["$steps", []]}, "in": {
                 "$max": [0, {"$subtract": [{"$size": {"$ifNull": ["$$this.attempts", []]}}, 1]}]}}}},
             "takeovers": {"$size": {"$ifNull": ["$handoffs", []]}},

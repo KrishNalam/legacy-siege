@@ -117,7 +117,7 @@ def validate(obj, schema: dict, path: str = "$") -> list[str]:
 
 
 _stats_q: _queue.Queue = _queue.Queue(maxsize=200)
-_stats_worker: _threading.Thread | None = None
+_stats_operator: _threading.Thread | None = None
 
 
 def _stats_loop() -> None:
@@ -125,7 +125,7 @@ def _stats_loop() -> None:
     while True:
         task, outcome = _stats_q.get()
         try:
-            col("stats").update_one({"_id": "llm_guard"}, {"$inc": {f"{task}.{outcome}": 1, f"all.{outcome}": 1,
+            col("stats").update_one({"_id": "llm_verifier"}, {"$inc": {f"{task}.{outcome}": 1, f"all.{outcome}": 1,
                                                                     "all.calls": 1}}, upsert=True)
         except Exception:
             pass
@@ -134,20 +134,20 @@ def _stats_loop() -> None:
 def _record(task: str, outcome: str) -> None:
     """Count an outcome: in-process at once; the shared MongoDB counter on a background thread, so telemetry
     never blocks the caller (dropped if the queue is full)."""
-    global _stats_worker
+    global _stats_operator
     with _stats_lock:
         _stats[f"{task}.{outcome}"] += 1
         _stats[f"all.{outcome}"] += 1
-        if _stats_worker is None:
-            _stats_worker = _threading.Thread(target=_stats_loop, name="llm-stats", daemon=True)
-            _stats_worker.start()
+        if _stats_operator is None:
+            _stats_operator = _threading.Thread(target=_stats_loop, name="llm-stats", daemon=True)
+            _stats_operator.start()
     try:
         _stats_q.put_nowait((task, outcome))
     except _queue.Full:
         pass
 
 
-def guard_stats() -> dict:
+def verifier_stats() -> dict:
     with _stats_lock:
         return dict(_stats)
 

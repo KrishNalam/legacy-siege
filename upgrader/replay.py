@@ -2,8 +2,8 @@
 
 Runs in its own subprocess (spawned by upgrader.testing) with:
     cwd        = a temp sandbox that contains the patched `systems/` package
-    PYTHONPATH = repo root (for `common`, `gardener`)
-    WORLD_DB   = world_test_gardener   (never the live `world` DB)
+    PYTHONPATH = repo root (for `common`, `upgrader`)
+    WORLD_DB   = world_test_upgrader   (never the live `world` DB)
 so `import systems.mainframe` resolves to the patched sandbox copy.
 
 Two layers, both must pass:
@@ -26,7 +26,7 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
-WAIT_S = float(os.environ.get("GARDENER_REPLAY_WAIT_S", 6))
+WAIT_S = float(os.environ.get("UPGRADER_REPLAY_WAIT_S", 6))
 
 
 def log(msg: str) -> None:
@@ -102,7 +102,7 @@ def app_replay() -> bool:
         log(f"app: batch status after fault = {status}")
         # force a NIGHTBAT run: with the legacy code this fails while poison remains
         r = c.post("/mainframe/ops/restart_batch",
-                   json={"action_id": f"GARDENER-REPLAY-{int(time.time())}", "params": {"job": "NIGHTBAT"}})
+                   json={"action_id": f"UPGRADER-REPLAY-{int(time.time())}", "params": {"job": "NIGHTBAT"}})
         log(f"app: restart_batch -> {r.status_code} {r.text[:200]}")
         state = {}
         deadline = time.monotonic() + WAIT_S
@@ -137,7 +137,7 @@ def tool_replay(fault: str, system: str, ops: list[dict]) -> bool:
 
     Passes only if the fault was really active before the ops and is resolved after them, the system reads
     back healthy and every op was accepted. `$record_id` placeholders bind to the poison records the
-    mainframe reports at that moment (as a Scout binds them from today's diagnosis)."""
+    mainframe reports at that moment (as an Investigator binds them from today's diagnosis)."""
     from fastapi.testclient import TestClient
 
     from systems.app import app
@@ -161,7 +161,7 @@ def tool_replay(fault: str, system: str, ops: list[dict]) -> bool:
                 if op["params"].get("record_id") == "$record_id" else [op["params"]]
             for params in targets:
                 r = c.post(f"/{op['system']}/ops/{op['op']}",
-                           json={"action_id": f"GARDENER-TOOL-{int(time.time())}-{i}-{len(params)}", "params": params})
+                           json={"action_id": f"UPGRADER-TOOL-{int(time.time())}-{i}-{len(params)}", "params": params})
                 body = r.json() if r.content else {}
                 good = r.status_code < 400 and body.get("accepted") is True
                 ok &= good

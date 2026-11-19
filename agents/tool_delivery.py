@@ -1,4 +1,4 @@
-"""Platform Sentinel delivery: waggle-bus notices + W19/W23 Gardener requests.
+"""Toolsmith Monitor delivery: reporter-bus notices + W19/W23 Upgrader requests.
 
 The common envelope is {kind, from, system, problem, fault_class, payload, ts, status,
 answer}. payload carries a registry reference plus the vetted parameterised spec. Receivers
@@ -9,11 +9,11 @@ from __future__ import annotations
 import threading
 
 from common.db import col, now
-from . import platform
+from . import toolsmith
 from .harness import log
 
 
-def envelope(tool, sender='platform-1'):
+def envelope(tool, sender='toolsmith-1'):
     return {'kind': 'tool', 'from': sender, 'system': tool['preconditions']['system'],
             'problem': tool['fault_class'], 'fault_class': tool['fault_class'],
             'payload': {'tool_id': tool['_id'], 'name': tool['name'], 'version': tool['version'],
@@ -22,59 +22,59 @@ def envelope(tool, sender='platform-1'):
             'ts': now(), 'status': 'open', 'answer': None}
 
 
-def publish(tool, sender='platform-1'):
+def publish(tool, sender='toolsmith-1'):
     """Idempotent fan-out. Called on every sweep to recover a publisher crash after registry insert."""
-    if not platform.enabled():
+    if not toolsmith.enabled():
         return
     body = envelope(tool, sender)
     key = f"GT-{tool['_id']}:{tool['status']}"
     col('gardener_requests').update_one({'_id': key}, {'$setOnInsert': body}, upsert=True)
     col('messages').update_one({'_id': key}, {'$setOnInsert': {
-        'from': sender, 'to': 'scouts', 'kind': 'tool', 'body': body, 'ts': body['ts'],
+        'from': sender, 'to': 'investigators', 'kind': 'tool', 'body': body, 'ts': body['ts'],
         'source': sender, 'system': body['system'], 'incident': None, 'severity': 'info', 'priority': 20}}, upsert=True)
 
 
 def refresh(agent, via='snapshot'):
-    if not platform.enabled():
+    if not toolsmith.enabled():
         return []
     versions, tools = {}, []
     for tool in col('tools').find({'status': 'active'}).limit(100):
         fault = tool['fault_class']
-        if not platform.valid(tool.get('ops'), fault):
+        if not toolsmith.valid(tool.get('ops'), fault):
             continue
-        system = platform.SUPPORTED[fault]
+        system = toolsmith.SUPPORTED[fault]
         if system not in versions:
             versions[system] = agent.systems.version(system)
         if tool['preconditions']['system_version'] == versions[system]:
             tools.append(tool['_id'])
-    # This is the Scout's actual received catalogue, also visible to Comms roster readers.
+    # This is the Investigator's actual received catalogue, also visible to Comms roster readers.
     col('agents').update_one({'_id': agent.id}, {'$set': {
-        'platform_tools': tools, 'platform_tools_received_at': now(), 'platform_tools_via': via}})
+        'toolsmith_tools': tools, 'toolsmith_tools_received_at': now(), 'toolsmith_tools_via': via}})
     return tools
 
 
 def start(agent):
-    """Watch bus deliveries even while a Scout is waiting on a Worker or approval.
+    """Watch bus deliveries even while an Investigator is waiting on an Operator or approval.
 
     Open stream before taking a snapshot to close the startup race. Snapshot on reconnect
-    covers dropped/expired messages. One receiver thread per Scout, not another process.
+    covers dropped/expired messages. One receiver thread per Investigator, not another process.
     """
-    if not platform.enabled() or getattr(agent, '_platform_delivery', False):
+    if not toolsmith.enabled() or getattr(agent, '_toolsmith_delivery', False):
         return
-    agent._platform_delivery = True
+    agent._toolsmith_delivery = True
 
     def receive():
         while not agent.stop.is_set():
             try:
                 with col('messages').watch([{'$match': {'operationType': 'insert',
-                        'fullDocument.to': 'scouts', 'fullDocument.kind': 'tool'}}],
+                        'fullDocument.to': 'investigators', 'fullDocument.kind': 'tool'}}],
                         max_await_time_ms=500) as stream:
                     refresh(agent)
                     while not agent.stop.is_set():
                         event = stream.try_next()
                         if event:
-                            refresh(agent, 'waggle_bus')
+                            refresh(agent, 'reporter_bus')
             except Exception as exc:
-                log(agent.id, f'platform delivery reconnect: {type(exc).__name__}')
+                log(agent.id, f'toolsmith delivery reconnect: {type(exc).__name__}')
                 agent.stop.wait(1)
-    threading.Thread(target=receive, name='platform-delivery', daemon=True).start()
+    threading.Thread(target=receive, name='toolsmith-delivery', daemon=True).start()

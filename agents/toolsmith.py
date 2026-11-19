@@ -1,6 +1,6 @@
-"""Platform tools are policy-validated data, never code. PLATFORM_ENGINEERS defaults off.
+"""Toolsmith tools are policy-validated data, never code. TOOLSMITH_ENGINEERS defaults off.
 
-A tool saves repeated plan assembly decisions, NOT operations or Guard checks. Every use
+A tool saves repeated plan assembly decisions, NOT operations or Verifier checks. Every use
 is rebound to today's diagnosis and must equal today's deterministic safe plan.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ SAMPLE = {'poison_records': ['$record_id']}
 
 
 def enabled():
-    return os.environ.get('PLATFORM_ENGINEERS', '').lower() in ('1', 'true', 'yes', 'on')
+    return os.environ.get('TOOLSMITH_ENGINEERS', '').lower() in ('1', 'true', 'yes', 'on')
 
 
 def template(fault):
@@ -38,7 +38,7 @@ def valid(ops, fault):
 def build(agent):
     if not enabled():
         return
-    # Recover accounting if the Guard died between its durable judgement and telemetry.
+    # Recover accounting if the Verifier died between its durable judgement and telemetry.
     for run in col('tool_runs').find({'status': 'running'}).limit(50):
         incident = col('incidents').find_one({'_id': run['incident']}) or {}
         tagged = [s for s in incident.get('steps', []) if s.get('tool_id') == run['tool_id']]
@@ -48,8 +48,8 @@ def build(agent):
         elif tagged and all(s['status'] == 'verified' for s in tagged):
             judged(agent, run['incident'], tagged[-1], True)
     # Repeated = at least 2 independent observations of the same fault on the same system version,
-    # summed across Guard-caught failures (lessons) and slow verified steps (platform_signals): night 1's
-    # lie + slow restart already qualifies, so night 2 can use the tool before the Gardener upgrade.
+    # summed across Verifier-caught failures (lessons) and slow verified steps (platform_signals): night 1's
+    # lie + slow restart already qualifies, so night 2 can use the tool before the Upgrader upgrade.
     query = {'stale': False, 'count': {'$gte': 1}, 'fault_class': {'$in': list(SUPPORTED)}}
     groups: dict = {}
     for ev in list(col('lessons').find(query).limit(50)) + list(col('platform_signals').find(query).limit(50)):
@@ -67,7 +67,7 @@ def build(agent):
         if col('tools').find_one({'_id': key}):
             continue  # retired tools cannot be silently rebuilt
         ops, source, why = template(fault), 'policy', 'Repeated verified failures; reuse a vetted recovery recipe.'
-        proposal, meta = guarded_json('platform_tool',
+        proposal, meta = guarded_json('toolsmith_tool',
             'Name and explain a recovery tool. Return ops unchanged from the supplied whitelist; no code.',
             json.dumps({'failure': ls.get('why'), 'count': ls['count'], 'whitelist': ops}),
             {'type': 'object', 'properties': {'name': {'type': 'string', 'maxLength': 80},
@@ -93,8 +93,8 @@ def build(agent):
         except DuplicateKeyError:
             continue
         slow = sum(e['count'] for e in ls['evidence_docs'] if str(e['_id']).startswith('SLOW:'))
-        agent.think(f"Platform engineer built tool {name} from {ls['count'] - slow} failures + {slow} slow steps ({source}); "
-                    f"{len(ops)} whitelisted ops, every step still Guard-verified.", kind='learn', pause=False,
+        agent.think(f"Toolsmith engineer built tool {name} from {ls['count'] - slow} failures + {slow} slow steps ({source}); "
+                    f"{len(ops)} whitelisted ops, every step still Verifier-verified.", kind='learn', pause=False,
                     system=ls['system'])
 
     from .tool_delivery import publish
@@ -144,8 +144,8 @@ def used(agent, incident, step):
         return tool
     tool = txn(fn)
     if tool:
-        agent.think(f"Worker used tool {tool['name']}; {len(tool['ops']) - 1} plan assembly steps saved; "
-                    '0 operations skipped, all approvals and Guard checks retained.', kind='action',
+        agent.think(f"Operator used tool {tool['name']}; {len(tool['ops']) - 1} plan assembly steps saved; "
+                    '0 operations skipped, all approvals and Verifier checks retained.', kind='action',
                     incident=incident, system=step['system'], pause=False)
 
 
@@ -162,7 +162,7 @@ def judged(agent, incident, step, success):
             col('platform_signals').update_one({'_id': key}, {'$setOnInsert': {
                 'system': step['system'], 'system_version': version, 'fault_class': fault,
                 'stale': False, 'why': 'Repeated operations taking at least 10 seconds to verify',
-                'evidence': 'Guard read-back verified after >=10s'},
+                'evidence': 'Verifier read-back verified after >=10s'},
                 '$addToSet': {'actions': step['action_id']}}, upsert=True)
             col('platform_signals').update_one({'_id': key}, [{'$set': {'count': {'$size': '$actions'}}}])
     if not step.get('tool_id'):
@@ -180,12 +180,12 @@ def judged(agent, incident, step, success):
         field = 'successes' if success else 'failures'
         updates = {'$inc': {field: 1}}
         if not success:
-            updates['$set'] = {'status': 'retired', 'retired_at': now(), 'retired_reason': 'Guard verification failed'}
+            updates['$set'] = {'status': 'retired', 'retired_at': now(), 'retired_reason': 'Verifier verification failed'}
         col('tools').update_one({'_id': tool_id}, updates, session=session)
         tool = col('tools').find_one({'_id': tool_id}, session=session)
         col('tools').update_one({'_id': tool_id}, {'$set': {'success_rate': tool['successes'] / (tool['successes'] + tool['failures'])}}, session=session)
         return True
     if txn(fn):
-        agent.think(f"Tool {tool_id}: " + ('all operations Guard-verified.' if success else
-                    'retired after failed Guard verification; continuing with the normal policy.'),
+        agent.think(f"Tool {tool_id}: " + ('all operations Verifier-verified.' if success else
+                    'retired after failed Verifier verification; continuing with the normal policy.'),
                     kind='learn' if success else 'reject', incident=incident, system=step['system'], pause=False)

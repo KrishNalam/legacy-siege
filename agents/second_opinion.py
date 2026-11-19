@@ -1,6 +1,6 @@
 """AI second opinion: Claude proposes, verification disposes.
 
-After the Scout writes its plan, `start()` spawns ONE background thread per incident. It numbers the evidence the
+After the Investigator writes its plan, `start()` spawns ONE background thread per incident. It numbers the evidence the
 Hive gathered (symptoms, each hop's status/blames/facts, the last few log lines per system; never the policy's own
 fault class, root cause or plan) and asks Claude for the fastest recovery it believes is safe: a hypothesis, the
 evidence ids it relies on, a confidence and an op plan. A deterministic judge then checks every proposed op against
@@ -394,14 +394,14 @@ def consult(ev: dict, plan: list[dict], root: str, fault_class: str, budget_s: f
                                      max_tokens=1100, timeout=window)
     latency = int((time.monotonic() - t0) * 1000)
     if out is None:
-        return {"status": "offline", "latency_ms": latency, "guard": meta["outcome"],
+        return {"status": "offline", "latency_ms": latency, "verifier": meta["outcome"],
                 "error": {"timeout": f"no answer within {max(window, 0):.1f}s", "schema": "answer failed schema validation",
                           "bad_json": "answer was not valid JSON", "refusal": "model declined",
                           "truncated": "answer was cut off"}.get(meta["outcome"], "LLM call failed")}
     prop = normalize(out, {e["id"] for e in evidence})
     verdict = judge(prop, plan, root, fault_class, readback)
     cited = set(prop["cites"]) | {c for h in prop["hypotheses"] for c in h["evidence"]}
-    return {"status": "done", "guard": "ok", "hypothesis": prop["hypothesis"], "hypotheses": prop["hypotheses"],
+    return {"status": "done", "verifier": "ok", "hypothesis": prop["hypothesis"], "hypotheses": prop["hypotheses"],
             "cites": prop["cites"], "confidence": prop["confidence"], "latency_ms": latency,
             "proposed_ops": [{k: o[k] for k in ("op", "target", "params", "risk", "why")} for o in prop["ops"]],
             **verdict, "root_system": prop["root_system"], "fault_class": prop["fault_class"],
@@ -415,7 +415,7 @@ def _finish(agent_id: str, inc_id: str, mine: dict, ai: dict) -> dict | None:
         return None
     try:
         tally = bump_tally(ai.get("verdicts") or []) if ai["status"] == "done" else None
-        g = col("stats").find_one({"_id": "llm_guard"}) or {}
+        g = col("stats").find_one({"_id": "llm_verifier"}) or {}
         allc = g.get("all") or {}
         tally = {**(tally or {k: 0 for k in ("proposed", "accepted", "overruled", "incidents")}),
                  "llm_calls": int(allc.get("calls") or 0),
@@ -441,7 +441,7 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
     """AI_DRIVES: ask Claude, with ONE hard deadline (AI_DRIVE_TIMEOUT_S) for evidence + inference. If its plan
     passes every guardrail it is the plan that runs; otherwise, or when the deadline passes, the rules plan runs
     and `ai.decision_reason` says why. A late answer is discarded. Never raises.
-    Returns {"plan": [steps for the scout], "decision": "ai_plan"|"rules_plan", "reason": str}."""
+    Returns {"plan": [steps for the investigator], "decision": "ai_plan"|"rules_plan", "reason": str}."""
     rules = [dict(s, source="policy") for s in rules_plan]
     cap = config.AI_DRIVE_TIMEOUT_S
     t0 = time.monotonic()
@@ -465,7 +465,7 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
                 box.put(consult(ev, plan_n, root, fault_class, budget_s=cap - (time.monotonic() - t0),
                                 llm_timeout=cap, task="ai_drive"))
             except Exception as e:  # noqa: BLE001
-                box.put({"status": "offline", "guard": "error", "error": type(e).__name__,
+                box.put({"status": "offline", "verifier": "error", "error": type(e).__name__,
                          "latency_ms": int((time.monotonic() - t0) * 1000)})
         threading.Thread(target=work, name=f"ai-drive-{inc_id}", daemon=True).start()
         say(f"Asking Claude to reason over the evidence (waits at most {cap:.1f}s, evidence included); its plan "
@@ -473,7 +473,7 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
         try:
             got = box.get(timeout=max(0.1, cap - (time.monotonic() - t0)))
         except queue.Empty:  # deadline: whatever arrives later is ignored
-            got = {"status": "offline", "guard": "timeout", "error": f"no decision within {cap:.1f}s",
+            got = {"status": "offline", "verifier": "timeout", "error": f"no decision within {cap:.1f}s",
                    "latency_ms": int((time.monotonic() - t0) * 1000)}
         ai = {**base, **got}
         if ai["status"] != "done":
@@ -499,7 +499,7 @@ def decide(agent_id: str, inc: dict, state: dict, rules_plan: list[dict], root: 
                 decision, reason = "rules_plan", (f"Claude left params of {', '.join(filled)} to the policy, so it isn't "
                                                   f"Claude's plan; rules plan runs")
             else:
-                decision, reason = "ai_plan", "Claude's plan passed P1–P6; executing it, the Guard verifies every step"
+                decision, reason = "ai_plan", "Claude's plan passed P1–P6; executing it, the Verifier verifies every step"
         ai.update(decision=decision, decision_reason=reason)
         try:
             with pymongo.timeout(1.5):  # bookkeeping is bounded too; the decision stands either way
@@ -575,10 +575,10 @@ def _opinion(agent_id: str, inc_id: str, opened_at, ev: dict, plan: list[dict], 
         if stored is None:
             return
         if ai["status"] != "done":
-            _log(agent_id, f"{inc_id} second opinion offline after {ai['latency_ms']} ms ({ai['guard']})")
+            _log(agent_id, f"{inc_id} second opinion offline after {ai['latency_ms']} ms ({ai['verifier']})")
             return
         text = summary(ai, root, fault_class)
-        events.think(agent_id, "scout", text, incident=inc_id, system=root, kind="thought")
+        events.think(agent_id, "investigator", text, incident=inc_id, system=root, kind="thought")
         _log(agent_id, f"(ai {ai['latency_ms']} ms) {text}")
     except Exception as e:
         _log(agent_id, f"{inc_id} second opinion failed: {type(e).__name__}: {e}")

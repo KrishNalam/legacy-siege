@@ -2,8 +2,8 @@
 
 usage: .venv/bin/python -m scripts.shoot OUTDIR     (the stack must be running: run.py)
 
-Shots: idle, night1 (scout tracing), lie (ACK != APPLIED), nurse (takeover after the kill),
-recall (night 2), gardener (approval), proven (upgrade proven). Needs Playwright Chromium.
+Shots: idle, night1 (investigator tracing), lie (ACK != APPLIED), recovery (takeover after the kill),
+recall (night 2), upgrader (approval), proven (upgrade proven). Needs Playwright Chromium.
 """
 from __future__ import annotations
 
@@ -17,15 +17,15 @@ from playwright.sync_api import sync_playwright
 from common import config
 from common.db import col
 
-BASE = f"http://127.0.0.1:{config.WARROOM_PORT}"
+BASE = f"http://127.0.0.1:{config.CONSOLE_PORT}"
 
 # (name, condition read from MongoDB, delay before the shot so the screen has caught up)
 BEATS = [
     ("night1", lambda: col("incidents").find_one({"diagnosis_path.1": {"$exists": True}}), 1.0),
     ("lie", lambda: col("ledger").find_one({"op": "quarantine_record", "status": "failed"}), 1.0),
-    ("nurse", lambda: col("incidents").find_one({"handoffs.0": {"$exists": True}}), 1.5),
+    ("recovery", lambda: col("incidents").find_one({"handoffs.0": {"$exists": True}}), 1.5),
     ("recall", lambda: col("incidents").find_one({"recall.used": True}), 2.0),
-    ("gardener", lambda: col("approvals").find_one({"kind": "upgrade"}), 0.6),
+    ("upgrader", lambda: col("approvals").find_one({"kind": "upgrade"}), 0.6),
     ("proven", lambda: col("upgrade_requests").find_one({"status": "proven"}), 1.0),
 ]
 

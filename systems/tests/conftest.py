@@ -1,7 +1,7 @@
 """Test isolation: every systems test runs against throwaway databases, never 'world'/'swarm'.
 
 An externally provided WORLD_DB/SWARM_DB is honoured only if it is already a test DB
-(e.g. the Gardener's WORLD_DB=world_test_gardener); anything else is overridden.
+(e.g. the Upgrader's WORLD_DB=world_test_upgrader); anything else is overridden.
 TEST_DB_SUFFIX (e.g. "_w2") is appended to the default names so parallel runs on one MongoDB never collide.
 """
 import os

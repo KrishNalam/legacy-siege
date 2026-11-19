@@ -1,4 +1,4 @@
-"""Start the whole stack: systems (:8701), war room (:8700), swarm supervisor, gardener.
+"""Start the whole stack: systems (:8701), war room (:8700), swarm supervisor, upgrader.
 
     .venv/bin/python run.py            # Ctrl-C (or SIGTERM) stops everything
     .venv/bin/python run.py --reset    # wipe runtime data first
@@ -23,12 +23,12 @@ PROCS = [
     ("systems", [PY, "-m", "uvicorn", "systems.app:app", "--host", "0.0.0.0", "--port",
                  os.environ.get("SYSTEMS_PORT", "8701"), "--log-level", "warning"]),
     ("console", [PY, "-m", "uvicorn", "console.server:app", "--host", "0.0.0.0", "--port",
-                 str(config.WARROOM_PORT), "--log-level", "warning"]),
+                 str(config.CONSOLE_PORT), "--log-level", "warning"]),
     ("agents", [PY, "-m", "agents.supervisor"]),
     ("upgrader", [PY, "-m", "upgrader.main"]),
 ]
 # Red fleet (AI attacker on top of the seeded chaos): opt-in, off by default.
-if os.environ.get("RED_FLEET", "").strip().lower() in ("1", "true", "yes", "on"):
+if os.environ.get("ADVERSARY", "").strip().lower() in ("1", "true", "yes", "on"):
     PROCS.append(("adversary", [PY, "-m", "adversary.redfleet"]))
 
 

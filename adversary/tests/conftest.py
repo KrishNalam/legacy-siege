@@ -48,7 +48,7 @@ def isolated_dbs():
 
 @pytest.fixture(autouse=True)
 def clean_dbs(isolated_dbs, monkeypatch):
-    monkeypatch.setenv("RED_FLEET_REFLECT_S", "0")
+    monkeypatch.setenv("ADVERSARY_REFLECT_S", "0")
     for db in DBS:
         for name in client()[db].list_collection_names(filter={"name": {"$not": {"$regex": "^system\\."}}}):
             client()[db][name].delete_many({})

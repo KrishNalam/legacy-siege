@@ -79,6 +79,6 @@ MONGODB_URI='mongodb://localhost:27027/?directConnection=true' PACE=0 .venv/bin/
 | `BATCH_EVERY_TICKS` | `2` | How often the NIGHTBAT batch runs, in ticks |
 | `CASCADE_TICKS` | `3` | How long a downstream system tolerates stale upstream data |
 | `SLOW_APPLY_S` | `20` | Cap on the `slow_apply` delay (read via `common.config`) |
-| `CHAOS_AGENT_LIE` | off | Allows the prompt-injection variant of `false_log` |
+| `ADVERSARY_AGENT_LIE` | off | Allows the prompt-injection variant of `false_log` |
 
 Back to the [main README](../README.md) · interfaces in [CONTRACTS.md](../CONTRACTS.md)

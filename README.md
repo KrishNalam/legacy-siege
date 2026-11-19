@@ -171,9 +171,9 @@ Everything works with no `.env`. Copy [`.env.example`](.env.example) to `.env` t
 | `MONGODB_URI` | `mongodb://localhost:27027/?directConnection=true` | MongoDB with Atlas Search (Atlas Local or Atlas). |
 | `WORLD_DB` / `SWARM_DB` | `world` / `swarm` | Database for the estate and chaos / database for the agents. |
 | `SYSTEMS_PORT` | `8701` | Port of the legacy systems API. |
-| `WARROOM_PORT` | `8700` | Port of the war room. |
+| `CONSOLE_PORT` | `8700` | Port of the war room. |
 | `PACE` | `1.0` | Multiplies every deliberate "thinking" pause. `0` = as fast as possible. |
-| `WARROOM_VIEW` | `diagram` | What `/` serves: `diagram` or `flow`. |
+| `CONSOLE_VIEW` | `diagram` | What `/` serves: `diagram` or `flow`. |
 | `ANTHROPIC_API_KEY` | none | Turns on Claude narration and the optional AI switches. |
 | `LLM_MODEL` | `claude-haiku-5-5` | Claude model used when a key is set. |
 | `VOYAGE_API_KEY` | none | Use Voyage embeddings instead of the built-in local hash embedding. |
@@ -186,8 +186,8 @@ Everything works with no `.env`. Copy [`.env.example`](.env.example) to `.env` t
 |---|---|
 | `AI_SECOND_OPINION=1` | Claude reviews each plan; a rules judge marks each proposed step accepted or overruled. Needs a key. |
 | `AI_DRIVES=1` | Claude's plan runs if it passes every guardrail; otherwise the rules plan runs. Needs a key. |
-| `RED_FLEET=1` | Five AI attacker processes on top of the seeded chaos. Refuses the default DB names unless `RED_FLEET_ALLOW_LIVE=1`. |
-| `SWARM_DYNAMIC=1` | Scouts and workers are spawned on demand and retire when idle. |
+| `ADVERSARY=1` | Five AI attacker processes on top of the seeded chaos. Refuses the default DB names unless `ADVERSARY_ALLOW_LIVE=1`. |
+| `AGENTS_AUTOSCALE=1` | Scouts and workers are spawned on demand and retire when idle. |
 | `MONGO_SPINE=1` | Schema validators, change-stream pre-images and a lease chain-of-custody log. |
 | `SCHEMA_DRIFT_DEMO=1` | Night 3 also renames a field in the unix feed; the bees learn the mapping. |
 | `WORKFLOW_DRIFT=1` | The mainframe starts requiring a new step before a restart; the bees learn it. |

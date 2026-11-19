@@ -155,10 +155,10 @@ def wait_ai(status, timeout=5, need=None):
 def test_flag_off_or_no_key_writes_nothing(inc, monkeypatch):
     doc, state = inc
     monkeypatch.setattr(so.config, "AI_SECOND_OPINION", True)  # flag on, but no key in tests
-    assert so.start("scout-1", doc, state, PLAN, "mainframe", "batch_abort") is False
+    assert so.start("investigator-1", doc, state, PLAN, "mainframe", "batch_abort") is False
     monkeypatch.setattr(so.config, "AI_SECOND_OPINION", False)
     monkeypatch.setattr(so.llm, "llm_available", lambda: True)  # key, but flag off
-    assert so.start("scout-1", doc, state, PLAN, "mainframe", "batch_abort") is False
+    assert so.start("investigator-1", doc, state, PLAN, "mainframe", "batch_abort") is False
     time.sleep(0.2)
     assert "ai" not in col("incidents").find_one({"_id": "INC-0099"})
 
@@ -168,7 +168,7 @@ def test_offline_when_llm_returns_none(inc, monkeypatch):
     monkeypatch.setattr(so.llm, "llm_available", lambda: True)
     monkeypatch.setattr(so.config, "AI_SECOND_OPINION", True)
     monkeypatch.setattr(so.llm, "guarded_json", lambda *a, **k: (None, {"outcome": "timeout", "latency_ms": 1}))
-    assert so.start("scout-1", doc, state, PLAN, "mainframe", "batch_abort")
+    assert so.start("investigator-1", doc, state, PLAN, "mainframe", "batch_abort")
     ai = wait_ai("offline")
     assert ai["latency_ms"] >= 0 and ai["error"]
 
@@ -189,7 +189,7 @@ def test_done_path_writes_verdict_and_thought(inc, monkeypatch):
     monkeypatch.setattr(so.llm, "llm_available", lambda: True)
     monkeypatch.setattr(so.config, "AI_SECOND_OPINION", True)
     monkeypatch.setattr(so.llm, "guarded_json", fake)
-    assert so.start("scout-1", doc, state, PLAN, "mainframe", "batch_abort")
+    assert so.start("investigator-1", doc, state, PLAN, "mainframe", "batch_abort")
     ai = wait_ai("done", need="tally")
     assert ai["kind"] == "second_opinion" and ai["root_agrees"] and not ai["agrees_with_policy"]
     assert len(ai["verdicts"]) == len(ai["proposed_ops"]) == 5
@@ -200,10 +200,10 @@ def test_done_path_writes_verdict_and_thought(inc, monkeypatch):
     assert "E77" not in ai["cites"] and ai["confidence"] == 0.8
     d = col("incidents").find_one({"_id": "INC-0099"})["ai"]
     assert d["tally"]["proposed"] >= 5 and d["tally"]["overruled"] >= 1
-    t = col("thoughts").find_one({"incident": "INC-0099", "agent": "scout-1"})
+    t = col("thoughts").find_one({"incident": "INC-0099", "agent": "investigator-1"})
     assert t and "overruled 1 of 5" in t["text"]
     # second start on the same incident is a no-op (one call per incident)
-    assert so.start("scout-1", doc, state, PLAN, "mainframe", "batch_abort")
+    assert so.start("investigator-1", doc, state, PLAN, "mainframe", "batch_abort")
     time.sleep(0.3)
     assert col("incidents").find_one({"_id": "INC-0099"})["ai"]["request_id"] == ai["request_id"]
 
@@ -238,7 +238,7 @@ def drive(inc, monkeypatch, out, outcome="ok"):
     monkeypatch.setattr(so.llm, "guarded_json", lambda *a, **k: (out, {"outcome": outcome, "latency_ms": 7}))
     said = []
     rules = [{k: v for k, v in s.items() if k != "n"} for s in PLAN]
-    d = so.decide("scout-1", doc, state, rules, "mainframe", "batch_abort", say=said.append)
+    d = so.decide("investigator-1", doc, state, rules, "mainframe", "batch_abort", say=said.append)
     return d, said, col("incidents").find_one({"_id": "INC-0099"})["ai"]
 
 
@@ -265,7 +265,7 @@ def test_overruled_or_incomplete_claude_plan_falls_back(inc, monkeypatch):
 def test_timeout_or_bad_schema_falls_back(inc, monkeypatch):
     for outcome in ("timeout", "schema"):
         d, said, ai = drive(inc, monkeypatch, None, outcome)
-        assert d["decision"] == "rules_plan" and ai["status"] == "offline" and ai["guard"] == outcome
+        assert d["decision"] == "rules_plan" and ai["status"] == "offline" and ai["verifier"] == outcome
         assert "rules plan runs" in said[-1]
 
 
@@ -275,7 +275,7 @@ def test_decide_never_raises(inc, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("x")
     monkeypatch.setattr(so, "consult", boom)
-    d = so.decide("scout-1", doc, state, [dict(PLAN[0])], "mainframe", "batch_abort")
+    d = so.decide("investigator-1", doc, state, [dict(PLAN[0])], "mainframe", "batch_abort")
     assert d["decision"] == "rules_plan" and d["plan"][0]["source"] == "policy"
 
 
@@ -301,7 +301,7 @@ def test_guardrails_fence_redact_validate_timeout(monkeypatch):
     monkeypatch.setitem(llm.PROVIDERS, "slow", lambda *a: ('{"a": 1}', "ok"))
     assert llm.guarded_json("t", "s", "p", {"type": "object", "required": ["b"]}, timeout=1)[1]["outcome"] == "schema"
     assert llm.guarded_json("t", "s", "p", {"type": "object", "required": ["a"]}, timeout=1)[0] == {"a": 1}
-    assert llm.guard_stats().get("t.timeout", 0) >= 1
+    assert llm.verifier_stats().get("t.timeout", 0) >= 1
 
 
 def test_never_clobbers_schema_mapping(inc, monkeypatch):
@@ -310,11 +310,11 @@ def test_never_clobbers_schema_mapping(inc, monkeypatch):
     d = col("incidents").find_one({"_id": "INC-0099"})
     assert so.owned_elsewhere(d)
     monkeypatch.setattr(so.llm, "guarded_json", lambda *a, **k: (claude(GOOD), {"outcome": "ok", "latency_ms": 1}))
-    r = so.decide("scout-1", d, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
+    r = so.decide("investigator-1", d, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
     assert r["decision"] == "rules_plan"
     monkeypatch.setattr(so.llm, "llm_available", lambda: True)
     monkeypatch.setattr(so.config, "AI_SECOND_OPINION", True)
-    so.start("scout-1", d, state, PLAN, "mainframe", "batch_abort")
+    so.start("investigator-1", d, state, PLAN, "mainframe", "batch_abort")
     time.sleep(0.3)
     assert col("incidents").find_one({"_id": "INC-0099"})["ai"] == {"kind": "schema_mapping", "hypothesis": "w3"}
 
@@ -329,10 +329,10 @@ def test_decide_respects_one_hard_deadline(inc, monkeypatch):
         return {"status": "done"}  # would be ignored: too late
     monkeypatch.setattr(so, "consult", slow)
     t = time.monotonic()
-    d = so.decide("scout-1", doc, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
+    d = so.decide("investigator-1", doc, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
     assert time.monotonic() - t < 2.0 and d["decision"] == "rules_plan"
     ai = col("incidents").find_one({"_id": "INC-0099"})["ai"]
-    assert ai["status"] == "offline" and ai["guard"] == "timeout"
+    assert ai["status"] == "offline" and ai["verifier"] == "timeout"
 
 
 def test_redaction_before_truncation_and_quoted_credentials(monkeypatch):
@@ -354,7 +354,7 @@ def test_stats_write_never_blocks(monkeypatch):
     t = time.monotonic()
     for _ in range(50):
         llm._record("t", "timeout")
-    assert time.monotonic() - t < 0.2 and llm.guard_stats()["t.timeout"] >= 50
+    assert time.monotonic() - t < 0.2 and llm.verifier_stats()["t.timeout"] >= 50
 
 
 
@@ -371,7 +371,7 @@ def test_decide_failure_marks_card_offline_at_once(inc, monkeypatch):
         raise RuntimeError("x")
     monkeypatch.setattr(so, "hypothesis_lines", boom)  # fails after the "thinking" write
     monkeypatch.setattr(so.llm, "guarded_json", lambda *a, **k: (claude(GOOD), {"outcome": "ok", "latency_ms": 1}))
-    d = so.decide("scout-1", doc, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
+    d = so.decide("investigator-1", doc, state, [{k: v for k, v in s.items() if k != "n"} for s in PLAN], "mainframe", "batch_abort")
     ai = col("incidents").find_one({"_id": "INC-0099"})["ai"]
     assert d["decision"] == "rules_plan" and ai["status"] == "offline" and ai["decision"] == "rules_plan"
     assert "AI step failed (RuntimeError)" in ai["decision_reason"]

@@ -1,4 +1,4 @@
-"""Shared pieces of the Red fleet: settings, the Red Scout's read of the Hive, guardrails, LLM JSON."""
+"""Shared pieces of the Red fleet: settings, the Red Investigator's read of the Hive, guardrails, LLM JSON."""
 from __future__ import annotations
 
 import json
@@ -11,13 +11,13 @@ from common import config
 from common.db import now, swarm, world
 
 ROLE = "red"
-# Agents Red may never kill: the Gardener (a kill between deploy and proof can strand a half-done upgrade).
-NEVER_KILL = {"gardener"}
+# Agents Red may never kill: the Upgrader (a kill between deploy and proof can strand a half-done upgrade).
+NEVER_KILL = {"upgrader"}
 UPGRADE_BUSY = ("planning", "testing", "awaiting_approval", "deploying", "deployed")
 
 
 def enabled() -> bool:
-    return os.environ.get("RED_FLEET", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("ADVERSARY", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -28,7 +28,7 @@ def _csv(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
 @dataclass
 class Settings:
     """Pacing only. Default cap 2 strikes per agent per night so the estate can go green and autoplay
-    continues (R1 finding 2); RED_FLEET_MAX_ATTACKS=0 = unlimited."""
+    continues (R1 finding 2); ADVERSARY_MAX_ATTACKS=0 = unlimited."""
     max_attacks: int = 2          # per agent per night; 0 = unlimited
     cooldown_s: float = 30.0      # per agent, between its own strikes (pacing, so the war room stays readable)
     first_strike_s: float = 0.0   # extra wait after a night starts (each persona adds its own stagger)
@@ -43,34 +43,34 @@ class Settings:
     def from_env(cls) -> "Settings":
         f = config.env_float
         return cls(
-            max_attacks=int(f("RED_FLEET_MAX_ATTACKS", 2)),
-            cooldown_s=max(0.0, f("RED_FLEET_COOLDOWN_S", 30)),
-            first_strike_s=max(0.0, f("RED_FLEET_FIRST_STRIKE_S", 0)),
-            poll_s=max(0.5, f("RED_FLEET_POLL_S", 2)),
-            kill_wait_s=min(max(f("RED_FLEET_KILL_WAIT_S", 6), 0.0), 30.0),
-            allowed=_csv("RED_FLEET_FAULTS", ()),
-            victims=_csv("RED_FLEET_VICTIMS", ()),
-            skip_scenarios=_csv("RED_FLEET_SKIP_SCENARIOS", ()),
-            use_llm=os.environ.get("RED_FLEET_LLM", "1").strip().lower() not in ("0", "false", "no", "off"),
+            max_attacks=int(f("ADVERSARY_MAX_ATTACKS", 2)),
+            cooldown_s=max(0.0, f("ADVERSARY_COOLDOWN_S", 30)),
+            first_strike_s=max(0.0, f("ADVERSARY_FIRST_STRIKE_S", 0)),
+            poll_s=max(0.5, f("ADVERSARY_POLL_S", 2)),
+            kill_wait_s=min(max(f("ADVERSARY_KILL_WAIT_S", 6), 0.0), 30.0),
+            allowed=_csv("ADVERSARY_FAULTS", ()),
+            victims=_csv("ADVERSARY_VICTIMS", ()),
+            skip_scenarios=_csv("ADVERSARY_SKIP_SCENARIOS", ()),
+            use_llm=os.environ.get("ADVERSARY_LLM", "1").strip().lower() not in ("0", "false", "no", "off"),
         )
 
 
 def live_db_refusal() -> str | None:
     """The one hard rule: never attack the live demo databases unless explicitly allowed."""
-    if os.environ.get("RED_FLEET_ALLOW_LIVE", "").strip().lower() in ("1", "true", "yes", "on"):
+    if os.environ.get("ADVERSARY_ALLOW_LIVE", "").strip().lower() in ("1", "true", "yes", "on"):
         return None
     if config.WORLD_DB == "world" or config.SWARM_DB == "swarm":
         return ("refusing the live world/swarm DBs; use an isolated stack (WORLD_DB/SWARM_DB) "
-                "or set RED_FLEET_ALLOW_LIVE=1")
+                "or set ADVERSARY_ALLOW_LIVE=1")
     return None
 
 
-# ------------------------------------------------------------------ Red Scout: read the Hive
+# ------------------------------------------------------------------ Red Investigator: read the Hive
 def _fresh_cutoff() -> datetime:
     return now() - timedelta(seconds=max(2 * config.LEASE_S, 3 * config.HEARTBEAT_S))
 
 
-def scout(agent_id: str) -> dict:
+def investigator(agent_id: str) -> dict:
     """Everything an attacker needs, read from MongoDB. Red reads Blue's DB but never writes it
     (except thoughts, like every agent)."""
     from ..runner import refresh_outcomes
@@ -125,7 +125,7 @@ def scout(agent_id: str) -> dict:
         "night_started": (run or {}).get("started_at"),
         "run_incidents": s.incidents.count_documents({"run_id": run_id}) if run_id else 0,
         "incidents": incidents, "agents": agents, "systems": systems,
-        "mid_send": [a for a in agents if a["role"] == "worker" and a["status"] == "working"
+        "mid_send": [a for a in agents if a["role"] == "operator" and a["status"] == "working"
                      and a["phase"] == "step_sent"],
         "approvals_pending": s.approvals.count_documents({"status": "pending"}),
         "upgrade_busy": s.upgrade_requests.count_documents({"status": {"$in": list(UPGRADE_BUSY)}}),
@@ -162,7 +162,7 @@ def gate(snap: dict, cfg: Settings, stagger_s: float = 0.0, at: datetime | None 
     if snap.get("scenario") in cfg.skip_scenarios and not early:
         return f"{snap['scenario']} is off limits"
     if snap.get("upgrade_busy"):
-        return "the Gardener is mid-upgrade"   # a strike mid-deploy could strand a half-done upgrade
+        return "the Upgrader is mid-upgrade"   # a strike mid-deploy could strand a half-done upgrade
     mine = snap.get("red_attacks") or []
     if cfg.max_attacks and len(mine) >= cfg.max_attacks:
         return f"attack budget spent ({len(mine)}/{cfg.max_attacks})"

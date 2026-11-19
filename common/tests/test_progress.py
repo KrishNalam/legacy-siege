@@ -23,7 +23,7 @@ def fresh():
 
 def test_off_writes_nothing(monkeypatch):
     monkeypatch.delenv("PROGRESS_ETA", raising=False)
-    progress.record("swarm", "step:restart_batch", "mainframe", "worker", 2.0, "verified")
+    progress.record("swarm", "step:restart_batch", "mainframe", "operator", 2.0, "verified")
     with progress.track("world", "attack:batch_abort", "mainframe", "chaos", agent="x", label="x"):
         pass
     assert progress.estimate("swarm", "step:restart_batch")["k"] == 0
@@ -34,7 +34,7 @@ def test_on_history_estimate_and_events(monkeypatch):
     monkeypatch.setenv("PROGRESS_ETA", "1")
     assert progress.eta_text(progress.estimate("swarm", "step:restart_batch", "mainframe")).startswith("ETA unknown")
     for d in (1.0, 2.0, 3.0, 4.0, 20.0):
-        progress.record("swarm", "step:restart_batch", "mainframe", "worker", d, "verified")
+        progress.record("swarm", "step:restart_batch", "mainframe", "operator", d, "verified")
     info = swarm().command("listCollections", filter={"name": progress.COLL})["cursor"]["firstBatch"][0]
     assert info["type"] == "timeseries" and info["options"]["timeseries"]["metaField"] == "meta"
     est = progress.estimate("swarm", "step:restart_batch", "mainframe")

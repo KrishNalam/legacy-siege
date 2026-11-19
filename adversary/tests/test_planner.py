@@ -1,4 +1,4 @@
-"""Red Planner (RED_PLANNER=1, needs RED_COMMANDER=1): off contract, both scout types spawned per campaign, the
+"""Red Planner (ADVERSARY_PLANNER=1, needs ADVERSARY_COMMANDER=1): off contract, both investigator types spawned per campaign, the
 brief reaches the Commander, Claude's focus is vetted (mocked), and the hand-off to the Runner via decider.propose."""
 from __future__ import annotations
 
@@ -15,29 +15,29 @@ def _mine():
 
 
 def test_off_by_default_and_needs_the_commander(systems, monkeypatch, fast):
-    monkeypatch.delenv("RED_PLANNER", raising=False)
+    monkeypatch.delenv("ADVERSARY_PLANNER", raising=False)
     assert not planner.enabled()
     _night_with_pending_mainframe_step()
     commander.Commander(cfg()).step()
     camp = world().red_agents.find_one({"_id": commander.COMMANDER_ID})["campaign"]
     assert "planning_id" not in camp and _mine() == []
-    assert world().red_agents.find_one({"_id": planner.SCOUT_SWARM}) is None
-    monkeypatch.setenv("RED_PLANNER", "1")
-    monkeypatch.delenv("RED_COMMANDER")
+    assert world().red_agents.find_one({"_id": planner.INVESTIGATOR_SWARM}) is None
+    monkeypatch.setenv("ADVERSARY_PLANNER", "1")
+    monkeypatch.delenv("ADVERSARY_COMMANDER")
     assert not planner.enabled()
 
 
-def test_planner_spawns_both_scouts_and_briefs_the_commander(systems, monkeypatch, fast):
-    monkeypatch.setenv("RED_PLANNER", "1")
+def test_planner_spawns_both_investigators_and_briefs_the_commander(systems, monkeypatch, fast):
+    monkeypatch.setenv("ADVERSARY_PLANNER", "1")
     monkeypatch.delenv("RUNNER_DECIDES", raising=False)
     _night_with_pending_mainframe_step()
     c = commander.Commander(cfg())
     c.step()
     board = {d["_id"]: d for d in world().red_agents.find()}
-    for sid in (planner.SCOUT_SWARM, planner.SCOUT_LEGACY):
-        assert board[sid]["spawned_by"] == planner.PLANNER_ID and board[sid]["kind"] == "scout"
-    assert board[planner.SCOUT_SWARM]["findings"]["pending_step_systems"] == ["mainframe"]
-    assert "weak" in board[planner.SCOUT_LEGACY]["findings"]
+    for sid in (planner.INVESTIGATOR_SWARM, planner.INVESTIGATOR_LEGACY):
+        assert board[sid]["spawned_by"] == planner.PLANNER_ID and board[sid]["kind"] == "investigator"
+    assert board[planner.INVESTIGATOR_SWARM]["findings"]["pending_step_systems"] == ["mainframe"]
+    assert "weak" in board[planner.INVESTIGATOR_LEGACY]["findings"]
     brief = board[planner.PLANNER_ID]["brief"]
     camp = board[commander.COMMANDER_ID]["campaign"]
     assert brief["planner"] == "rule" and brief["focus"] == "compound" and camp["combo"] in brief["prefer"]
@@ -52,7 +52,7 @@ def test_planner_spawns_both_scouts_and_briefs_the_commander(systems, monkeypatc
 def test_claude_focus_must_be_on_the_menu(systems, monkeypatch, fast):
     run_id = _night_with_pending_mainframe_step()
     from adversary.redfleet import core
-    s = core.scout(commander.COMMANDER_ID)
+    s = core.investigator(commander.COMMANDER_ID)
     options = commander.combos(s, cfg())
     monkeypatch.setattr(planner.llm, "llm_available", lambda: True)
     monkeypatch.setattr(planner.llm, "complete", lambda *a, **k: '{"focus": "compound", "priority": "high", "reason": "stack"}')
@@ -68,7 +68,7 @@ def test_claude_focus_must_be_on_the_menu(systems, monkeypatch, fast):
 
 
 def test_campaign_handed_to_the_runner(systems, monkeypatch, fast):
-    monkeypatch.setenv("RED_PLANNER", "1")
+    monkeypatch.setenv("ADVERSARY_PLANNER", "1")
     monkeypatch.setenv("RUNNER_DECIDES", "1")
     _night_with_pending_mainframe_step()
     c = commander.Commander(cfg())

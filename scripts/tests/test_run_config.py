@@ -14,7 +14,7 @@ def test_launcher_reads_dotenv_ports(tmp_path):
     shutil.copyfile(root / "common" / "config.py", tmp_path / "common" / "config.py")
     shutil.copyfile(root / "run.py", tmp_path / "run.py")
     (tmp_path / ".env").write_text("SYSTEMS_PORT=19231\nWARROOM_PORT=19232\n")
-    env = {k: v for k, v in os.environ.items() if k not in {"SYSTEMS_PORT", "WARROOM_PORT", "PORT", "PYTHONPATH"}}
+    env = {k: v for k, v in os.environ.items() if k not in {"SYSTEMS_PORT", "CONSOLE_PORT", "PORT", "PYTHONPATH"}}
     result = subprocess.run(
         [sys.executable, "-c", "import json, run; print(json.dumps(dict(run.PROCS)))"],
         cwd=tmp_path, env=env, check=True, capture_output=True, text=True, timeout=10,

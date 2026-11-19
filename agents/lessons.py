@@ -3,19 +3,19 @@
 Playbooks remember the fix that worked. Lessons remember the attempts that failed verification, so the
 next incident doesn't repeat them:
 
-* ``lied``        an op ACKed ``applied:true`` but the Guard's read-back showed nothing changed (ACK ≠ APPLIED)
+* ``lied``        an op ACKed ``applied:true`` but the Verifier's read-back showed nothing changed (ACK ≠ APPLIED)
 * ``refused``     the system refused the op (``accepted:false``)
 * ``not_applied`` accepted, but the effect never landed inside the slow-apply window
-* ``no_ack``      no answer from the system (transport error / worker died before the POST)
+* ``no_ack``      no answer from the system (transport error / operator died before the POST)
 * ``misfit``      a wrong hypothesis: a recalled playbook didn't fit what its root system showed
 
 One document per (system, version, op-or-playbook, kind) in ``agents.lessons``; a repeat failure bumps
 ``count`` and appends to ``history``. Every lesson carries the ``system_version`` it was learned on: when the
-Sentinel sees a version bump (e.g. the Gardener deployed an upgrade) older lessons go ``stale`` exactly like
+Monitor sees a version bump (e.g. the Upgrader deployed an upgrade) older lessons go ``stale`` exactly like
 playbooks, and a stale or version-mismatched lesson is never applied — the plan says so instead.
 
-On recall/plan the Scout reads the lessons that match its plan (annotating each step in the incident
-document, so a Nurse that takes over reads the same memory) and narrates them; the Guard rejects a repeat
+On recall/plan the Investigator reads the lessons that match its plan (annotating each step in the incident
+document, so a Recovery that takes over reads the same memory) and narrates them; the Verifier rejects a repeat
 lie without waiting out the grace period; a known-misfit playbook is skipped in favour of the next hit.
 
 Behind ``FAILURE_MEMORY=1`` (default off). With the switch off nothing here is called.
@@ -45,7 +45,7 @@ def lesson_id(system: str, version, subject: str, kind: str) -> str:
 
 
 def classify(evidence: str, response: dict | None) -> str:
-    """Map the Guard's rejection reason (and the recorded ACK) to a lesson kind."""
+    """Map the Verifier's rejection reason (and the recorded ACK) to a lesson kind."""
     ev = evidence or ""
     if ev.startswith("ACK ≠ APPLIED"):
         return "lied"
@@ -83,7 +83,7 @@ def _upsert(_id: str, base: dict, event: dict) -> dict:
 
 def record_failure(incident: str, step: dict, action_id: str, evidence: str, agent: str, version: int,
                    fault_class: str | None = None) -> dict:
-    """Guard: an attempt failed verification -> durable lesson tagged with the system's current version."""
+    """Verifier: an attempt failed verification -> durable lesson tagged with the system's current version."""
     system, op = step["system"], step["op"]
     kind = classify(evidence, step.get("response"))
     why = _why(kind, op, system, evidence)
@@ -96,7 +96,7 @@ def record_failure(incident: str, step: dict, action_id: str, evidence: str, age
 
 def record_misfit(incident: str, playbook: dict, symptom_text: str, observed: dict, agent: str,
                   version: int) -> dict:
-    """Scout: a recalled playbook didn't fit (wrong hypothesis) -> skip it next time for these symptoms."""
+    """Investigator: a recalled playbook didn't fit (wrong hypothesis) -> skip it next time for these symptoms."""
     system = playbook["system"]
     seen = observed.get("fault_class") or "no fault"
     why = (f"{playbook['playbook_id']} predicted {playbook['fault_class']} on {system} but {system} "
@@ -119,7 +119,7 @@ def note_recovery(incident: str, step: dict, action_id: str) -> int:
 
 
 def mark_stale(system: str, version: int) -> int:
-    """Sentinel: `system` is now `version` -> every lesson learned on an older version goes stale."""
+    """Monitor: `system` is now `version` -> every lesson learned on an older version goes stale."""
     return col("lessons").update_many(
         {"system": system, "stale": False, "system_version": {"$lt": version}},
         {"$set": {"stale": True, "staled_at": now(), "stale_reason": f"{system} upgraded to v{version}"}}
@@ -184,7 +184,7 @@ def narrate(ls: dict) -> str:
     rec = f" ({ls['recovered_by']})" if ls.get("recovered_by") else ""
     if ls["kind"] == "lied":
         return (f"Lesson {ls['_id']}: last time {sys} v{v} ACKed {op} as applied but nothing changed ({inc}){rec}. "
-                f"Not trusting its ACK: the Guard rejects a repeat lie on sight and the retry goes straight out.")
+                f"Not trusting its ACK: the Verifier rejects a repeat lie on sight and the retry goes straight out.")
     if ls["kind"] == "not_applied":
         return (f"Lesson {ls['_id']}: last time {op} on {sys} v{v} was accepted but never landed ({inc}){rec}; "
                 f"waiting for read-back, not the ACK.")

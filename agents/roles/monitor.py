@@ -1,4 +1,4 @@
-"""Sentinel (SRE / observability) — also the Undertaker.
+"""Monitor (SRE / observability) — also the Undertaker.
 
 Every ~1 s it sweeps /health + /metrics of every system (HTTP only: it never reads faults_active or
 chaos_events) and:
@@ -6,7 +6,7 @@ chaos_events) and:
                 active incident it touches ($addToSet affected). A unique partial index on
                 correlation_key {active:true} makes "one incident per cascade" a database guarantee.
   * undertaker: agents whose last_seen is stale -> status dead; their task/incident leases are released
-                (lease_until -> past, owner kept so nurses know whose work it was); waggle note to nurses.
+                (lease_until -> past, owner kept so recovery agents know whose work it was); reporter note to recovery agents.
   * staleness:  a system's version went up -> its playbooks are marked stale:true.
   * recurrence: aggregation over resolved incidents; same fault_class on the same root system resolved in
                 >= UPGRADE_AFTER distinct nights and no upgrade request yet -> files swarm.upgrade_requests.
@@ -26,7 +26,7 @@ from pymongo.errors import DuplicateKeyError
 from common.db import col, next_id, now
 from common.events import say
 from common import comms
-from upgrader import help as gardener_help
+from upgrader import help as upgrader_help
 
 from .. import leases, policy, recovery, schema, settings
 from ..harness import Agent, checkpointer, log
@@ -125,8 +125,8 @@ def build_graphs(agent: Agent):
                 continue
             agent.think(f"Opened {doc['_id']}: {doc['symptoms'][0]}.", kind="action", incident=doc["_id"],
                         system=head, pause=False)
-            if comms.enabled():  # structure v3 step 1: the Sentinel tells the Queen (the Queen still reads the incident)
-                say(agent.id, "queen", "incident", {"incident": doc["_id"], "system": head, "affected": list(seg),
+            if comms.enabled():  # structure v3 step 1: the Monitor tells the Coordinator (the Coordinator still reads the incident)
+                say(agent.id, "coordinator", "incident", {"incident": doc["_id"], "system": head, "affected": list(seg),
                                                     "text": f"Opened {doc['_id']} on {head}: {doc['symptoms'][0]}"},
                     incident=doc["_id"], system=head, severity="warning")
             if recovery.enabled() and not security:  # visible final recovery after an escalation
@@ -164,18 +164,18 @@ def build_graphs(agent: Agent):
         incs = [i["_id"] for i in col("incidents").find({"owner": a, "active": True}, {"_id": 1})]
         col("tasks").update_many({"owner": a, "status": "claimed"}, {"$set": {"lease_until": leases.EPOCH}})
         col("incidents").update_many({"owner": a, "active": True}, {"$set": {"lease_until": leases.EPOCH}})
-        q = col("stats").update_one({"_id": "queen_lease", "owner": a}, {"$set": {"lease_until": leases.EPOCH}})
-        return {"released": {"tasks": tasks, "incidents": incs, "queen_lease": bool(q.modified_count)}}
+        q = col("stats").update_one({"_id": "coordinator_lease", "owner": a}, {"$set": {"lease_until": leases.EPOCH}})
+        return {"released": {"tasks": tasks, "incidents": incs, "coordinator_lease": bool(q.modified_count)}}
 
     def notify(state: ReapState, config) -> dict:
         if not state.get("confirmed"):
             return {}
         rel = state.get("released") or {}
-        work = rel.get("tasks", []) + rel.get("incidents", []) + (["the queen lease"] if rel.get("queen_lease") else [])
+        work = rel.get("tasks", []) + rel.get("incidents", []) + (["the coordinator lease"] if rel.get("coordinator_lease") else [])
         text = (f"{state['agent']} stopped heartbeating — marked dead; released {', '.join(work)}."
                 if work else f"{state['agent']} stopped heartbeating — marked dead (held no work).")
         agent.think(text, kind="handoff", incident=(rel.get("incidents") or [None])[0], pause=False)
-        say(agent.id, "nurse", "handoff", {"dead": state["agent"], "released": rel, "text": text})
+        say(agent.id, "recovery", "handoff", {"dead": state["agent"], "released": rel, "text": text})
         return {}
 
     g = StateGraph(ReapState)
@@ -204,8 +204,8 @@ def build_graphs(agent: Agent):
         if r.upserted_id is None:
             return {"upgrade": None}
         agent.think(f"{fc} on {sys} resolved {len(state['evidence'])} times ({', '.join(state['evidence'])}) — "
-                    f"filed {uid} for the Gardener: {weakness}.", kind="upgrade", system=sys, pause=False)
-        say(agent.id, "gardener", "upgrade", {"upgrade": uid, "system": sys, "weakness": weakness})
+                    f"filed {uid} for the Upgrader: {weakness}.", kind="upgrade", system=sys, pause=False)
+        say(agent.id, "upgrader", "upgrade", {"upgrade": uid, "system": sys, "weakness": weakness})
         return {"upgrade": uid}
 
     g = StateGraph(UpgradeState)
@@ -235,19 +235,19 @@ RECURRING = [
 ]
 
 
-SENTINEL_2 = "sentinel-2"
+MONITOR_2 = "monitor-2"
 
 
-def sentinel_2_alive() -> bool:
-    """sentinel-1 hands its Sentinel #2 duties over while a live sentinel-2 heartbeats (and takes them back if it dies)."""
-    return bool(col("agents").find_one({"_id": SENTINEL_2, "status": {"$ne": "dead"},
+def monitor_2_alive() -> bool:
+    """monitor-1 hands its Monitor #2 duties over while a live monitor-2 heartbeats (and takes them back if it dies)."""
+    return bool(col("agents").find_one({"_id": MONITOR_2, "status": {"$ne": "dead"},
                                         "last_seen": {"$gte": now() - timedelta(seconds=settings.DEAD_AFTER_S)}},
                                        {"_id": 1}))
 
 
-def run_sentinel_2(agent: Agent) -> None:
-    """Structure v3 Sentinel #2 (GARDENER_HELP=1): sits between Comms and the Gardener and cuts duplicate work —
-    pushes remembered fixes to the Scouts and hands repeats to the Gardener. Detection stays on sentinel-1."""
+def run_monitor_2(agent: Agent) -> None:
+    """Structure v3 Monitor #2 (UPGRADER_HELP=1): sits between Comms and the Upgrader and cuts duplicate work —
+    pushes remembered fixes to the Investigators and hands repeats to the Upgrader. Detection stays on monitor-1."""
     agent.set(target="hive", phase="dedup_watch")
     last_slow = 0.0
     while not agent.stop.is_set():
@@ -266,16 +266,16 @@ def run_sentinel_2(agent: Agent) -> None:
         except SystemExit:
             raise
         except Exception as e:
-            log(agent.id, f"sentinel-2 sweep error: {type(e).__name__}: {e}")
-        agent.nap(max(0.05, settings.SENTINEL_POLL_S - (time.monotonic() - t0)))
+            log(agent.id, f"monitor-2 sweep error: {type(e).__name__}: {e}")
+        agent.nap(max(0.05, settings.MONITOR_POLL_S - (time.monotonic() - t0)))
 
 
 def run(agent: Agent) -> None:
-    if agent.id == SENTINEL_2:
-        return run_sentinel_2(agent)
-    if agent.id.startswith("platform-"):  # platform engineers are Sentinel-type agents (PLATFORM_ENGINEERS)
-        from . import platform as platform_role
-        return platform_role.run(agent)
+    if agent.id == MONITOR_2:
+        return run_monitor_2(agent)
+    if agent.id.startswith("toolsmith-"):  # toolsmith engineers are Monitor-type agents (TOOLSMITH_ENGINEERS)
+        from . import toolsmith as toolsmith_role
+        return toolsmith_role.run(agent)
     detect, reap, upgrade = build_graphs(agent)
     sysc = agent.systems
     streak: dict[str, int] = {}
@@ -313,7 +313,7 @@ def run(agent: Agent) -> None:
             agent.think(f"Security: {s} log shows '{signs[-1].get('line', '')[:70]}…' and {vid} is exploitable.",
                         kind="thought", system=s, pause=False)
             detect.invoke({"kind": "security", "segment": [s], "symptoms": {s: line}},
-                          {"configurable": {"thread_id": f"sentinel:security:{s}:{int(time.time() * 1000)}"}},
+                          {"configurable": {"thread_id": f"monitor:security:{s}:{int(time.time() * 1000)}"}},
                           durability="exit")
 
     noticed: dict = {"change": None}
@@ -344,7 +344,7 @@ def run(agent: Agent) -> None:
             streak[s] = streak.get(s, 0) + 1 if h.get("status") != "up" else 0
             v = int(h.get("version") or 1)
             if versions.get(s) != v:
-                # version bump (e.g. Gardener upgrade) -> playbooks learned on older versions go stale
+                # version bump (e.g. Upgrader upgrade) -> playbooks learned on older versions go stale
                 r = col("playbooks").update_many({"system": s, "stale": False, "system_version": {"$lt": v}},
                                                  {"$set": {"stale": True, "staled_at": now(),
                                                            "stale_reason": f"{s} upgraded to v{v}"}})
@@ -369,7 +369,7 @@ def run(agent: Agent) -> None:
                 continue  # just escalated to the Beekeeper (e.g. approval denied): don't nag immediately
             key = f"{seg[0]}:{int(time.time() * 1000)}"
             detect.invoke({"kind": "chain", "segment": seg, "symptoms": {s: lines[s] for s in seg}},
-                          {"configurable": {"thread_id": f"sentinel:detect:{key}"}}, durability="exit")
+                          {"configurable": {"thread_id": f"monitor:detect:{key}"}}, durability="exit")
 
         # Undertaker: stale heartbeats
         cutoff = now() - timedelta(seconds=settings.DEAD_AFTER_S)
@@ -396,8 +396,8 @@ def run(agent: Agent) -> None:
             except Exception as e:
                 log(agent.id, f"schema sample error: {type(e).__name__}: {e}")
 
-        delegated = gardener_help.enabled() and sentinel_2_alive()  # Sentinel #2 duties live on sentinel-2
-        if gardener_help.enabled() and not delegated:  # fallback: push a remembered fix to the Scout
+        delegated = upgrader_help.enabled() and monitor_2_alive()  # Monitor #2 duties live on monitor-2
+        if upgrader_help.enabled() and not delegated:  # fallback: push a remembered fix to the Investigator
             try:
                 push_known_fixes(agent, versions)
             except Exception as e:
@@ -410,7 +410,7 @@ def run(agent: Agent) -> None:
             for row in col("incidents").aggregate(RECURRING):
                 upgrade.invoke({"system": row["_id"]["system"], "fault_class": row["_id"]["fault_class"],
                                 "evidence": row["evidence"]},
-                               {"configurable": {"thread_id": f"sentinel:upgrade:{row['_id']['fault_class']}:"
+                               {"configurable": {"thread_id": f"monitor:upgrade:{row['_id']['fault_class']}:"
                                                               f"{row['_id']['system']}"}}, durability="exit")
 
     agent.set(target="hive")
@@ -423,13 +423,13 @@ def run(agent: Agent) -> None:
             raise
         except Exception as e:
             log(agent.id, f"sweep error: {type(e).__name__}: {e}")
-        agent.nap(max(0.05, settings.SENTINEL_POLL_S - (time.monotonic() - t0)))
+        agent.nap(max(0.05, settings.MONITOR_POLL_S - (time.monotonic() - t0)))
 
 
 def note_repeated_problems(agent):
-    """Sentinel #2 mode: durable advisory notes, independent of FAILURE_MEMORY. With GARDENER_HELP=1 each
-    problem seen 3+ times is also handed to the Gardener as a real request (upgrader.help answers it)."""
-    handoff = gardener_help.enabled()
+    """Monitor #2 mode: durable advisory notes, independent of FAILURE_MEMORY. With UPGRADER_HELP=1 each
+    problem seen 3+ times is also handed to the Upgrader as a real request (upgrader.help answers it)."""
+    handoff = upgrader_help.enabled()
     if not (comms.enabled() or handoff):
         return
     groups, runs = {}, {}
@@ -454,16 +454,16 @@ def note_repeated_problems(agent):
     for sig, g in groups.items():
         if g['count'] < 3:
             continue
-        text = f"sent to the Gardener: {g['problem']}, seen {g['count']} times"
+        text = f"sent to the Upgrader: {g['problem']}, seen {g['count']} times"
         result = col('gardener_notes').update_one({'_id': sig},
             {'$setOnInsert': {'source': agent.id, 'ts': now()},
              '$set': {**g, 'text': text, 'updated_at': now()}}, upsert=True)
         if result.upserted_id is not None:
-            say(agent.id, 'gardener', 'gardener_note', text, system=g['system'])
-            agent.think(text, kind='gardener_note', system=g['system'], pause=False)
-        if handoff and gardener_help.hand_off_repeat(agent.id, sig, g) is not None:
+            say(agent.id, 'upgrader', 'upgrader_note', text, system=g['system'])
+            agent.think(text, kind='upgrader_note', system=g['system'], pause=False)
+        if handoff and upgrader_help.hand_off_repeat(agent.id, sig, g) is not None:
             where = f" on {g['system']}" if g.get('system') and g['system'] not in str(g['problem']) else ''
-            agent.think(f"Sentinel #2 → Gardener: {g['problem']}{where} repeated {g['count']}× "
+            agent.think(f"Monitor #2 → Upgrader: {g['problem']}{where} repeated {g['count']}× "
                         f"({', '.join(g['evidence'][-4:])}).", kind='upgrade', system=g['system'], pause=False)
 
 
@@ -479,7 +479,7 @@ def known_fix_for(symptoms: list[str], versions: dict) -> dict | None:
         seen, root = set(pb.get("symptoms") or []), pb["system"]
         cur = versions.get(root)
         # whole remembered cascade present, or an early part of it that already points at the remembered root
-        # (the Scout's confirm hop checks the fault class either way, so a near-miss costs one read)
+        # (the Investigator's confirm hop checks the fault class either way, so a near-miss costs one read)
         early = lines <= seen and any(ln.split(" ", 1)[0] == root or f"blames {root}" in ln for ln in lines)
         if seen and (seen <= lines or early) and (cur is None or pb.get("system_version") == cur) and pb.get("fix"):
             return pb
@@ -487,9 +487,9 @@ def known_fix_for(symptoms: list[str], versions: dict) -> dict | None:
 
 
 def push_known_fixes(agent, versions: dict) -> None:
-    """Sentinel #2 cuts duplicate work: when a Scout has taken an incident whose symptoms match a fix the
-    hive already verified, push that fix onto the incident (known_fix) and the bus, so the Scout uses it instead
-    of rediscovering it. The Scout still confirms it with one read and the Guard still verifies every step."""
+    """Monitor #2 cuts duplicate work: when an Investigator has taken an incident whose symptoms match a fix the
+    hive already verified, push that fix onto the incident (known_fix) and the bus, so the Investigator uses it instead
+    of rediscovering it. The Investigator still confirms it with one read and the Verifier still verifies every step."""
     for inc in col("incidents").find({"active": True, "kind": {"$ne": "security"}, "owner": {"$ne": None},
                                       "status": {"$in": ["claimed", "diagnosing"]}, "known_fix": {"$exists": False}},
                                      {"symptoms": 1, "owner": 1}):
@@ -504,6 +504,6 @@ def push_known_fixes(agent, versions: dict) -> None:
             continue
         say(agent.id, inc["owner"], "known_fix", {k: fix[k] for k in ("playbook_id", "system", "fault_class")},
             incident=inc["_id"], system=pb["system"])
-        agent.think(f"Sentinel #2 → {inc['owner']}: {inc['_id']} shows the same symptoms as {pb.get('incident')} "
+        agent.think(f"Monitor #2 → {inc['owner']}: {inc['_id']} shows the same symptoms as {pb.get('incident')} "
                     f"({pb.get('fault_class')} on {pb['system']}); pushed known fix {pb['_id']} so nobody rediscovers it.",
                     kind="recall", incident=inc["_id"], system=pb["system"], pause=False)

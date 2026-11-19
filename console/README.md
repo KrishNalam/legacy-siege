@@ -68,7 +68,7 @@ MONGODB_URI='mongodb://localhost:27027/?directConnection=true' PACE=0 .venv/bin/
 
 | name | default | effect |
 |---|---|---|
-| `WARROOM_VIEW` | `diagram` | Which page `/` serves (`diagram` or `flow`); `?view=` overrides |
+| `CONSOLE_VIEW` | `diagram` | Which page `/` serves (`diagram` or `flow`); `?view=` overrides |
 | `DEMO_AUTOPLAY` | off | Advance nights and auto-approve (via `common.config`) |
 | `AUTOPLAY_GAP_S` | `4` | Pause after a night goes green |
 | `AUTOPLAY_APPROVE_S` | `3` | How long a later approval stays before auto-approve |

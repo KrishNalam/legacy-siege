@@ -15,7 +15,7 @@ Most severe first. Each entry gives the place, a concrete failure, the severity,
 | 6 | **Fixed.** Compose pins the in-container ports. |
 | 7 | **Fixed.** Crash-loop exit is 1. |
 | 8 | **Fixed.** One clear error line on a MongoDB without Atlas Search. |
-| 9 | **Fixed.** `config.WARROOM_PORT` honours `PORT`; `run.py` uses it. |
+| 9 | **Fixed.** `config.CONSOLE_PORT` honours `PORT`; `run.py` uses it. |
 | 10 | Open. |
 | 11 | **Fixed.** `common/tests/conftest.py` isolates the DBs. |
 | 12 | **Fixed.** Accepts 1/true/yes/on. |
@@ -63,7 +63,7 @@ The full stack could not run here (see the note at the end), so no entry was che
 ## 4. After a full reset the Queen skips new incidents whose ids it has seen before
 
 - **Where:** `agents/roles/queen.py:87, 144-145` (`handled` set, in process memory). A full reset wipes `swarm.counters` (`scripts/setup_db.py:282`), so ids restart at `INC-0001`. The queen process is not restarted (`agents/supervisor.py:325-327` respawns only *missing* roster bees).
-- **What goes wrong:** On the second demo after the queen started, `INC-0001` is already in `handled`. So no triage line, no "Assigning INC-0001 to scout-1", and with `SWARM_DYNAMIC=1` no scout spawn request. Scouts still self-claim it after 2 s (`agents/roles/scout.py:716-719`). In dynamic mode no scout exists, so a Nurse has to cover (`agents/roles/nurse.py:187-200`). The Guard has the same pattern (`agents/roles/guard.py:51-52`, `seen`/`noted_slow` keyed by action id), so its "Reading back …" line goes missing for reused ids.
+- **What goes wrong:** On the second demo after the queen started, `INC-0001` is already in `handled`. So no triage line, no "Assigning INC-0001 to scout-1", and with `AGENTS_AUTOSCALE=1` no scout spawn request. Scouts still self-claim it after 2 s (`agents/roles/scout.py:716-719`). In dynamic mode no scout exists, so a Nurse has to cover (`agents/roles/nurse.py:187-200`). The Guard has the same pattern (`agents/roles/guard.py:51-52`, `seen`/`noted_slow` keyed by action id), so its "Reading back …" line goes missing for reused ids.
 - **Severity:** Medium (slower and quieter Night 1 on every rehearsal after the first; dynamic mode loses the spawn beat).
 - **Check:** Read.
 - **Fix:** Key the set by `(_id, opened_at)`, or clear it when `swarm.stats{_id:"roster_reset"}.at` changes (the supervisor already watches that doc).
@@ -76,14 +76,14 @@ The full stack could not run here (see the note at the end), so no entry was che
 - **Check:** Plausible, not reproduced. It is the same family as HANDOFF's "no run-epoch fence" (#3/#6).
 - **Fix:** Put a reset epoch (for example `opened_at` or a counter in `swarm.stats`) in every thread id. Or skip the INC counter reset so ids are never reused.
 
-## 6. Docker Compose breaks when `.env` sets `WARROOM_PORT` / `SYSTEMS_PORT`
+## 6. Docker Compose breaks when `.env` sets `CONSOLE_PORT` / `SYSTEMS_PORT`
 
 - **Where:** `deploy/docker-compose.yml:30-41`, `deploy/docker-compose.atlas.yml:13-22`.
-- **What goes wrong:** `env_file: ../.env` overrides the image's `ENV WARROOM_PORT=8700 SYSTEMS_PORT=8701`, but `ports:` always maps to container ports 8700/8701. AGENTS.md tells developers to set these ports per box account (for example 20100-20199).
-- **Scenario:** With `WARROOM_PORT=20150` in `.env`, the war room listens on 20150 inside the container. `localhost:8700` refuses connections, but the image healthcheck still reports healthy, because it reads the same env var.
+- **What goes wrong:** `env_file: ../.env` overrides the image's `ENV CONSOLE_PORT=8700 SYSTEMS_PORT=8701`, but `ports:` always maps to container ports 8700/8701. AGENTS.md tells developers to set these ports per box account (for example 20100-20199).
+- **Scenario:** With `CONSOLE_PORT=20150` in `.env`, the war room listens on 20150 inside the container. `localhost:8700` refuses connections, but the image healthcheck still reports healthy, because it reads the same env var.
 - **Severity:** Medium (the one-command start fails with no clear error).
 - **Check:** Read.
-- **Fix:** Pin `WARROOM_PORT: "8700"` and `SYSTEMS_PORT: "8701"` under `environment:` in both compose files (it already overrides `MONGODB_URI` this way).
+- **Fix:** Pin `CONSOLE_PORT: "8700"` and `SYSTEMS_PORT: "8701"` under `environment:` in both compose files (it already overrides `MONGODB_URI` this way).
 
 ## 7. `run.py` exits 0 when it gives up on a crash loop
 
@@ -103,11 +103,11 @@ The full stack could not run here (see the note at the end), so no entry was che
 
 ## 9. `PORT` is honoured by `run.py` but not by the rest of the code
 
-- **Where:** `run.py:26` uses `WARROOM_PORT or PORT or 8700`. `common/config.py:30` reads only `WARROOM_PORT`. So do `scripts/demo_check.py:628`, `drift_check.py:147` and `record_demo.py:285` (`--base` default), and the healthcheck in `deploy/Dockerfile:39`.
+- **Where:** `run.py:26` uses `CONSOLE_PORT or PORT or 8700`. `common/config.py:30` reads only `CONSOLE_PORT`. So do `scripts/demo_check.py:628`, `drift_check.py:147` and `record_demo.py:285` (`--base` default), and the healthcheck in `deploy/Dockerfile:39`.
 - **What goes wrong:** With only `PORT=9000` set, the war room listens on 9000, while the rehearsal scripts and the healthcheck still call 8700.
 - **Severity:** Low.
 - **Check:** Read.
-- **Fix:** `WARROOM_PORT = int(os.environ.get("WARROOM_PORT") or os.environ.get("PORT") or 8700)` in `common/config.py`, and use `config.WARROOM_PORT` in `run.py`.
+- **Fix:** `CONSOLE_PORT = int(os.environ.get("CONSOLE_PORT") or os.environ.get("PORT") or 8700)` in `common/config.py`, and use `config.CONSOLE_PORT` in `run.py`.
 
 ## 10. Gardener resume after a crash mid-deploy bumps the version twice
 
@@ -125,10 +125,10 @@ The full stack could not run here (see the note at the end), so no entry was che
 - **Check:** Reproduced. After the suite ran, the local `swarm` DB held `stats {_id: "llm_guard", all: {calls: 3, ...}}`.
 - **Fix:** Add a `common/tests/conftest.py` that sets `WORLD_DB`/`SWARM_DB` to test names before importing `common`, like the other packages do.
 
-## 12. `RED_FLEET_ALLOW_LIVE` accepts only `"1"`
+## 12. `ADVERSARY_ALLOW_LIVE` accepts only `"1"`
 
 - **Where:** `adversary/redfleet/core.py:60`. Every other switch accepts `1/true/yes/on`.
-- **What goes wrong:** `RED_FLEET_ALLOW_LIVE=true` with the default DB names makes the Red fleet idle silently, apart from one line in `logs/redfleet.log`.
+- **What goes wrong:** `ADVERSARY_ALLOW_LIVE=true` with the default DB names makes the Red fleet idle silently, apart from one line in `logs/redfleet.log`.
 - **Severity:** Low.
 - **Check:** Read.
 - **Fix:** Use the same truthy parser as the other switches.

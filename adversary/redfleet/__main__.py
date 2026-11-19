@@ -60,9 +60,9 @@ def run_fleet(ids: list[str]) -> None:
     for i in ids:
         launch(i)
     cmd = None
-    if commander.enabled():   # Commander + 2 Scouts: a thread in this supervisor, no extra process
+    if commander.enabled():   # Commander + 2 Investigators: a thread in this supervisor, no extra process
         cmd = commander.start_thread()
-        print("red fleet: Red Commander + Hive/Systems Scouts online", flush=True)
+        print("red fleet: Red Commander + Hive/Systems Investigators online", flush=True)
     runner_loop = None
     if decider.enabled():   # RUNNER_DECIDES=1: the Runner's own decision loop, a thread here like the Commander
         runner_loop = decider.start_thread()
@@ -95,16 +95,16 @@ def main() -> None:
     ap.add_argument("--agent", choices=sorted(PERSONAS) + [commander.COMMANDER_ID])
     a = ap.parse_args()
     if not core.enabled():
-        print("red fleet is off (set RED_FLEET=1 to enable)", flush=True)
+        print("red fleet is off (set ADVERSARY=1 to enable)", flush=True)
         return
     refusal = core.live_db_refusal()
     if refusal:
         return _idle(refusal)
     if a.agent:
         return run_agent(a.agent)
-    raw = os.environ.get("RED_FLEET_AGENTS", "").strip()
+    raw = os.environ.get("ADVERSARY_AGENTS", "").strip()
     ids = [i.strip() for i in raw.split(",") if i.strip() in PERSONAS] if raw else list(PERSONAS)
-    # no process for a Striker whose whole kit is switched off (e.g. the Memory Striker without CHAOS_POISON_MEMORY)
+    # no process for a Striker whose whole kit is switched off (e.g. the Memory Striker without ADVERSARY_POISON_MEMORY)
     ids = [i for i in ids if any(faults.FAULTS[f].enabled() for f in PERSONAS[i].faults)]
     run_fleet(ids)
 

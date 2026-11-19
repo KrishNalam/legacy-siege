@@ -1,11 +1,11 @@
-"""Red Commander + 2 Scouts (opt-in ``RED_COMMANDER=1``, only meaningful with ``RED_FLEET=1``).
+"""Red Commander + 2 Investigators (opt-in ``ADVERSARY_COMMANDER=1``, only meaningful with ``ADVERSARY=1``).
 
 The Strikers each decide alone; the Commander plans *campaigns*: an ordered combo of vetted Runner faults
-(e.g. a lying mainframe, then FREEZE the worker that sends the next step), assigns each step to a Striker on
+(e.g. a lying mainframe, then FREEZE the operator that sends the next step), assigns each step to a Striker on
 the shared Red board (``world.red_agents.<striker>.order``), waits for it to land and reflects on the outcome
-(did the Guard catch it, did a Nurse take over, how fast was recovery).
+(did the Verifier catch it, did a Recovery take over, how fast was recovery).
 
-* Scouts (``red-scout-hive``, ``red-scout-systems``): cheap observers, no model. Each tick they read the Hive /
+* Investigators (``red-recon-hive``, ``red-recon-systems``): cheap observers, no model. Each tick they read the Hive /
   the estate and post findings on their own board entry; the Commander plans from those findings.
 * Commander (``red-commander``): LangGraph OBSERVE -> THINK -> ACT -> REFLECT. Claude picks ONE campaign from the
   vetted combos that are feasible right now (labelled ``claude``); anything else, no key, a timeout or bad JSON ->
@@ -37,12 +37,12 @@ from .personas import ARMED, KEYS, PERSONAS, SPOILER, VULN_OF, validate
 log = logging.getLogger("adversary.redfleet.commander")
 
 COMMANDER_ID = "red-commander"
-SCOUT_HIVE, SCOUT_SYSTEMS = "red-scout-hive", "red-scout-systems"
+INVESTIGATOR_HIVE, INVESTIGATOR_SYSTEMS = "red-recon-hive", "red-recon-systems"
 AGENT_FAULTS = ("agent_kill", "agent_freeze")
 
 
 def enabled() -> bool:
-    return os.environ.get("RED_COMMANDER", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("ADVERSARY_COMMANDER", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def _f(name: str, default: float) -> float:
@@ -50,12 +50,12 @@ def _f(name: str, default: float) -> float:
 
 
 def _roster() -> set[str]:
-    raw = os.environ.get("RED_FLEET_AGENTS", "").strip()
+    raw = os.environ.get("ADVERSARY_AGENTS", "").strip()
     return {i.strip() for i in raw.split(",") if i.strip() in PERSONAS} if raw else set(PERSONAS)
 
 
-# ------------------------------------------------------------------ Scouts: cheap observers, no model
-def scout_hive(snap: dict) -> dict:
+# ------------------------------------------------------------------ Investigators: cheap observers, no model
+def investigator_hive(snap: dict) -> dict:
     agents = snap.get("agents") or []
     pending = []
     for inc in snap.get("incidents") or []:
@@ -63,17 +63,17 @@ def scout_hive(snap: dict) -> dict:
             if st.get("system") and st["system"] not in pending:
                 pending.append(st["system"])
     return {
-        "busy_workers": [a["id"] for a in agents if a["role"] == "worker" and a["status"] == "working"],
+        "busy_operators": [a["id"] for a in agents if a["role"] == "operator" and a["status"] == "working"],
         "mid_send": [a["id"] for a in snap.get("mid_send") or []],
-        "idle_workers": [a["id"] for a in agents if a["role"] == "worker" and a["status"] != "working"],
-        "nurses_free": [a["id"] for a in agents if a["role"] == "nurse" and a["status"] != "working"],
-        "queens": len([a for a in agents if a["role"] == "queen"]),
+        "idle_operators": [a["id"] for a in agents if a["role"] == "operator" and a["status"] != "working"],
+        "recovery_agents_free": [a["id"] for a in agents if a["role"] == "recovery" and a["status"] != "working"],
+        "coordinators": len([a for a in agents if a["role"] == "coordinator"]),
         "open_incidents": [i["id"] for i in snap.get("incidents") or []],
         "pending_step_systems": pending,
     }
 
 
-def scout_systems(snap: dict) -> dict:
+def investigator_systems(snap: dict) -> dict:
     systems = snap.get("systems") or {}
     weak = {s: d.get("faults_active") for s, d in systems.items() if d.get("faults_active")}
     return {
@@ -86,7 +86,7 @@ def scout_systems(snap: dict) -> dict:
 
 
 def _summary_hive(f: dict) -> str:
-    return (f"{len(f['busy_workers'])} workers busy ({len(f['mid_send'])} mid-send), {len(f['nurses_free'])} nurses "
+    return (f"{len(f['busy_operators'])} operators busy ({len(f['mid_send'])} mid-send), {len(f['recovery_agents_free'])} recovery agents "
             f"free, {len(f['open_incidents'])} open incidents; next steps land on "
             f"{', '.join(f['pending_step_systems']) or 'nothing'}")
 
@@ -96,21 +96,21 @@ def _summary_systems(f: dict) -> str:
     return f"weak systems: {weak}. Open vulns on {', '.join(f['open_vulns']) or 'none'}"
 
 
-SCOUT_REPORT_S = 15.0
-SCOUTS = {SCOUT_HIVE: ("Hive Scout", scout_hive, _summary_hive),
-          SCOUT_SYSTEMS: ("Systems Scout", scout_systems, _summary_systems)}
+INVESTIGATOR_REPORT_S = 15.0
+INVESTIGATORS = {INVESTIGATOR_HIVE: ("Hive Investigator", investigator_hive, _summary_hive),
+          INVESTIGATOR_SYSTEMS: ("Systems Investigator", investigator_systems, _summary_systems)}
 
 
 def post_findings(snap: dict) -> dict:
-    """Both Scouts observe and post on the Red board; a thought only when the picture changes."""
+    """Both Investigators observe and post on the Red board; a thought only when the picture changes."""
     out = {}
-    for sid, (name, fn, summarize) in SCOUTS.items():
+    for sid, (name, fn, summarize) in INVESTIGATORS.items():
         findings = fn(snap)
         summary = summarize(findings)
         prev = world().red_agents.find_one({"_id": sid}, {"reported": 1, "reported_at": 1}) or {}
-        fields = {"name": name, "kind": "scout", "status": "watching", "findings": findings, "summary": summary,
+        fields = {"name": name, "kind": "investigator", "status": "watching", "findings": findings, "summary": summary,
                   "run_id": snap.get("run_id"), "pid": os.getpid(), "last_seen": now()}
-        quiet = prev.get("reported_at") and (now() - prev["reported_at"]).total_seconds() < SCOUT_REPORT_S
+        quiet = prev.get("reported_at") and (now() - prev["reported_at"]).total_seconds() < INVESTIGATOR_REPORT_S
         if snap.get("night_running") and prev.get("reported") != summary and not quiet:
             think(sid, core.ROLE, f"{name}: {summary}.")   # the feed hears a changed picture at most every 15 s
             fields.update(reported=summary, reported_at=now())
@@ -120,29 +120,29 @@ def post_findings(snap: dict) -> dict:
 
 
 def read_findings() -> dict:
-    return {d["_id"]: d.get("findings") or {} for d in world().red_agents.find({"_id": {"$in": list(SCOUTS)}})}
+    return {d["_id"]: d.get("findings") or {} for d in world().red_agents.find({"_id": {"$in": list(INVESTIGATORS)}})}
 
 
 # ------------------------------------------------------------------ vetted combos
 COMBOS = {
-    "lie-then-freeze": ("ACK lie on {s}, then FREEZE the worker that sends the next step",
-                        "Q1+Q2: Guard must catch ACK != APPLIED while a stalled lease is taken over"),
-    "lie-then-kill": ("ACK lie on {s}, then SIGKILL the worker that sends the next step",
-                      "Q1+Q2: Guard read-back and Nurse resume from checkpoint at once"),
+    "lie-then-freeze": ("ACK lie on {s}, then FREEZE the operator that sends the next step",
+                        "Q1+Q2: Verifier must catch ACK != APPLIED while a stalled lease is taken over"),
+    "lie-then-kill": ("ACK lie on {s}, then SIGKILL the operator that sends the next step",
+                      "Q1+Q2: Verifier read-back and Recovery resume from checkpoint at once"),
     "false-log-then-kill": ("false log on {root} blaming {wrong}, then SIGKILL the next sender",
-                            "Do they trust read-back over logs while a worker dies mid-step?"),
+                            "Do they trust read-back over logs while an operator dies mid-step?"),
     "break-then-drift": ("break {s} mid-repair, then rename the unix balance field",
                          "Compound faults: re-plan plus adapt to a changed layout"),
     "poison-then-break": ("poison the remembered {fc} repair ({wrong}), then cause {fc} again",
                           "Memory vs evidence: the Hive must reject the recalled poisoned repair and re-plan"),
-    "kill-then-exploit": ("SIGKILL a busy worker, then walk in through {vuln}",
+    "kill-then-exploit": ("SIGKILL a busy operator, then walk in through {vuln}",
                           "An intruder during a takeover: detect, patch, retest"),
 }
 
 
-def _worker_item(menu: list[dict], fault: str) -> dict | None:
-    """Best worker victim for an agent fault: someone mid-send, else the armed next-sender."""
-    items = [m for m in menu if m["fault"] == fault and m.get("role") == "worker"]
+def _operator_item(menu: list[dict], fault: str) -> dict | None:
+    """Best operator victim for an agent fault: someone mid-send, else the armed next-sender."""
+    items = [m for m in menu if m["fault"] == fault and m.get("role") == "operator"]
     return (next((m for m in items if m.get("phase") == "step_sent" and m.get("victim") != ARMED), None)
             or next((m for m in items if m.get("victim") == ARMED), None) or (items[0] if items else None))
 
@@ -154,8 +154,8 @@ def _key(item: dict) -> dict:
 def combos(snap: dict, cfg: core.Settings, findings: dict | None = None) -> list[dict]:
     """Every vetted combo whose steps are on the right Strikers' menus right now (and whose Strikers run)."""
     findings = findings or {}
-    hive = findings.get(SCOUT_HIVE) or scout_hive(snap)
-    estate = findings.get(SCOUT_SYSTEMS) or scout_systems(snap)
+    hive = findings.get(INVESTIGATOR_HIVE) or investigator_hive(snap)
+    estate = findings.get(INVESTIGATOR_SYSTEMS) or investigator_systems(snap)
     roster = _roster()
     menus = {pid: PERSONAS[pid].menu(snap, cfg) for pid in roster}
     pending = hive.get("pending_step_systems") or []
@@ -168,7 +168,7 @@ def combos(snap: dict, cfg: core.Settings, findings: dict | None = None) -> list
         if pid not in menus:
             return None
         if want.get("fault") in AGENT_FAULTS:
-            return _worker_item(menus[pid], want["fault"])
+            return _operator_item(menus[pid], want["fault"])
         return next((m for m in menus[pid] if all(m.get(k) == v for k, v in want.items())), None)
 
     out = []
@@ -235,9 +235,9 @@ def order_strike(persona_id: str, order: dict, snap: dict, cfg: core.Settings) -
     """Turn an order into a validated strike from the Striker's OWN menu now (a mid-send victim may have changed)."""
     p = PERSONAS[persona_id]
     menu = p.menu(snap, cfg)
-    if order["fault"] in AGENT_FAULTS:   # the ordered victim if still on my menu, else the best worker now
+    if order["fault"] in AGENT_FAULTS:   # the ordered victim if still on my menu, else the best operator now
         item = next((m for m in menu if m["fault"] == order["fault"] and m.get("victim") == order.get("victim")
-                     and order.get("victim")), None) or _worker_item(menu, order["fault"])
+                     and order.get("victim")), None) or _operator_item(menu, order["fault"])
     else:
         want = {k: order[k] for k in KEYS if order.get(k) is not None}
         item = next((m for m in menu if _key(m) == want), None)
@@ -265,13 +265,13 @@ SYSTEM_PROMPT = (
     "You are the Red Commander in a chaos drill against the Hive, a team of AI operations agents keeping a "
     "simulated bank's legacy estate (portal -> unix -> mainframe) online; MongoDB holds all their state. Your "
     "Strikers execute vetted faults; you pick ONE campaign (an ordered combo) from the menu, timed against what "
-    "your Scouts report the Hive is doing now and what past attacks taught you. Output ONLY one compact JSON "
+    "your Investigators report the Hive is doing now and what past attacks taught you. Output ONLY one compact JSON "
     'object, start with \'{\': {"combo": "<menu combo id, exactly>", "reason": "<one sentence, at most 40 words, '
     'explain because>"}')
 REFLECT_PROMPT = (
     "You are the Red Commander reflecting on one campaign of a chaos drill. Use only the supplied evidence; do not "
-    "invent recovery or claim causality. Return JSON {\"reflection\": \"1-2 sentences: did the Guard catch it, did a "
-    "Nurse take over, how fast was recovery\", \"lesson\": \"specific next combo or timing change\"}.")
+    "invent recovery or claim causality. Return JSON {\"reflection\": \"1-2 sentences: did the Verifier catch it, did a "
+    "Recovery take over, how fast was recovery\", \"lesson\": \"specific next combo or timing change\"}.")
 
 
 class CmdState(TypedDict, total=False):
@@ -286,12 +286,12 @@ class CmdState(TypedDict, total=False):
 class Commander:
     def __init__(self, cfg: core.Settings | None = None):
         self.cfg = cfg or core.Settings.from_env()
-        self.cooldown_s = _f("RED_COMMANDER_COOLDOWN_S", 45)
-        self.first_s = _f("RED_COMMANDER_FIRST_S", 20)
-        self.step_gap_s = _f("RED_COMMANDER_STEP_GAP_S", 3)
-        self.step_timeout_s = _f("RED_COMMANDER_STEP_TIMEOUT_S", 90)
-        self.observe_s = _f("RED_COMMANDER_OBSERVE_S", 45)
-        self.max_campaigns = int(_f("RED_COMMANDER_MAX", 1))  # per night; 0 = unlimited
+        self.cooldown_s = _f("ADVERSARY_COMMANDER_COOLDOWN_S", 45)
+        self.first_s = _f("ADVERSARY_COMMANDER_FIRST_S", 20)
+        self.step_gap_s = _f("ADVERSARY_COMMANDER_STEP_GAP_S", 3)
+        self.step_timeout_s = _f("ADVERSARY_COMMANDER_STEP_TIMEOUT_S", 90)
+        self.observe_s = _f("ADVERSARY_COMMANDER_OBSERVE_S", 45)
+        self.max_campaigns = int(_f("ADVERSARY_COMMANDER_MAX", 1))  # per night; 0 = unlimited
         self.llm_calls = 0
         self.fallback_count = 0
         self._restored = False
@@ -331,7 +331,7 @@ class Commander:
         if not self._restored:
             self._restored = True
             self.llm_calls, self.fallback_count = doc.get("llm_calls", 0), doc.get("fallback_count", 0)
-        snap = core.scout(COMMANDER_ID)
+        snap = core.investigator(COMMANDER_ID)
         findings = post_findings(snap)
         camp = doc.get("campaign")
         if camp and not _this_night(camp, snap, "started_at"):
@@ -353,7 +353,7 @@ class Commander:
         if snap.get("scenario") in self.cfg.skip_scenarios:
             return f"{snap['scenario']} is off limits"
         if snap.get("upgrade_busy"):
-            return "the Gardener is mid-upgrade"
+            return "the Upgrader is mid-upgrade"
         history = [h for h in doc.get("lessons") or [] if _this_night(h, snap)]
         if self.max_campaigns and len(history) >= self.max_campaigns:
             return f"campaign budget spent ({len(history)}/{self.max_campaigns})"
@@ -373,7 +373,7 @@ class Commander:
             return {"pick": None, "hold": "no feasible combo right now"}
         lessons = self._doc().get("lessons") or []
         brief = None
-        if planner_mod.enabled():   # RED_PLANNER=1: spawn both scouts, get a focus, prefer that focus's combos
+        if planner_mod.enabled():   # ADVERSARY_PLANNER=1: spawn both investigators, get a focus, prefer that focus's combos
             counts = {"llm_calls": 0, "fallbacks": 0}
             brief = planner_mod.plan(snap, options, lessons, use_llm=self.cfg.use_llm, counts=counts)
             self.llm_calls += counts["llm_calls"]
@@ -384,14 +384,14 @@ class Commander:
         if self.cfg.use_llm and llm.llm_available():
             self.llm_calls += 1
             prompt = json.dumps({
-                "scout_reports": state.get("findings"),
+                "investigator_reports": state.get("findings"),
                 "my_past_campaigns_and_lessons": [{k: h.get(k) for k in ("combo", "outcome_summary", "reflection", "lesson")}
                                                   for h in lessons[-4:]],
                 "recent_attack_outcomes": snap.get("attack_history", []),
                 "scenario": snap.get("scenario"),
                 "campaign_menu": [{"combo": o["combo"], "plan": o["title"], "tests": o["tests"],
                                    "steps": o["steps"]} for o in options],
-                **({"planner_brief": {k: brief[k] for k in ("focus", "priority", "prefer", "reason", "scouts")}}
+                **({"planner_brief": {k: brief[k] for k in ("focus", "priority", "prefer", "reason", "investigators")}}
                    if brief else {}),
             }, default=str)
             choice = core.parse_json(llm.complete(SYSTEM_PROMPT, prompt, max_tokens=400))
@@ -407,8 +407,8 @@ class Commander:
             if rejected:
                 self._say(f"Red Commander: {rejected}; using my own playbook.", kind="reject")
             p = policy_pick(options, lessons)
-            pick = {**p, "reason": f"{p['tests']}; scouts say next steps land on "
-                                   f"{', '.join((state.get('findings') or {}).get(SCOUT_HIVE, {}).get('pending_step_systems') or []) or 'nothing yet'}"}
+            pick = {**p, "reason": f"{p['tests']}; investigators say next steps land on "
+                                   f"{', '.join((state.get('findings') or {}).get(INVESTIGATOR_HIVE, {}).get('pending_step_systems') or []) or 'nothing yet'}"}
         if brief:
             pick = {**pick, "planning_id": brief["planning_id"], "priority": brief["priority"], "focus": brief["focus"]}
         return {"pick": pick, "planner": planner}
@@ -426,7 +426,7 @@ class Commander:
         plan = " -> ".join(f"{s['persona'].removeprefix('red-')}: {s['fault']}" for s in steps)
         self._say(f"Red Commander ({self._label(state['planner'])}) THINK: campaign {pick['combo']}: {plan}. "
                   f"{pick['reason']} {self._counts()}")
-        if camp.get("planning_id"):   # RED_PLANNER: the Planner hands it to the Runner when the Runner decides
+        if camp.get("planning_id"):   # ADVERSARY_PLANNER: the Planner hands it to the Runner when the Runner decides
             rids = planner_mod.handoff(camp)
             if rids is not None:
                 camp.update(handed=True, requests=rids, status="active" if rids else "aborted",
@@ -530,14 +530,14 @@ class Commander:
         evidence = [{"step": i + 1, "fault": e["fault"], "target": e.get("target"), "status": e.get("status"),
                      "effect": (e.get("result") or {}).get("effect") or (e.get("result") or {}).get("error"),
                      "outcome": learning.outcome(e)} for i, e in enumerate(events)]
-        caught = any(ev["outcome"].get("guard_caught") for ev in evidence)
+        caught = any(ev["outcome"].get("verifier_caught") for ev in evidence)
         recov = [ev["outcome"]["recovery_s"] for ev in evidence if ev["outcome"].get("recovery_s") is not None]
         seen = {r["incident"]: r for ev in evidence for r in ev["outcome"].get("incidents") or []}
         handoffs = sum(len(r.get("handoffs") or []) for r in seen.values())
-        summary = {"landed": f"{len(events)}/{len(camp['steps'])}", "guard_caught": caught or None,
-                   "recovery_s": max(recov) if recov else None, "nurse_handoffs": handoffs,
+        summary = {"landed": f"{len(events)}/{len(camp['steps'])}", "verifier_caught": caught or None,
+                   "recovery_s": max(recov) if recov else None, "recovery_handoffs": handoffs,
                    "aborted": camp["status"] == "aborted"}
-        reflection = (f"{summary['landed']} steps landed; Guard catch {'seen' if caught else 'not observed'}; "
+        reflection = (f"{summary['landed']} steps landed; Verifier catch {'seen' if caught else 'not observed'}; "
                       f"{handoffs} handoffs; recovery {'%.1fs' % summary['recovery_s'] if recov else 'not observed'}.")
         lesson = ("Repeat the combo with tighter timing." if not caught and not recov
                   else "The Hive defended this combo; switch to a different pairing next.")
@@ -596,9 +596,9 @@ class Commander:
 
     def run(self) -> None:
         self._say("Red Commander online: plans campaigns of vetted faults for the Strikers; Hive and Systems "
-                  "Scouts report in.")
+                  "Investigators report in.")
         while not self._stop.is_set():
-            # GARDENER_PAUSE=1: no campaigns while the Gardener upgrades a system (lease: auto-resume if it dies)
+            # UPGRADER_PAUSE=1: no campaigns while the Upgrader upgrades a system (lease: auto-resume if it dies)
             if pause.wait_while_paused(self._stop.is_set, on_pause=self._paused):
                 continue
             try:
@@ -612,10 +612,10 @@ class Commander:
             pass
 
     def _paused(self, d: dict) -> None:
-        """The Commander and its two Scouts (they run inside its step) all show paused."""
-        hold = f"Gardener upgrading {d.get('system')}"
+        """The Commander and its two Investigators (they run inside its step) all show paused."""
+        hold = f"Upgrader upgrading {d.get('system')}"
         self._set(status="paused", hold=hold, last_seen=now())
-        world().red_agents.update_many({"_id": {"$in": [SCOUT_HIVE, SCOUT_SYSTEMS]}},
+        world().red_agents.update_many({"_id": {"$in": [INVESTIGATOR_HIVE, INVESTIGATOR_SYSTEMS]}},
                                        {"$set": {"status": "paused", "last_seen": now()}})
 
     def stop(self, *_):

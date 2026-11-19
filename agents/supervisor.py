@@ -2,17 +2,17 @@
 
 Spawns one OS process per agent (`python -m agents.agent <role> <id>`). It does no hive work itself and
 never touches leases: when a child dies (e.g. Chaos SIGKILL), recovery of its WORK is the hive's job
-(Undertaker + Nurse via MongoDB). The supervisor only refills the bench: after NURSE_RESPAWN_S it starts
-a fresh nurse standby in the dead bee's place. Singleton roles with no standby (guard, sentinel, waggle)
-and queens come back in their own role. SIGTERM/SIGINT stops all children cleanly.
+(Undertaker + Recovery via MongoDB). The supervisor only refills the bench: after RECOVERY_RESPAWN_S it starts
+a fresh recovery standby in the dead bee's place. Singleton roles with no standby (verifier, monitor, reporter)
+and coordinators come back in their own role. SIGTERM/SIGINT stops all children cleanly.
 
-Env SWARM_ROSTER="role:id,role:id" overrides the roster (tests).
+Env AGENTS_ROSTER="role:id,role:id" overrides the roster (tests).
 
-SWARM_DYNAMIC=1 (default off) switches to dynamic scaling (see agents.scale): the standing roster shrinks to
-DYNAMIC_ROSTER (queens, guard, waggle, sentinel, warm nurses) and scouts/workers are started on request from
-swarm.spawn_requests, out of SWARM_WARM pre-imported spare processes, up to SWARM_MAX_AGENTS live agents.
+AGENTS_AUTOSCALE=1 (default off) switches to dynamic scaling (see agents.scale): the standing roster shrinks to
+DYNAMIC_ROSTER (coordinators, verifier, reporter, monitor, warm recovery agents) and investigators/operators are started on request from
+swarm.spawn_requests, out of AGENTS_WARM pre-imported spare processes, up to AGENTS_MAX_AGENTS live agents.
 Spawned bees retire themselves (exit 0, agent doc deleted) and are not respawned; a spawned bee that DIES
-(SIGKILL, crash) is replaced on the bench by a nurse exactly like a roster bee. Live counts go to
+(SIGKILL, crash) is replaced on the bench by a recovery exactly like a roster bee. Live counts go to
 swarm.stats{_id:"swarm_scale"} for the war room.
 """
 from __future__ import annotations
@@ -30,19 +30,19 @@ from common import config
 
 ROOT = Path(__file__).resolve().parent.parent
 ROSTER = [
-    ("queen", "queen-1"), ("queen", "queen-2"),
-    ("scout", "scout-1"), ("scout", "scout-2"),
-    ("worker", "worker-mainframe-1"), ("worker", "worker-unix-1"), ("worker", "worker-web-1"),
-    ("guard", "guard-1"), ("waggle", "waggle-1"), ("sentinel", "sentinel-1"),
-    ("nurse", "nurse-1"), ("nurse", "nurse-2"),
+    ("coordinator", "coordinator-1"), ("coordinator", "coordinator-2"),
+    ("investigator", "investigator-1"), ("investigator", "investigator-2"),
+    ("operator", "operator-mainframe-1"), ("operator", "operator-unix-1"), ("operator", "operator-web-1"),
+    ("verifier", "verifier-1"), ("reporter", "reporter-1"), ("monitor", "monitor-1"),
+    ("recovery", "recovery-1"), ("recovery", "recovery-2"),
 ]
-# dynamic mode: no standing scouts or workers; nurses stay warm so a kill is always taken over at once
+# dynamic mode: no standing investigators or operators; recovery agents stay warm so a kill is always taken over at once
 DYNAMIC_ROSTER = [
-    ("queen", "queen-1"), ("queen", "queen-2"),
-    ("guard", "guard-1"), ("waggle", "waggle-1"), ("sentinel", "sentinel-1"),
-    ("nurse", "nurse-1"), ("nurse", "nurse-2"),
+    ("coordinator", "coordinator-1"), ("coordinator", "coordinator-2"),
+    ("verifier", "verifier-1"), ("reporter", "reporter-1"), ("monitor", "monitor-1"),
+    ("recovery", "recovery-1"), ("recovery", "recovery-2"),
 ]
-SELF_RESPAWN = {"guard", "sentinel", "waggle", "queen", "nurse"}
+SELF_RESPAWN = {"verifier", "monitor", "reporter", "coordinator", "recovery"}
 
 
 def dynamic() -> bool:
@@ -51,12 +51,12 @@ def dynamic() -> bool:
 
 
 def roster() -> list[tuple[str, str]]:
-    raw = os.environ.get("SWARM_ROSTER", "").strip()
+    raw = os.environ.get("AGENTS_ROSTER", "").strip()
     if not raw:
-        from upgrader.help import enabled as gardener_help  # structure v3: Sentinel #2 is its own agent
-        from agents.platform import enabled as platform_on  # platform engineers: Sentinel-type, subtype platform
-        return (list(DYNAMIC_ROSTER if dynamic() else ROSTER) + ([("sentinel", "sentinel-2")] if gardener_help() else [])
-                + ([("sentinel", "platform-1")] if platform_on() else []))
+        from upgrader.help import enabled as upgrader_help  # structure v3: Monitor #2 is its own agent
+        from agents.toolsmith import enabled as toolsmith_on  # toolsmith engineers: Monitor-type, subtype toolsmith
+        return (list(DYNAMIC_ROSTER if dynamic() else ROSTER) + ([("monitor", "monitor-2")] if upgrader_help() else [])
+                + ([("monitor", "toolsmith-1")] if toolsmith_on() else []))
     return [tuple(x.split(":", 1)) for x in raw.split(",") if ":" in x]  # type: ignore[misc]
 
 
@@ -94,12 +94,12 @@ class Supervisor:
         self.children: dict[str, tuple[str, subprocess.Popen]] = {}
         self.pending: list[tuple[float, str, str, str | None]] = []  # (when, role, id, standby_for)
         self.stopping = False
-        self.next_nurse = 1 + sum(1 for r, _ in roster() if r == "nurse")
-        self.retired: set[str] = set()   # extra nurses stopped on a roster restore: never respawned
+        self.next_recovery = 1 + sum(1 for r, _ in roster() if r == "recovery")
+        self.retired: set[str] = set()   # extra recovery agents stopped on a roster restore: never respawned
         self.restore_seen = None
         self.restore_checked = 0.0
         self.nights = 0                  # roster restores so far
-        self.bench_born: dict[str, int] = {}  # replacement nurse -> self.nights when it was started
+        self.bench_born: dict[str, int] = {}  # replacement recovery -> self.nights when it was started
         # dynamic scaling
         self.dynamic = dynamic()
         self.warm: list[subprocess.Popen] = []      # pre-imported spares waiting for an assignment on stdin
@@ -194,15 +194,15 @@ class Supervisor:
             if self.live_count() >= scale.MAX_AGENTS:
                 if not r.get("note"):
                     col("spawn_requests").update_one({"_id": r["_id"]}, {"$set": {
-                        "note": f"deferred: at the SWARM_MAX_AGENTS ceiling ({scale.MAX_AGENTS})"}})
+                        "note": f"deferred: at the AGENTS_MAX_AGENTS ceiling ({scale.MAX_AGENTS})"}})
                     log(f"{r['_id']} deferred: {scale.MAX_AGENTS} live agents (ceiling)")
                 continue
             role = r["role"]
-            if role not in ("scout", "worker", "nurse") or (role == "worker" and not r.get("specialty")):
+            if role not in ("investigator", "operator", "recovery") or (role == "operator" and not r.get("specialty")):
                 col("spawn_requests").update_one({"_id": r["_id"]}, {"$set": {"status": "cancelled",
                                                                              "note": "unsupported request"}})
                 continue
-            prefix = f"worker-{r['specialty']}" if role == "worker" else role
+            prefix = f"operator-{r['specialty']}" if role == "operator" else role
             agent_id = self.free_id(prefix)
             t0 = time.monotonic()
             warm = self.spawn(role, agent_id, ephemeral=True)
@@ -211,7 +211,7 @@ class Supervisor:
             col("spawn_requests").update_one({"_id": r["_id"]}, {"$set": {
                 "status": "spawned", "agent_id": agent_id, "pid": p.pid, "warm": warm, "spawned_at": now(),
                 "spawn_ms": ms}})
-            if role == "scout" and r.get("incident"):  # hand the incident straight to the new scout
+            if role == "investigator" and r.get("incident"):  # hand the incident straight to the new investigator
                 col("incidents").update_one({"_id": r["incident"], "status": "open", "assigned_to": None},
                                             {"$set": {"assigned_to": agent_id, "assigned_by": r.get("requested_by"),
                                                       "assigned_at": now()}})
@@ -267,15 +267,15 @@ class Supervisor:
                         pass
                     log(f"{agent_id} retired")
                     continue
-            when = time.monotonic() + config.NURSE_RESPAWN_S
+            when = time.monotonic() + config.RECOVERY_RESPAWN_S
             if role in SELF_RESPAWN:
                 self.pending.append((when, role, agent_id, None))
-                log(f"{agent_id} exited ({code}); respawning in its own role in {config.NURSE_RESPAWN_S:.0f}s")
+                log(f"{agent_id} exited ({code}); respawning in its own role in {config.RECOVERY_RESPAWN_S:.0f}s")
             else:
-                nid = f"nurse-{self.next_nurse}"
-                self.next_nurse += 1
-                self.pending.append((when, "nurse", nid, agent_id))
-                log(f"{agent_id} exited ({code}); {nid} joins the bench in {config.NURSE_RESPAWN_S:.0f}s")
+                nid = f"recovery-{self.next_recovery}"
+                self.next_recovery += 1
+                self.pending.append((when, "recovery", nid, agent_id))
+                log(f"{agent_id} exited ({code}); {nid} joins the bench in {config.RECOVERY_RESPAWN_S:.0f}s")
 
     def respawn_due(self) -> None:
         now = time.monotonic()
@@ -286,7 +286,7 @@ class Supervisor:
 
     def restore_roster(self) -> None:
         """A full demo reset (war room) writes swarm.stats{_id:"roster_reset"}: bring the bench back to the
-        original roster — respawn missing roster bees in their own role, retire extra respawned nurses."""
+        original roster — respawn missing roster bees in their own role, retire extra respawned recovery agents."""
         if time.monotonic() - self.restore_checked < 2.0:
             return
         self.restore_checked = time.monotonic()
@@ -308,9 +308,9 @@ class Supervisor:
                 pass
         base = roster()
         base_ids = {i for _, i in base}
-        # A bee that died this night is still owed its replacement nurse on the bench: start it now instead of
-        # dropping it (at stage pace the next night's reset lands before NURSE_RESPAWN_S, and the dead bee's
-        # roster slot is refilled in its own role below). Replacement nurses of the night now ending survive
+        # A bee that died this night is still owed its replacement recovery on the bench: start it now instead of
+        # dropping it (at stage pace the next night's reset lands before RECOVERY_RESPAWN_S, and the dead bee's
+        # roster slot is refilled in its own role below). Replacement recovery agents of the night now ending survive
         # this reset (demo_check / the war room still look for them) and retire at the next one.
         owed = [(role, aid, sb) for _, role, aid, sb in self.pending if sb]
         self.pending = []

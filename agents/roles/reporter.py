@@ -1,8 +1,8 @@
-"""Waggle — the hive's message bus scribe.
+"""Reporter — the hive's message bus scribe.
 
 One database-level change stream over swarm.{incidents, agents, stats} (heartbeat noise filtered out
 server-side in the $match) turns state changes into one-line status and handoff notes in swarm.messages.
-The resume token is persisted in swarm.stats {_id: "waggle_resume"}, so a restarted waggle neither
+The resume token is persisted in swarm.stats {_id: "reporter_resume"}, so a restarted reporter neither
 misses nor repeats events.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ PIPELINE = [{"$match": {"$or": [
     {"ns.coll": "incidents"},
     {"ns.coll": "agents", "operationType": "insert"},
     {"ns.coll": "agents", "updateDescription.updatedFields.status": {"$exists": True}},
-    {"ns.coll": "stats", "documentKey._id": "queen_lease", "updateDescription.updatedFields.owner": {"$exists": True}},
+    {"ns.coll": "stats", "documentKey._id": "coordinator_lease", "updateDescription.updatedFields.owner": {"$exists": True}},
 ]}}]
 
 
@@ -73,7 +73,7 @@ def interpret(ev: dict) -> list[dict]:
             if k.startswith("steps.") and k.endswith(".status") and v in ("verified", "failed"):
                 idx = int(k.split(".")[1])
                 st = (doc.get("steps") or [{}] * (idx + 1))[idx]
-                word = "verified by the Guard" if v == "verified" else "rejected by the Guard"
+                word = "verified by the Verifier" if v == "verified" else "rejected by the Verifier"
                 out.append({"to": "hive", "kind": "status",
                             "body": f"{st.get('step_id')} {st.get('op')} {word}: {st.get('evidence') or ''}"[:240]})
         return out
@@ -87,7 +87,7 @@ def interpret(ev: dict) -> list[dict]:
             out.append({"to": "hive", "kind": "status", "body": f"{aid} joined the bench (replacing {doc['standby_for']})."})
         return out
     if coll == "stats" and upd.get("owner"):
-        out.append({"to": "beekeeper", "kind": "handoff", "body": f"{upd['owner']} now holds the queen lease."})
+        out.append({"to": "beekeeper", "kind": "handoff", "body": f"{upd['owner']} now holds the coordinator lease."})
     return out
 
 
@@ -107,14 +107,14 @@ def build_graph(agent: Agent):
 def run(agent: Agent) -> None:
     if config.MONGO_SPINE:  # chain of custody from change-stream pre-images (agents/custody.py), same process
         from .. import custody  # noqa: PLC0415
-        custody.start(agent.stop, lambda text, row: think(agent.id, "waggle", text, incident=row.get("incident"),
+        custody.start(agent.stop, lambda text, row: think(agent.id, "reporter", text, incident=row.get("incident"),
                                                            kind="handoff"))
     if comms.enabled():
         roster.start(agent)  # live roster of every agent beside the prioritised bus (agents/roster.py)
         return run_prioritiser(agent)
     graph = build_graph(agent)
     while not agent.stop.is_set():
-        token = (col("stats").find_one({"_id": "waggle_resume"}) or {}).get("token")
+        token = (col("stats").find_one({"_id": "reporter_resume"}) or {}).get("token")
         try:
             with swarm().watch(PIPELINE, full_document="updateLookup", resume_after=token,
                                max_await_time_ms=500) as stream:
@@ -126,13 +126,13 @@ def run(agent: Agent) -> None:
                     lines = interpret(ev)
                     if lines:  # only events that say something get a (tiny) graph run
                         graph.invoke({"lines": lines},
-                                     {"configurable": {"thread_id": f"waggle:{ev['ns']['coll']}:{ev['documentKey']['_id']}"}},
+                                     {"configurable": {"thread_id": f"reporter:{ev['ns']['coll']}:{ev['documentKey']['_id']}"}},
                                      durability="exit")
-                    col("stats").update_one({"_id": "waggle_resume"}, {"$set": {"token": stream.resume_token}},
+                    col("stats").update_one({"_id": "reporter_resume"}, {"$set": {"token": stream.resume_token}},
                                             upsert=True)
         except OperationFailure as e:
             log(agent.id, f"resume failed ({e.code}); starting a fresh stream")
-            col("stats").delete_one({"_id": "waggle_resume"})
+            col("stats").delete_one({"_id": "reporter_resume"})
         except PyMongoError as e:
             log(agent.id, f"stream error: {e}")
             agent.nap(1.0)
@@ -140,7 +140,7 @@ def run(agent: Agent) -> None:
 
 BATCH_MAX, BATCH_S = 256, 0.5  # one prioritiser batch: at most 256 changes or 0.5 s
 LOG_THOUGHT_S = 5.0  # a batch of estate log lines only narrates "Comms: ..." at most this often
-LOGS_RESUME = 'waggle_logs_resume'
+LOGS_RESUME = 'reporter_logs_resume'
 
 
 def drain(streams, limit=BATCH_MAX, budget_s=BATCH_S):
@@ -189,7 +189,7 @@ def post_batch(agent, lines, *, narrate=True):
         n_logs = sum(m['count'] for m in groups if m['kind'] == 'log')
         if narrate:
             text = f"Comms: {n} messages, {n - len(groups)} merged, top: {str(groups[0]['body'])[:140]}"
-            think(agent.id, 'waggle', text, kind='comms')
+            think(agent.id, 'reporter', text, kind='comms')
         col('stats').update_one({'_id': 'comms'}, {'$inc': {'messages': n, 'merged': n - len(groups), 'logs': n_logs},
             '$set': {'top': str(groups[0]['body'])[:140]}}, upsert=True)
     return groups
@@ -204,7 +204,7 @@ def run_prioritiser(agent):
     ]}}]
     last_log_thought = 0.0
     while not agent.stop.is_set():
-        token = (col('stats').find_one({'_id': 'waggle_resume'}) or {}).get('token')
+        token = (col('stats').find_one({'_id': 'reporter_resume'}) or {}).get('token')
         log_token = (col('stats').find_one({'_id': LOGS_RESUME}) or {}).get('token')
         try:
             with swarm().watch(pipeline, full_document='updateLookup', resume_after=token,
@@ -238,12 +238,12 @@ def run_prioritiser(agent):
                         post_batch(agent, lines, narrate=narrate)
                         if narrate and not hive_lines:
                             last_log_thought = time.monotonic()
-                    for doc_id, s in (('waggle_resume', stream), (LOGS_RESUME, logs)):
+                    for doc_id, s in (('reporter_resume', stream), (LOGS_RESUME, logs)):
                         if s.resume_token:
                             col('stats').update_one({'_id': doc_id}, {'$set': {'token': s.resume_token}}, upsert=True)
         except OperationFailure as e:
             log(agent.id, f'resume failed ({e.code}); starting fresh streams')
-            col('stats').delete_many({'_id': {'$in': ['waggle_resume', LOGS_RESUME]}})
+            col('stats').delete_many({'_id': {'$in': ['reporter_resume', LOGS_RESUME]}})
         except PyMongoError as e:
             log(agent.id, f'stream error: {e}')
             agent.nap(1.0)

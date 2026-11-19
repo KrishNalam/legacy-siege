@@ -45,7 +45,7 @@ TOKEN_DOC = "stream_tokens"
 WATCHED["swarm"].append("lessons")  # failure memory (agents/lessons.py): empty unless FAILURE_MEMORY=1
 if config.MONGO_SPINE:  # lease chain of custody from change-stream pre-images (agents/custody.py)
     WATCHED["swarm"].append("custody")
-WATCHED["swarm"].append("roster")  # Comms live roster (agents/roster.py): empty unless SWARM_COMMS=1
+WATCHED["swarm"].append("roster")  # Comms live roster (agents/roster.py): empty unless AGENTS_COMMS=1
 
 
 def db_names() -> dict[str, str]:

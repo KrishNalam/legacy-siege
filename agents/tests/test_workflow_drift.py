@@ -1,9 +1,9 @@
 """WORKFLOW_DRIFT=1 contract (Statement 3 Q3, "workflow changes underneath it"), real systems app + real swarm.
 
 Night 1: the mainframe's JES2 maintenance makes restart_batch refuse ("issue release_hold before restart_batch").
-The worker notices the refusal, reads /mainframe/ops, the rules insert release_hold, the Guard verifies it and
+The operator notices the refusal, reads /mainframe/ops, the rules insert release_hold, the Verifier verifies it and
 the retried restart_batch, and the workflow is stored in swarm.schema_mappings (kind workflow, v2).
-Night 2: the scout plans release_hold up front from memory: no refusal, one attempt. No Claude call either night."""
+Night 2: the investigator plans release_hold up front from memory: no refusal, one attempt. No Claude call either night."""
 from __future__ import annotations
 
 import socket
@@ -69,7 +69,7 @@ def test_workflow_drift_learned_then_reused(real):
     assert verified.index("release_hold") < verified.index("restart_batch")
     m = col("schema_mappings").find_one({"_id": "mainframe.workflow.restart_batch"})
     assert m["kind"] == "workflow" and m["requires"] == ["release_hold"] and m["version"] == 2
-    assert m["learned_from"] == inc["_id"] and m["verified_by"] == "guard-1"
+    assert m["learned_from"] == inc["_id"] and m["verified_by"] == "verifier-1"
     assert col("thoughts").find_one({"text": {"$regex": "^workflow changed: restart_batch now needs release_hold"}})
     assert not any(s.get("source") == "ai" for s in inc["steps"])   # no key: the rules path did it
 

@@ -11,6 +11,32 @@ try:  # optional .env support
 except Exception:  # pragma: no cover
     pass
 
+# Old env var names (before the plain-names rename, docs/NAMING.md) still work for one release: each one is copied
+# to its new name unless the new name is already set. Children started by run.py inherit the copied values.
+_OLD_EXACT = {"SWARM_DYNAMIC": "AGENTS_AUTOSCALE", "RED_FLEET": "ADVERSARY"}
+_OLD_PREFIX = [("RED_FLEET_", "ADVERSARY_"), ("RED_COMMANDER", "ADVERSARY_COMMANDER"), ("RED_PLANNER", "ADVERSARY_PLANNER"),
+               ("CHAOS_", "ADVERSARY_"), ("SWARM_", "AGENTS_"), ("WARROOM_", "CONSOLE_"), ("NURSE_", "RECOVERY_"),
+               ("GUARD_", "VERIFIER_"), ("SCOUT_", "INVESTIGATOR_"), ("SENTINEL_", "MONITOR_"), ("GARDENER_", "UPGRADER_"),
+               ("QUEEN_", "COORDINATOR_"), ("WORKER_", "OPERATOR_"), ("WAGGLE_", "REPORTER_"), ("PLATFORM_", "TOOLSMITH_")]
+_NOT_RENAMED = {"SWARM_DB", "SWARM_TEST_DB_SUFFIX"}  # database names move in a later step
+
+
+def _new_env_name(old: str) -> str | None:
+    if old in _NOT_RENAMED:
+        return None
+    if old in _OLD_EXACT:
+        return _OLD_EXACT[old]
+    for a, b in _OLD_PREFIX:
+        if old.startswith(a):
+            return b + old[len(a):]
+    return None
+
+
+for _old in list(os.environ):
+    _new = _new_env_name(_old)
+    if _new and _new not in os.environ:
+        os.environ[_new] = os.environ[_old]
+
 
 def env_float(name: str, default: float) -> float:
     """Float from the environment, falling back to ``default`` when unset or malformed."""
@@ -27,7 +53,7 @@ WORLD_DB = os.environ.get("WORLD_DB", "world")
 SWARM_DB = os.environ.get("SWARM_DB", "swarm")
 
 SYSTEMS_PORT = int(os.environ.get("SYSTEMS_PORT", 8701))
-WARROOM_PORT = int(os.environ.get("WARROOM_PORT") or os.environ.get("PORT") or 8700)  # PORT: PaaS hosts (Fly)
+CONSOLE_PORT = int(os.environ.get("CONSOLE_PORT") or os.environ.get("PORT") or 8700)  # PORT: PaaS hosts (Fly)
 SYSTEMS_URL = os.environ.get("SYSTEMS_URL", f"http://127.0.0.1:{SYSTEMS_PORT}")
 PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "localhost")
 
@@ -36,9 +62,9 @@ LEASE_S = _f("LEASE_S", 10)
 PACE = _f("PACE", 1.0)  # multiplier on deliberate "thinking" delays; 0 in tests
 SLOW_APPLY_S = _f("SLOW_APPLY_S", 20)
 PARTITION_S = _f("PARTITION_S", 15)
-NURSE_RESPAWN_S = _f("NURSE_RESPAWN_S", 15)
+RECOVERY_RESPAWN_S = _f("RECOVERY_RESPAWN_S", 15)
 RECALL_THRESHOLD = _f("RECALL_THRESHOLD", 0.70)
-PROVE_WINDOW_S = _f("PROVE_WINDOW_S", 30)  # Gardener prove: replay the fault, watch this long for incidents
+PROVE_WINDOW_S = _f("PROVE_WINDOW_S", 30)  # Upgrader prove: replay the fault, watch this long for incidents
 
 # Demo autoplay (war room, opt-in): nights advance by themselves, approvals after the first auto-approve
 DEMO_AUTOPLAY = os.environ.get("DEMO_AUTOPLAY", "").strip().lower() in ("1", "true", "yes", "on")

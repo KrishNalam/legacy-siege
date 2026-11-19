@@ -1,5 +1,5 @@
 """MONGO_SPINE (W25): change-stream pre-images -> hash-chained lease custody; validators on tasks/approvals.
-Protects the kill + nurse takeover beat's audit trail and the switch's on/off contract."""
+Protects the kill + recovery takeover beat's audit trail and the switch's on/off contract."""
 from __future__ import annotations
 
 import threading
@@ -43,22 +43,22 @@ def test_takeover_is_recorded_from_pre_images_and_chain_verifies(spine):
     t = custody.start(stop, lambda text, row: said.append(text))
     try:
         time.sleep(1.0)  # let the stream open before the writes
-        won = leases.claim(col("tasks"), {"_id": "INC-0001-t1"}, "worker-mainframe-1",
+        won = leases.claim(col("tasks"), {"_id": "INC-0001-t1"}, "operator-mainframe-1",
                            extra_set={"status": "claimed"})
         assert won["generation"] == 1
         col("tasks").update_one({"_id": "INC-0001-t1"}, {"$set": {"lease_until": now() - timedelta(seconds=5)}})
-        assert leases.takeover(col("tasks"), "INC-0001-t1", "worker-mainframe-1", 1, "nurse-1")
+        assert leases.takeover(col("tasks"), "INC-0001-t1", "operator-mainframe-1", 1, "recovery-1")
         rows = wait_for(lambda: (r := list(col("custody").find({"doc_id": "INC-0001-t1"}).sort("seq", 1)))
                         and len(r) >= 2 and r, 10, what="custody rows")
     finally:
         stop.set()
         t.join(3)
     claim, take = rows[0], rows[1]
-    assert (claim["kind"], claim["to_owner"], claim["gen_after"]) == ("claim", "worker-mainframe-1", 1)
-    assert (take["kind"], take["from_owner"], take["to_owner"]) == ("takeover", "worker-mainframe-1", "nurse-1")
+    assert (claim["kind"], claim["to_owner"], claim["gen_after"]) == ("claim", "operator-mainframe-1", 1)
+    assert (take["kind"], take["from_owner"], take["to_owner"]) == ("takeover", "operator-mainframe-1", "recovery-1")
     assert take["gen_before"] == 1 and take["gen_after"] == 2 and take["lease_expired"] and take["pre_image"]
     assert take["prev_hash"] == claim["hash"] and custody.verify_chain("INC-0001-t1")
-    assert any("worker-mainframe-1 (gen 1) → nurse-1 (gen 2)" in s for s in said)
+    assert any("operator-mainframe-1 (gen 1) → recovery-1 (gen 2)" in s for s in said)
     col("custody").update_one({"_id": take["_id"]}, {"$set": {"to_owner": "mallory"}})
     assert not custody.verify_chain("INC-0001-t1")  # tamper-evident
 
@@ -84,14 +84,14 @@ def test_takeover_then_quick_release_keeps_both(spine):
     from common.db import col, now, swarm
     from agents import custody, leases
     col("tasks").insert_one({"_id": "INC-0002-t1", "incident": "INC-0002", "kind": "fix", "specialty": "unix",
-                             "step_ids": [], "status": "claimed", "owner": "worker-unix-1",
+                             "step_ids": [], "status": "claimed", "owner": "operator-unix-1",
                              "lease_until": now() - timedelta(seconds=5), "generation": 1, "ts": now()})
     with swarm().watch(custody.PIPELINE, max_await_time_ms=100) as cs:
         cs.try_next()
         token = cs.resume_token
     col("stats").update_one({"_id": custody.TOKEN_ID}, {"$set": {"token": token}}, upsert=True)
-    won = leases.takeover(col("tasks"), "INC-0002-t1", "worker-unix-1", 1, "nurse-1")
-    assert leases.release(col("tasks"), "INC-0002-t1", "nurse-1", won["generation"], {"status": "done"})
+    won = leases.takeover(col("tasks"), "INC-0002-t1", "operator-unix-1", 1, "recovery-1")
+    assert leases.release(col("tasks"), "INC-0002-t1", "recovery-1", won["generation"], {"status": "done"})
     stop = threading.Event()
     t = custody.start(stop)
     try:
@@ -101,7 +101,7 @@ def test_takeover_then_quick_release_keeps_both(spine):
         stop.set()
         t.join(3)
     assert [(r["kind"], r["from_owner"], r["to_owner"]) for r in rows] == [
-        ("takeover", "worker-unix-1", "nurse-1"), ("release", "nurse-1", None)]
+        ("takeover", "operator-unix-1", "recovery-1"), ("release", "recovery-1", None)]
     assert rows[0]["gen_after"] == 2 and rows[0]["status_after"] == "claimed" and rows[1]["status_after"] == "done"
     assert custody.verify_chain("INC-0002-t1")
 

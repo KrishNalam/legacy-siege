@@ -46,7 +46,7 @@ INCIDENT_SCHEMA = {
                     "bsonType": "object",
                     "required": ["step_id", "status", "op", "system"],
                     "properties": {"status": {"enum": STEP_STATUSES}},
-                    # a verified step MUST carry evidence (the Guard bee's read-back)
+                    # a verified step MUST carry evidence (the Verifier bee's read-back)
                     "anyOf": [
                         {"properties": {"status": {"enum": [s for s in STEP_STATUSES if s != "verified"]}}},
                         {"required": ["evidence"], "properties": {"evidence": {"bsonType": "string", "minLength": 1}}},
@@ -70,7 +70,7 @@ AGENT_SCHEMA = {
         "bsonType": "object",
         "required": ["_id", "role", "status"],
         "properties": {
-            "role": {"enum": ["queen", "scout", "worker", "guard", "waggle", "sentinel", "nurse", "gardener"]},
+            "role": {"enum": ["coordinator", "investigator", "operator", "verifier", "reporter", "monitor", "recovery", "upgrader"]},
             "status": {"enum": ["idle", "working", "standby", "dead"]},
         },
     }
@@ -171,7 +171,7 @@ def ensure() -> None:
     for n in ["tasks", "thoughts", "messages", "playbooks", "approvals", "upgrade_requests", "stats", "counters",
               "schema_samples", "schema_mappings", "spawn_requests"]:
         _ensure(s, n)
-    # dynamic scaling (SWARM_DYNAMIC): the supervisor polls pending requests; history expires after a day
+    # dynamic scaling (AGENTS_AUTOSCALE): the supervisor polls pending requests; history expires after a day
     s.spawn_requests.create_index([("status", ASCENDING), ("ts", ASCENDING)])
     s.spawn_requests.create_index([("ts", ASCENDING)], expireAfterSeconds=86400, name="ttl_24h")
 
@@ -210,8 +210,8 @@ def ensure() -> None:
         _ensure(s, "gardener_notes")
         s.messages.create_index([("priority", DESCENDING), ("incident", ASCENDING), ("ts", ASCENDING)],
                                 name="comms_priority_incident")
-    from upgrader import help as gardener_help
-    if gardener_help.enabled():  # GARDENER_HELP=1: Sentinel #2 / Worker requests answered by the Gardener
+    from upgrader import help as upgrader_help
+    if upgrader_help.enabled():  # UPGRADER_HELP=1: Monitor #2 / Operator requests answered by the Upgrader
         _ensure(s, "gardener_notes")
         _ensure(s, "gardener_requests")
         s.gardener_requests.create_index([("status", ASCENDING), ("ts", ASCENDING)], name="open_requests")
@@ -236,8 +236,8 @@ def ensure() -> None:
     if config.MONGO_SPINE:
         ensure_spine(s)
 
-    from agents.platform import enabled as platform_enabled
-    if platform_enabled():
+    from agents.toolsmith import enabled as toolsmith_enabled
+    if toolsmith_enabled():
         _ensure(s, "tools")
         _ensure(s, "tool_runs")
         _ensure(s, "platform_signals")
@@ -278,11 +278,11 @@ def ensure() -> None:
 
 def reset() -> None:
     from adversary import faults
-    try:  # a Gardener patch left on disk would make Night 1 open no incident at "version 1"
-        from upgrader import pipeline as gardener_pipeline
-        gardener_pipeline.revert("mainframe")
+    try:  # an Upgrader patch left on disk would make Night 1 open no incident at "version 1"
+        from upgrader import pipeline as upgrader_pipeline
+        upgrader_pipeline.revert("mainframe")
     except Exception as e:
-        print(f"WARNING: gardener revert skipped ({e})")
+        print(f"WARNING: upgrader revert skipped ({e})")
     faults.thaw_overdue(all_=True)
     faults.clear_planted_memory()
     w, s = _setup_dbs()

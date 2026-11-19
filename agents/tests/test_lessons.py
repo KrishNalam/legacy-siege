@@ -44,17 +44,17 @@ def test_classify():
 
 def test_record_failure_is_durable_versioned_and_counts_repeats(mem, db):
     ls = mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: state.batch.quarantined=[]",
-                            "guard-1", version=1, fault_class="batch_abort")
+                            "verifier-1", version=1, fault_class="batch_abort")
     assert ls["_id"] == "LS:mainframe:v1:quarantine_record:lied"
     assert ls["kind"] == "lied" and ls["system_version"] == 1 and ls["stale"] is False and ls["count"] == 1
     assert ls["incidents"] == ["INC-0001"] and ls["history"][0]["action_id"] == "INC-0001-s1-a1"
     assert "applied:true" in ls["why"] and ls["fault_class"] == "batch_abort"
-    again = mem.record_failure("INC-0009", _step(), "INC-0009-s1-a1", "ACK ≠ APPLIED: still poisoned", "guard-1",
+    again = mem.record_failure("INC-0009", _step(), "INC-0009-s1-a1", "ACK ≠ APPLIED: still poisoned", "verifier-1",
                                version=1)
     assert again["count"] == 2 and again["incidents"] == ["INC-0001", "INC-0009"] and len(again["history"]) == 2
     assert db.lessons.count_documents({}) == 1
     # a different version is a different lesson
-    mem.record_failure("INC-0010", _step(), "INC-0010-s1-a1", "ACK ≠ APPLIED: x", "guard-1", version=2)
+    mem.record_failure("INC-0010", _step(), "INC-0010-s1-a1", "ACK ≠ APPLIED: x", "verifier-1", version=2)
     assert db.lessons.count_documents({}) == 2
 
 
@@ -67,7 +67,7 @@ def test_validator_rejects_a_lesson_without_why(mem, db):
 
 def test_plan_reads_matching_lessons_and_marks_steps(mem, db):
     mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: state.batch.quarantined=[]",
-                       "guard-1", version=1)
+                       "verifier-1", version=1)
     plan = _plan()
     applied, lines = mem.for_plan(plan, lambda s: 1, "INC-0002")
     assert [ls["_id"] for ls in applied] == ["LS:mainframe:v1:quarantine_record:lied"]
@@ -80,7 +80,7 @@ def test_plan_reads_matching_lessons_and_marks_steps(mem, db):
 
 
 def test_version_bump_marks_lessons_stale_and_plan_says_so(mem, db):
-    mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: x", "guard-1", version=1)
+    mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: x", "verifier-1", version=1)
     assert mem.mark_stale("mainframe", 2) == 1
     assert mem.mark_stale("mainframe", 2) == 0  # idempotent
     doc = db.lessons.find_one()
@@ -92,14 +92,14 @@ def test_version_bump_marks_lessons_stale_and_plan_says_so(mem, db):
 
 
 def test_version_mismatch_is_never_applied_even_if_not_yet_marked(mem):
-    mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: x", "guard-1", version=1)
+    mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: x", "verifier-1", version=1)
     plan = _plan()
     applied, lines = mem.for_plan(plan, lambda s: 3, "INC-0004")
     assert applied == [] and "stale" in lines[0]
 
 
 def test_recovery_is_noted(mem, db):
-    mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: x", "guard-1", version=1)
+    mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: x", "verifier-1", version=1)
     st = _step(attempts=["INC-0001-s1-a1", "INC-0001-s1-a2"])
     assert mem.note_recovery("INC-0001", st, "INC-0001-s1-a2") == 1
     assert "INC-0001-s1-a2" in db.lessons.find_one()["recovered_by"]
@@ -110,7 +110,7 @@ def test_misfit_playbook_is_skipped_for_the_same_symptoms(mem, db):
     sym = "portal degraded, blames unix; unix degraded, blames mainframe"
     hit_bad = {"playbook_id": "PB-0001", "system": "unix", "fault_class": "disk_fill", "fix": []}
     ls = mem.record_misfit("INC-0005", hit_bad, sym, {"fault_class": None, "facts": ["disk_pct=40"]},
-                           "scout-1", version=1)
+                           "investigator-1", version=1)
     assert ls["_id"] == "LS:unix:v1:PB-0001:misfit" and ls["kind"] == "misfit" and ls["playbook"] == "PB-0001"
     hits = [{"_id": "PB-0001", "score": 0.97}, {"_id": "PB-0002", "score": 0.91}]
     summary = [{"playbook_id": "PB-0001", "score": 0.97, "usable": True},
@@ -132,7 +132,7 @@ def test_memory_items_list_every_kind_with_versions(mem, db):
                              "root_cause": "poison record", "fix": [{"op": "quarantine_record"}], "stale": True,
                              "stale_reason": "mainframe upgraded to v2", "uses": 1, "created_at": now(),
                              "symptom_text": "sym"})
-    mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: x", "guard-1", version=1)
+    mem.record_failure("INC-0001", _step(), "INC-0001-s1-a1", "ACK ≠ APPLIED: x", "verifier-1", version=1)
     rows = mem.items({"mainframe": 2})
     kinds = {r["kind"]: r for r in rows}
     assert set(kinds) >= {"playbook", "lesson"}

@@ -1,6 +1,6 @@
-"""The Gardener process: `python -m upgrader.main`. A separate system OUTSIDE the swarm (not a bee).
+"""The Upgrader process: `python -m upgrader.main`. A separate system OUTSIDE the swarm (not a bee).
 
-Registers as swarm.agents/gardener-1 (role 'gardener', target 'workshop'), heartbeats
+Registers as swarm.agents/upgrader-1 (role 'upgrader', target 'workshop'), heartbeats
 every HEARTBEAT_S, resumes any upgrade it was in the middle of, then waits for
 upgrade_requests with status 'requested' (change stream + polling fallback) and runs
 each one through upgrader.pipeline. All state is in MongoDB: kill this process at any
@@ -21,7 +21,7 @@ from common.db import col, now
 from . import help as help_desk, pipeline
 from .pipeline import AGENT, ROLE
 
-log = logging.getLogger("gardener")
+log = logging.getLogger("upgrader")
 POLL_S = 5.0
 IN_FLIGHT = ["planning", "testing", "awaiting_approval", "deploying", "deployed"]  # deployed: prove may not have finished
 
@@ -62,7 +62,7 @@ def run_safely(upg_id: str) -> None:
         log.exception("%s crashed", upg_id)
         col("upgrade_requests").update_one(
             {"_id": upg_id, "status": {"$nin": ["proven", "rejected", "deployed"]}},
-            {"$set": {"status": "rejected", "reason": f"gardener error: {e}", "updated_at": now()}})
+            {"$set": {"status": "rejected", "reason": f"upgrader error: {e}", "updated_at": now()}})
         pipeline.set_phase(None)
 
 
@@ -98,13 +98,13 @@ def wait_for_request(stream, timeout: float):
 
 def serve() -> None:
     register()
-    if pause.enabled():  # a previous Gardener died mid-upgrade: don't wait for its pause lease to lapse
+    if pause.enabled():  # a previous Upgrader died mid-upgrade: don't wait for its pause lease to lapse
         pause.end(AGENT)
     stop = threading.Event()
     threading.Thread(target=heartbeat, args=(stop,), daemon=True, name="heartbeat").start()
-    if help_desk.enabled():  # GARDENER_HELP=1: answer Sentinel #2 / Worker requests while upgrades run
+    if help_desk.enabled():  # UPGRADER_HELP=1: answer Monitor #2 / Operator requests while upgrades run
         threading.Thread(target=help_desk.serve, args=(stop,), daemon=True, name="help").start()
-    pipeline.say("Gardener online in the workshop; watching upgrade_requests")
+    pipeline.say("Upgrader online in the workshop; watching upgrade_requests")
     stream = open_stream()  # opened before the first scan so nothing is missed in between
     try:
         for doc in col("upgrade_requests").find({"status": {"$in": IN_FLIGHT}, "reverted_at": {"$exists": False}}).sort("ts", 1):
@@ -126,7 +126,7 @@ def serve() -> None:
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s gardener %(levelname)s %(message)s",
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s upgrader %(levelname)s %(message)s",
                         stream=sys.stdout)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # -> finally: mark ourselves dead
     try:

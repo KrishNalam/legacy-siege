@@ -3,8 +3,8 @@
     python -m adversary.cli list                                   # faults + scenarios
     python -m adversary.cli run bank-night-1 [--round 2]           # play a scenario (waits for its steps)
     python -m adversary.cli fire batch_abort mainframe [--params '{"count":2}']
-    python -m adversary.cli kill worker [--phase step_sent] [--wait 30]
-    python -m adversary.cli kill --agent worker-unix-1
+    python -m adversary.cli kill operator [--phase step_sent] [--wait 30]
+    python -m adversary.cli kill --agent operator-unix-1
     python -m adversary.cli clear                                  # POST /_chaos/clear
     python -m adversary.cli events [-n 20]                         # recent chaos_events
     python -m adversary.cli score                                  # scorecard per run
@@ -121,7 +121,7 @@ def build_parser() -> argparse.ArgumentParser:
     f.add_argument("--params", help="JSON object merged over the fault's defaults")
     f.set_defaults(fn=cmd_fire)
     k = sub.add_parser("kill", help="SIGKILL a bee")
-    k.add_argument("role", nargs="?", default="worker")
+    k.add_argument("role", nargs="?", default="operator")
     k.add_argument("--phase", default=None, help="e.g. step_sent")
     k.add_argument("--agent", default=None, help="exact agent id (overrides role/phase)")
     k.add_argument("--wait", type=float, default=30.0)

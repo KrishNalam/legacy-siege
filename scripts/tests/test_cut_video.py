@@ -9,10 +9,10 @@ import pytest
 from scripts import beatlog, code_cards, cut_video, narration
 
 NAMES = ["night1_attack", "cascade_trace", "lie_caught", "approval", "kill_takeover", "night2_recall",
-         "night2_resolved", "gardener", "night3", "atlas"]
+         "night2_resolved", "upgrader", "night3", "atlas"]
 LOG = {"video_duration_s": 200.0, "metrics": {},
        "beats": [{"name": n, "t_start": 10.0 * i, "t_end": 10.0 * i + 20.0} for i, n in enumerate(NAMES)]}
-CARDS = [{"key": k, "caption": k} for k in ("lease", "guard", "schema")]
+CARDS = [{"key": k, "caption": k} for k in ("lease", "verifier", "schema")]
 # the same take with the 10-beat script's moments recorded (record_demo's script beats)
 NEW = ["ai_checked", "ai_overruled", "schema_drift", "drift_reused", "red_freeze"]
 FULL = {**LOG, "video_duration_s": 400.0,
@@ -102,10 +102,10 @@ def test_captions_use_the_take():
         {"name": "ai_checked", "t_start": 1, "t_end": 2, "decision": "ai_plan"},
         {"name": "ai_overruled", "t_start": 1, "t_end": 2, "op": "restart_batch", "rule": "P3 blast radius"},
         {"name": "schema_drift", "t_start": 1, "t_end": 2, "from": "balance", "to": "acct_bal", "version": 2},
-        {"name": "red_freeze", "t_start": 1, "t_end": 2, "by": "red-assassin", "agent": "worker-2", "takeover_s": 11.2}]})
+        {"name": "red_freeze", "t_start": 1, "t_end": 2, "by": "red-assassin", "agent": "operator-2", "takeover_s": 11.2}]})
     assert "CLAUDE'S PLAN RUNS" in cap["ai"] and "restart_batch → P3 blast radius" in cap["overruled"]
     assert "balance → acct_bal" in cap["drift"] and "MAPPING LEARNED" in cap["drift"]
-    assert "red-assassin FREEZEs worker-2" in cap["red"] and "11 s" in cap["red"]
+    assert "red-assassin FREEZEs operator-2" in cap["red"] and "11 s" in cap["red"]
 
 
 def test_narration_covers_every_segment():
@@ -153,10 +153,10 @@ def test_script_beats_from_recorded_events():
               ev("ai_decided", 93.0, incident="INC-2", decision="ai_plan"),
               ev("drift_noticed", 300.0), ev("mapping_learned", 312.0, frm="balance", to="acct_bal", version=2),
               ev("mapping_reused", 400.0, version=2),
-              ev("takeover", 50.0, incident="INC-1", to="nurse-1"),  # the SIGKILL takeover, before the freeze
+              ev("takeover", 50.0, incident="INC-1", to="recovery-1"),  # the SIGKILL takeover, before the freeze
               ev("red_freeze", 200.0, id="CHX-9", by="red-assassin"),
-              ev("takeover", 211.0, incident="INC-3", to="nurse-2"),
-              ev("red_thaw", 225.0, id="CHX-9", by="red-assassin", agent="worker-2", ok=True)]
+              ev("takeover", 211.0, incident="INC-3", to="recovery-2"),
+              ev("red_thaw", 225.0, id="CHX-9", by="red-assassin", agent="operator-2", ok=True)]
     beats = {b["name"]: b for b in beatlog.script_beats(events, lambda e, d=0.0: round(max(0.0, e["t"] - 1.0 + d), 2))}
     assert beats["ai_checked"]["incident"] == "INC-2" and beats["ai_checked"]["decision"] == "ai_plan"
     assert (beats["ai_checked"]["t_start"], beats["ai_checked"]["t_end"]) == (88.0, 95.5)
@@ -164,13 +164,13 @@ def test_script_beats_from_recorded_events():
     assert beats["schema_drift"]["t_start"] == 298.0 and beats["schema_drift"]["to"] == "acct_bal"
     assert beats["drift_reused"]["version"] == 2
     red = beats["red_freeze"]
-    assert (red["t_start"], red["t_end"], red["takeover_s"], red["agent"]) == (196.0, 213.0, 11.0, "worker-2")
+    assert (red["t_start"], red["t_end"], red["takeover_s"], red["agent"]) == (196.0, 213.0, 11.0, "operator-2")
     assert beatlog.script_beats([], lambda e, d=0.0: e["t"]) == []
 
 
 def test_code_cards_use_real_code():
     keys = {c["key"] for c in code_cards.usable()}
-    assert {"lease", "guard"} <= keys  # schema needs agents/schema.py (tree or the drift branch)
+    assert {"lease", "verifier"} <= keys  # schema needs agents/schema.py (tree or the drift branch)
     src, _ = code_cards.source(next(c for c in code_cards.CARDS if c["key"] == "lease"))
     rows = code_cards.excerpt(src, next(c for c in code_cards.CARDS if c["key"] == "lease")["ranges"])
     assert any("find_one_and_update" in t for _, t in rows)

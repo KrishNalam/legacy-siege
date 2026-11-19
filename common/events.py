@@ -1,4 +1,4 @@
-"""Write the Hive's visible chatter: thoughts (per reasoning step) and waggle-bus messages."""
+"""Write the Hive's visible chatter: thoughts (per reasoning step) and reporter-bus messages."""
 from __future__ import annotations
 
 from .db import col, now

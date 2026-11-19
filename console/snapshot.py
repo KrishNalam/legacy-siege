@@ -60,9 +60,9 @@ async def build(hub: Hub) -> dict:
         _recent_logs(w),
         _find(w.runs, sort=[("started_at", ASCENDING)], limit=50),
         s.stats.find_one({"_id": "current"}),
-        s.stats.find_one({"_id": "comms"}),  # SWARM_COMMS=1 prioritiser totals; None when the switch is off
+        s.stats.find_one({"_id": "comms"}),  # AGENTS_COMMS=1 prioritiser totals; None when the switch is off
         hub.counts(),
-        _find(s.roster, sort=[("_id", ASCENDING)]),  # Comms live roster (SWARM_COMMS=1; else empty)
+        _find(s.roster, sort=[("_id", ASCENDING)]),  # Comms live roster (AGENTS_COMMS=1; else empty)
     )
     approvals = {a["_id"]: a for a in approvals_recent + approvals_pending}
     run = None

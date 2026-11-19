@@ -7,7 +7,7 @@ flowchart LR
   subgraph sources["Who fires"]
     scn["Scenarios<br/>world.chaos_scenarios<br/>run_scenario"]
     btn["War room buttons<br/>and adversary.cli"]
-    fleet["Red fleet (RED_FLEET=1)<br/>6 personas: scout, plan,<br/>strike, observe"]
+    fleet["Red fleet (ADVERSARY=1)<br/>6 personas: scout, plan,<br/>strike, observe"]
   end
   subgraph door["runner.fire"]
     gate["faults.get<br/>known fault, switch on,<br/>valid target"]
@@ -39,8 +39,8 @@ flowchart LR
 3. System faults call the systems chaos hook (`hit_system`). Red never touches system state directly.
 4. `agent_kill` reads the victim's pid from `swarm.agents` and sends a real `SIGKILL`. By default it waits for a worker in phase `step_sent`. `agent_freeze` sends `SIGSTOP`, then `SIGCONT`; `thaw.py` is a guardian that thaws even if the attacker dies.
 5. Scenarios are fixed lists of `(t, fault, target, params)` with a seed, so a rehearsal replays the same timeline. `run_scenario` plays them in a daemon thread.
-6. The Red fleet (`redfleet/`) runs one process per persona (`red-memory` only when `CHAOS_POISON_MEMORY` is on). Claude picks one item from the persona's menu; anything off the menu is rejected and the deterministic playbook decides. Params always come from the menu. The Gardener is never a kill target (`NEVER_KILL`).
-7. The fleet refuses the live `world` / `swarm` databases unless `RED_FLEET_ALLOW_LIVE=1` (`core.live_db_refusal`).
+6. The Red fleet (`redfleet/`) runs one process per persona (`red-memory` only when `ADVERSARY_POISON_MEMORY` is on). Claude picks one item from the persona's menu; anything off the menu is rejected and the deterministic playbook decides. Params always come from the menu. The Gardener is never a kill target (`NEVER_KILL`).
+7. The fleet refuses the live `world` / `swarm` databases unless `ADVERSARY_ALLOW_LIVE=1` (`core.live_db_refusal`).
 8. `score.py` joins what Red fired with what the Hive did, by `run_id`, with one aggregation per database.
 
 ## Key files
@@ -71,19 +71,19 @@ MONGODB_URI='mongodb://localhost:27027/?directConnection=true' PACE=0 .venv/bin/
 
 | name | default | effect |
 |---|---|---|
-| `RED_FLEET` | off | Enables the fleet and the `false_log` / `credential_exploit` faults |
-| `RED_FLEET_ALLOW_LIVE` | off | Lets the fleet attack the live `world` / `swarm` DBs |
-| `RED_FLEET_LLM` | `1` | `0` makes personas use only their deterministic playbook |
-| `RED_FLEET_MAX_ATTACKS` | `2` | Strikes per agent per night; `0` = unlimited |
-| `RED_FLEET_COOLDOWN_S` | `30` | Pause between one agent's strikes |
-| `RED_FLEET_AGENTS` | all | Comma list of attacker ids to run |
-| `RED_COMMANDER` / `RED_PLANNER` | off | Campaign commander; planner in front of it |
+| `ADVERSARY` | off | Enables the fleet and the `false_log` / `credential_exploit` faults |
+| `ADVERSARY_ALLOW_LIVE` | off | Lets the fleet attack the live `world` / `swarm` DBs |
+| `ADVERSARY_LLM` | `1` | `0` makes personas use only their deterministic playbook |
+| `ADVERSARY_MAX_ATTACKS` | `2` | Strikes per agent per night; `0` = unlimited |
+| `ADVERSARY_COOLDOWN_S` | `30` | Pause between one agent's strikes |
+| `ADVERSARY_AGENTS` | all | Comma list of attacker ids to run |
+| `ADVERSARY_COMMANDER` / `ADVERSARY_PLANNER` | off | Campaign commander; planner in front of it |
 | `RUNNER_DECIDES` | off | Runner admits, holds or denies every Red fire |
-| `CHAOS_AGENT_FREEZE` | off | Enables `agent_freeze` |
-| `CHAOS_AGENT_LIE` | off | Enables `lie_to_agent` |
-| `CHAOS_POISON_MEMORY` | off | Enables `poison_memory` |
+| `ADVERSARY_AGENT_FREEZE` | off | Enables `agent_freeze` |
+| `ADVERSARY_AGENT_LIE` | off | Enables `lie_to_agent` |
+| `ADVERSARY_POISON_MEMORY` | off | Enables `poison_memory` |
 | `WORKFLOW_DRIFT` | off | Enables `workflow_drift` and adds it to scenarios |
 | `SCHEMA_DRIFT_DEMO` | off | Adds a `schema_drift` step to scenarios |
-| `CHAOS_OUTCOMES` | off | Watches each event's outcome in a background thread |
+| `ADVERSARY_OUTCOMES` | off | Watches each event's outcome in a background thread |
 
 Back to the [main README](../README.md) · interfaces in [CONTRACTS.md](../CONTRACTS.md)

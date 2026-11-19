@@ -20,7 +20,7 @@ def spawn():
     def _spawn(agent_id: str, **fields) -> subprocess.Popen:
         p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)  # agents.agent dummy"])
         procs.append(p)
-        doc = {"_id": agent_id, "role": "worker", "specialty": "mainframe", "status": "working",
+        doc = {"_id": agent_id, "role": "operator", "specialty": "mainframe", "status": "working",
                "phase": "diagnosing", "pid": p.pid, "last_seen": now(), "started_at": now(),
                "incident": "INC-0001", "task": "INC-0001-t1", "generation": 1, **fields}
         col("agents").insert_one(doc)
@@ -41,8 +41,8 @@ def _killed(p: subprocess.Popen) -> bool:
 
 
 def test_kill_waits_for_step_sent_phase(spawn, monkeypatch):
-    bystander = spawn("worker-unix-1", specialty="unix")
-    victim = spawn("worker-mainframe-1")
+    bystander = spawn("operator-unix-1", specialty="unix")
+    victim = spawn("operator-mainframe-1")
 
     from adversary import faults
     queried = threading.Event()
@@ -57,35 +57,35 @@ def test_kill_waits_for_step_sent_phase(spawn, monkeypatch):
     monkeypatch.setattr(faults, '_candidates', candidates)
 
     def becomes_step_sent():
-        assert queried.wait(10), 'kill never queried for a mid-step worker'
-        col("agents").update_one({"_id": "worker-mainframe-1"}, {"$set": {"phase": "step_sent", "last_seen": now()}})
+        assert queried.wait(10), 'kill never queried for a mid-step operator'
+        col("agents").update_one({"_id": "operator-mainframe-1"}, {"$set": {"phase": "step_sent", "last_seen": now()}})
 
     threading.Thread(target=becomes_step_sent, daemon=True).start()
-    ev = runner.fire("agent_kill", "swarm", {"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 10})
+    ev = runner.fire("agent_kill", "swarm", {"selector": {"role": "operator", "phase": "step_sent"}, "wait_s": 10})
     assert ev["status"] == "ok"
     r = ev["result"]
-    assert r["agent"] == "worker-mainframe-1" and r["pid"] == victim.pid and r["matched"] == "selector"
-    # The first lookup completed empty before the worker transitioned; matching proves polling.
+    assert r["agent"] == "operator-mainframe-1" and r["pid"] == victim.pid and r["matched"] == "selector"
+    # The first lookup completed empty before the operator transitioned; matching proves polling.
     assert r["phase"] == "step_sent" and r["task"] == "INC-0001-t1" and r["waited_s"] > 0
     assert _killed(victim) and bystander.poll() is None
     assert world().chaos_events.find_one({"_id": ev["_id"]})["result"]["pid"] == victim.pid
 
 
 def test_kill_by_agent_id(spawn):
-    p = spawn("scout-1", role="scout", status="idle", phase=None)
-    ev = runner.fire("agent_kill", params={"selector": {"agent": "scout-1"}, "wait_s": 1})
-    assert ev["status"] == "ok" and ev["result"]["agent"] == "scout-1" and _killed(p)
+    p = spawn("investigator-1", role="investigator", status="idle", phase=None)
+    ev = runner.fire("agent_kill", params={"selector": {"agent": "investigator-1"}, "wait_s": 1})
+    assert ev["status"] == "ok" and ev["result"]["agent"] == "investigator-1" and _killed(p)
 
 
-def test_gives_up_instead_of_killing_a_random_busy_worker(spawn):
-    """No worker reaches step_sent within the wait: the kill is skipped. A busy worker in another
+def test_gives_up_instead_of_killing_a_random_busy_operator(spawn):
+    """No operator reaches step_sent within the wait: the kill is skipped. A busy operator in another
     phase is NOT killed as a fallback (a late press must not spoil the round-2 timing)."""
-    busy = spawn("worker-web-1", specialty="web", phase="diagnosing")
-    ev = runner.fire("agent_kill", params={"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0.3})
+    busy = spawn("operator-web-1", specialty="web", phase="diagnosing")
+    ev = runner.fire("agent_kill", params={"selector": {"role": "operator", "phase": "step_sent"}, "wait_s": 0.3})
     r = ev["result"]
     assert ev["status"] == "failed" and r["ok"] is False and r["how"] == "gave_up" and r["skipped"] is True
-    assert r["selector"] == {"role": "worker", "phase": "step_sent"} and r["waited_s"] >= 0.3
-    assert r["error"].startswith("kill skipped: no worker mid-step")
+    assert r["selector"] == {"role": "operator", "phase": "step_sent"} and r["waited_s"] >= 0.3
+    assert r["error"].startswith("kill skipped: no operator mid-step")
     assert "agent" not in r and "pid" not in r
     time.sleep(0.2)
     assert busy.poll() is None  # still alive
@@ -93,16 +93,16 @@ def test_gives_up_instead_of_killing_a_random_busy_worker(spawn):
 
 
 def test_agent_id_selector_unchanged_when_missing(spawn):
-    ev = runner.fire("agent_kill", params={"selector": {"agent": "queen-9"}, "wait_s": 0.2})
+    ev = runner.fire("agent_kill", params={"selector": {"agent": "coordinator-9"}, "wait_s": 0.2})
     assert ev["status"] == "failed" and ev["result"]["how"] == "none"
     assert ev["result"]["error"] == "no live agent matched"
 
 
 def test_no_kill_for_stale_or_dead_agents(spawn):
-    stale = spawn("worker-mainframe-1", phase="step_sent", last_seen=now() - timedelta(minutes=5))
+    stale = spawn("operator-mainframe-1", phase="step_sent", last_seen=now() - timedelta(minutes=5))
     gone = subprocess.Popen([sys.executable, "-c", "pass"])
     gone.wait()
-    col("agents").insert_one({"_id": "worker-unix-1", "role": "worker", "status": "working",
+    col("agents").insert_one({"_id": "operator-unix-1", "role": "operator", "status": "working",
                               "phase": "step_sent", "pid": gone.pid, "last_seen": now()})
     ev = runner.fire("agent_kill", params={"wait_s": 0.3})
     assert ev["status"] == "failed" and ev["result"]["how"] == "gave_up"
@@ -112,8 +112,8 @@ def test_no_kill_for_stale_or_dead_agents(spawn):
 
 def test_refuses_recycled_pid(spawn):
     # agent doc claims a last heartbeat long before this process was started -> pid was reused
-    p = spawn("worker-mainframe-1", phase="step_sent")
-    col("agents").update_one({"_id": "worker-mainframe-1"},
+    p = spawn("operator-mainframe-1", phase="step_sent")
+    col("agents").update_one({"_id": "operator-mainframe-1"},
                              {"$set": {"last_seen": now() - timedelta(seconds=10)}})  # still "fresh"
     ev = runner.fire("agent_kill", params={"wait_s": 0.2})
     assert ev["status"] == "failed" and p.poll() is None
@@ -121,20 +121,20 @@ def test_refuses_recycled_pid(spawn):
 
 def test_stray_kill_never_crosses_into_the_next_night(spawn):
     """A kill requested in night 1 (here from another process's point of view: no in-process reset
-    epoch bump) must not strike a worker in night 2."""
+    epoch bump) must not strike an operator in night 2."""
     w = world()
     w.runs.insert_one({"_id": "RUN-0001", "started_at": now() - timedelta(minutes=2), "ended_at": None})
 
-    def next_night():  # Reset ▸ Next round ends night 1, then night 2 starts and a worker gets busy
+    def next_night():  # Reset ▸ Next round ends night 1, then night 2 starts and an operator gets busy
         time.sleep(0.4)
         w.runs.update_one({"_id": "RUN-0001"}, {"$set": {"ended_at": now()}})
         w.runs.insert_one({"_id": "RUN-0002", "started_at": now(), "ended_at": None})
-        spawn("worker-mainframe-1", phase="diagnosing", incident="INC-0002", task="INC-0002-d1")
+        spawn("operator-mainframe-1", phase="diagnosing", incident="INC-0002", task="INC-0002-d1")
 
     threading.Thread(target=next_night, daemon=True).start()
-    ev = runner.fire("agent_kill", params={"selector": {"role": "worker"}, "wait_s": 3}, run_id="RUN-0001")
+    ev = runner.fire("agent_kill", params={"selector": {"role": "operator"}, "wait_s": 3}, run_id="RUN-0001")
     assert ev["status"] == "failed" and ev["result"]["error"].startswith("called off")
-    victim = col("agents").find_one({"_id": "worker-mainframe-1"})
+    victim = col("agents").find_one({"_id": "operator-mainframe-1"})
     assert victim is not None
     time.sleep(0.2)
     import os  # noqa: PLC0415
@@ -143,8 +143,8 @@ def test_stray_kill_never_crosses_into_the_next_night(spawn):
 
 def test_kill_within_the_same_night_still_lands(spawn):
     world().runs.insert_one({"_id": "RUN-0002", "started_at": now(), "ended_at": None})
-    p = spawn("worker-web-1", specialty="web", phase="step_sent")
-    ev = runner.fire("agent_kill", params={"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0.3},
+    p = spawn("operator-web-1", specialty="web", phase="step_sent")
+    ev = runner.fire("agent_kill", params={"selector": {"role": "operator", "phase": "step_sent"}, "wait_s": 0.3},
                      run_id="RUN-0002")
     assert ev["status"] == "ok" and ev["result"]["matched"] == "selector" and _killed(p)
 
@@ -152,11 +152,11 @@ def test_kill_within_the_same_night_still_lands(spawn):
 def test_freeze_is_opt_in_and_thaws_and_reset_wakes(spawn, monkeypatch):
     import os
     from adversary import faults
-    monkeypatch.delenv('CHAOS_AGENT_FREEZE', raising=False)
+    monkeypatch.delenv('ADVERSARY_AGENT_FREEZE', raising=False)
     with pytest.raises(faults.FaultError):
         runner.fire('agent_freeze')
-    monkeypatch.setenv('CHAOS_AGENT_FREEZE', '1')
-    p = spawn('worker-mainframe-1', phase='step_sent')
+    monkeypatch.setenv('ADVERSARY_AGENT_FREEZE', '1')
+    p = spawn('operator-mainframe-1', phase='step_sent')
     result = {}
     t = threading.Thread(target=lambda: result.update(runner.fire('agent_freeze', params={'freeze_s': 8, 'wait_s': 0})))
     t.start()
@@ -166,12 +166,12 @@ def test_freeze_is_opt_in_and_thaws_and_reset_wakes(spawn, monkeypatch):
             break
         time.sleep(.02)
     else:
-        pytest.fail('worker was never stopped')
+        pytest.fail('operator was never stopped')
     runner.cancel()
     os.kill(p.pid, 0)
     deadline = time.monotonic() + 2
     while 'T' in open(f'/proc/{p.pid}/status').read().split('State:')[1].splitlines()[0]:
-        assert time.monotonic() < deadline, 'reset failed to thaw worker'
+        assert time.monotonic() < deadline, 'reset failed to thaw operator'
         time.sleep(.02)
     assert col('frozen_agents').count_documents({}) == 0
     t.join(20)
@@ -181,8 +181,8 @@ def test_freeze_is_opt_in_and_thaws_and_reset_wakes(spawn, monkeypatch):
 def test_freeze_guardian_thaws_even_if_attacker_dies(spawn, monkeypatch):
     import os
     from adversary import faults
-    monkeypatch.setenv('CHAOS_AGENT_FREEZE', '1')
-    p = spawn('worker-mainframe-1', phase='step_sent')
+    monkeypatch.setenv('ADVERSARY_AGENT_FREEZE', '1')
+    p = spawn('operator-mainframe-1', phase='step_sent')
     attacker = subprocess.Popen([sys.executable, '-c',
         "from adversary import runner; runner.fire('agent_freeze', params={'freeze_s': 2, 'wait_s': 0})"])
     try:
@@ -193,7 +193,7 @@ def test_freeze_guardian_thaws_even_if_attacker_dies(spawn, monkeypatch):
                 break
             time.sleep(.02)
         else:
-            pytest.fail('attacker never froze worker')
+            pytest.fail('attacker never froze operator')
         attacker.kill()
         attacker.wait(5)
         deadline = time.monotonic() + 15
@@ -215,7 +215,7 @@ def test_thaw_identity_survives_wall_clock_changes(spawn, monkeypatch):
     import os
     import signal
     from adversary import faults
-    p = spawn('worker-mainframe-1', phase='step_sent')
+    p = spawn('operator-mainframe-1', phase='step_sent')
     ticks = faults._proc_start_ticks(p.pid)
     assert ticks is not None
     monkeypatch.setattr(faults, '_proc_start_epoch', lambda pid: -999999)

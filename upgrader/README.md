@@ -74,13 +74,13 @@ MONGODB_URI='mongodb://localhost:27027/?directConnection=true' PACE=0 .venv/bin/
 | name | default | effect |
 |---|---|---|
 | `PROVE_WINDOW_S` | `30` | How long prove watches for incidents (via `common.config`) |
-| `GARDENER_PAUSE_MIN_S` | `4` | Minimum on-screen pause while the file is swapped |
-| `GARDENER_REPLAY_WORLD_DB` | `world_test_gardener` | Sandbox world DB for the replay |
-| `GARDENER_REPLAY_SWARM_DB` | `swarm_test_gardener` | Sandbox swarm DB for the replay |
-| `GARDENER_SANDBOX_URI` | unset | Put the sandbox DB on a different MongoDB |
-| `GARDENER_REPLAY_WAIT_S` | `6` | Replay wait time |
-| `GARDENER_HELP` | off | Turns on the help desk |
-| `GARDENER_HELP_WAIT_S` | `5` | How long a worker waits for an answer |
-| `GARDENER_TOOL_PROVE_S` | `120` | Prove window for a tool upgrade |
+| `UPGRADER_PAUSE_MIN_S` | `4` | Minimum on-screen pause while the file is swapped |
+| `UPGRADER_REPLAY_WORLD_DB` | `world_test_gardener` | Sandbox world DB for the replay |
+| `UPGRADER_REPLAY_SWARM_DB` | `swarm_test_gardener` | Sandbox swarm DB for the replay |
+| `UPGRADER_SANDBOX_URI` | unset | Put the sandbox DB on a different MongoDB |
+| `UPGRADER_REPLAY_WAIT_S` | `6` | Replay wait time |
+| `UPGRADER_HELP` | off | Turns on the help desk |
+| `UPGRADER_HELP_WAIT_S` | `5` | How long a worker waits for an answer |
+| `UPGRADER_TOOL_PROVE_S` | `120` | Prove window for a tool upgrade |
 
 Back to the [main README](../README.md) · interfaces in [CONTRACTS.md](../CONTRACTS.md)

@@ -1,6 +1,6 @@
 """End-to-end demo rehearsal: drives the war-room API like a presenter and checks every beat in MongoDB.
 
-    .venv/bin/python -m scripts.demo_check                 # full reset, nights 1-3, Gardener, reset again
+    .venv/bin/python -m scripts.demo_check                 # full reset, nights 1-3, Upgrader, reset again
     .venv/bin/python -m scripts.demo_check --no-reset      # start from the current state
     .venv/bin/python -m scripts.demo_check --drift         # also check schema adaptation and repeat memory
     .venv/bin/python -m scripts.demo_check --keep          # leave the upgraded estate (no final reset)
@@ -8,7 +8,7 @@
 
 The stack must already be running (`.venv/bin/python run.py --reset`). Approvals are auto-approved through
 POST /api/approvals/{id} (like the Beekeeper clicking Approve); the agent kill is fired through POST /api/kill
-right after restart_batch is approved, so the worker dies in phase step_sent. Exit code 0 = every beat PASS.
+right after restart_batch is approved, so the operator dies in phase step_sent. Exit code 0 = every beat PASS.
 
     .venv/bin/python -m scripts.demo_check --drift         # + Statement 3 Q3 rows (opt-in, after night 3)
 
@@ -76,10 +76,10 @@ def md5(p: Path) -> str:
     return hashlib.md5(p.read_bytes()).hexdigest()
 
 
-def worker_kill(ev: dict) -> bool:
-    """A kill chaos event aimed at a worker (by role selector, or by a worker's agent id)."""
+def operator_kill(ev: dict) -> bool:
+    """A kill chaos event aimed at an operator (by role selector, or by an operator's agent id)."""
     sel = (ev.get("params") or {}).get("selector") or {}
-    return sel.get("role") == "worker" or str(sel.get("agent") or "").startswith("worker")
+    return sel.get("role") == "operator" or str(sel.get("agent") or "").startswith("operator")
 
 
 # ---------------------------------------------------------------------------------------------- driver
@@ -90,7 +90,7 @@ class Demo:
         self.sys_http = httpx.Client(base_url=config.SYSTEMS_URL, timeout=10)
         self.approve_delay = approve_delay
         self.autoplay = autoplay  # DEMO_AUTOPLAY stack: click only Night 1, its approval and the kill
-        self.red_kill = red_kill  # RED_FLEET stage run: the Red Assassin fires the night-1 kill, not POST /api/kill
+        self.red_kill = red_kill  # ADVERSARY stage run: the Red Assassin fires the night-1 kill, not POST /api/kill
         self.r = report
         self.s, self.w = swarm(), world()
 
@@ -135,22 +135,22 @@ class Demo:
         if reset:
             log("POST /api/reset {mode: full}")
             out = self.post("/api/reset", {"mode": "full"})
-            gr = out.get("gardener_revert")
+            gr = out.get("upgrader_revert")
             if isinstance(gr, dict) and gr.get("changed"):
-                log(f"gardener revert restored systems/mainframe.py from {Path(gr['backup']).name}")
+                log(f"upgrader revert restored systems/mainframe.py from {Path(gr['backup']).name}")
 
         def ready():
             agents = self.live_agents()
             ids = {a["_id"] for a in agents}
             roles = [a["role"] for a in agents]
             systems = {d["_id"]: d for d in self.w.systems.find()}
-            # SWARM_DYNAMIC: no standing scouts/workers (they are spawned per incident), so don't wait for them
+            # AGENTS_AUTOSCALE: no standing investigators/operators (they are spawned per incident), so don't wait for them
             dyn = bool((self.s.stats.find_one({"_id": "swarm_scale"}) or {}).get("dynamic"))
-            pool = dyn or (roles.count("worker") >= 3 and "worker-mainframe-1" in ids and roles.count("scout") >= 1)
+            pool = dyn or (roles.count("operator") >= 3 and "operator-mainframe-1" in ids and roles.count("investigator") >= 1)
             ok = (len(systems) == 3 and all(d["status"] == "up" for d in systems.values())
-                  and pool and "guard-1" in ids
-                  and "sentinel-1" in ids and "gardener-1" in ids
-                  and roles.count("nurse") >= 1 and not self.s.incidents.count_documents({"active": True}))
+                  and pool and "verifier-1" in ids
+                  and "monitor-1" in ids and "upgrader-1" in ids
+                  and roles.count("recovery") >= 1 and not self.s.incidents.count_documents({"active": True}))
             return (agents, systems) if ok else None
 
         got, secs = self.wait("ready", ready, 60)
@@ -190,15 +190,15 @@ class Demo:
             q["opened_at"] = {"$lte": first["closed_at"]}
         return list(self.s.incidents.find(q).sort("opened_at", 1))
 
-    def red_worker_kill(self, run_id: str, obs: dict) -> dict | None:
-        """The Red Assassin's first kill of a worker this night. Beat d is the worker kill + nurse takeover; the
-        Assassin may also take out a queen first (the standby takes the crown), which is logged, not scored."""
+    def red_operator_kill(self, run_id: str, obs: dict) -> dict | None:
+        """The Red Assassin's first kill of an operator this night. Beat d is the operator kill + recovery takeover; the
+        Assassin may also take out a coordinator first (the standby takes the crown), which is logged, not scored."""
         for ev in self.w.chaos_events.find({"run_id": run_id, "fault": "agent_kill", "by": "red-assassin",
                                             "_id": {"$nin": obs.setdefault("other_kills", [])}}).sort("ts", 1):
-            if worker_kill(ev):
+            if operator_kill(ev):
                 return ev
             obs["other_kills"].append(ev["_id"])
-            log(f"Red Assassin fired {ev['_id']} {ev.get('params', {}).get('selector')} (not a worker: a takeover, "
+            log(f"Red Assassin fired {ev['_id']} {ev.get('params', {}).get('selector')} (not an operator: a takeover, "
                 "not the scored kill)")
         return None
 
@@ -229,17 +229,17 @@ class Demo:
                     self.approve(apr["_id"])
                     step = apr.get("step_id", "")
                     if kill and obs["kill_fired_at"] is None and "restart_batch" in apr.get("desc", "") \
-                            and not (self.red_kill and self.red_worker_kill(run_id, obs)):
-                        if self.red_kill:  # the Assassin spent its strike elsewhere (e.g. a queen): press Kill
-                            log(f"no Red worker kill yet (other kills: {obs.get('other_kills') or []}); "
+                            and not (self.red_kill and self.red_operator_kill(run_id, obs)):
+                        if self.red_kill:  # the Assassin spent its strike elsewhere (e.g. a coordinator): press Kill
+                            log(f"no Red operator kill yet (other kills: {obs.get('other_kills') or []}); "
                                 "the presenter presses Kill")
                             obs["kill_source"] = "manual"
-                        log(f"POST /api/kill {{role: worker, phase: step_sent}} (restart_batch {step} is next)")
-                        self.post("/api/kill", {"selector": {"role": "worker", "phase": "step_sent"}})
+                        log(f"POST /api/kill {{role: operator, phase: step_sent}} (restart_batch {step} is next)")
+                        self.post("/api/kill", {"selector": {"role": "operator", "phase": "step_sent"}})
                         obs["kill_fired_at"] = time.monotonic() - t0
                         obs["kill_wall"] = datetime.now(tz=timezone.utc)
             if kill and self.red_kill and obs["kill_fired_at"] is None:  # the Red Assassin presses Kill itself
-                ev = self.red_worker_kill(run_id, obs)
+                ev = self.red_operator_kill(run_id, obs)
                 if ev:
                     log(f"Red Assassin fired {ev['_id']} {ev.get('params', {}).get('selector')}")
                     obs["kill_fired_at"] = time.monotonic() - t0
@@ -287,7 +287,7 @@ class Demo:
 
     def check_lie(self, inc: dict) -> None:
         inc_id = inc["_id"]
-        rejects = list(self.s.thoughts.find({"incident": inc_id, "kind": "reject", "agent": "guard-1"}))
+        rejects = list(self.s.thoughts.find({"incident": inc_id, "kind": "reject", "agent": "verifier-1"}))
         lied_steps = [s for s in inc.get("steps") or [] if len(s.get("attempts") or []) >= 2 and s["system"] == "mainframe"]
         detail, ok = "no mainframe step needed a second attempt", False
         if lied_steps:
@@ -301,7 +301,7 @@ class Demo:
                   and rn.get("status") == "verified" and bool(rn.get("evidence")) and st["status"] == "verified"
                   and len(set(st["attempts"])) == len(st["attempts"]))
             detail = (f"{st['op']}: {first} ACK applied:true → ledger failed (receipt lied={receipt.get('lied')}); "
-                      f"{last} verified, evidence '{(rn.get('evidence') or '')[:50]}'; guard reject: "
+                      f"{last} verified, evidence '{(rn.get('evidence') or '')[:50]}'; verifier reject: "
                       f"'{rejects[0]['text'][:40] if rejects else 'NONE'}'")
         self.r.add("b. lying system caught (ACK ≠ APPLIED)", ok, detail)
         # every step's attempts == its ledger rows, and the current attempt's ledger status == step status
@@ -338,7 +338,7 @@ class Demo:
 
     def check_kill(self, inc: dict, obs: dict) -> None:
         if obs["kill_fired_at"] is None:
-            self.r.add("d. agent kill → nurse takeover", False, "kill never fired (no restart_batch approval)")
+            self.r.add("d. agent kill → recovery takeover", False, "kill never fired (no restart_batch approval)")
             return
         q = {"_id": obs["kill_event"]} if obs.get("kill_event") else \
             {"run_id": obs["run_id"], "fault": "agent_kill", "source": "manual"} if obs.get("kill_source") else \
@@ -347,7 +347,7 @@ class Demo:
             {**q, "status": {"$in": ["ok", "failed"]}}), 40)
         res = (ev or {}).get("result") or {}
         if not res.get("ok"):
-            self.r.add("d. worker SIGKILLed in step_sent", False, f"kill event: {res}")
+            self.r.add("d. operator SIGKILLed in step_sent", False, f"kill event: {res}")
             return
         victim, pid = res["agent"], res["pid"]
         try:
@@ -357,7 +357,7 @@ class Demo:
             alive = False
         except PermissionError:
             alive = True
-        self.r.add("d. worker SIGKILLed in step_sent", not alive and res.get("phase") == "step_sent",
+        self.r.add("d. operator SIGKILLed in step_sent", not alive and res.get("phase") == "step_sent",
                    f"{victim} pid {pid} phase={res.get('phase')} task={res.get('task')} matched={res.get('matched')} "
                    f"waited {res.get('waited_s')}s; process {'STILL ALIVE' if alive else 'gone'}")
         killed_at = ev.get("done_at") or ev["ts"]
@@ -372,13 +372,13 @@ class Demo:
         hos = [h for h in inc.get("handoffs") or [] if h.get("from") == victim]
         task = self.s.tasks.find_one({"_id": res.get("task")}) if res.get("task") else None
         if not hos:
-            self.r.add("d. nurse takeover from checkpoint", False, f"no handoff from {victim} on {inc['_id']}")
+            self.r.add("d. recovery takeover from checkpoint", False, f"no handoff from {victim} on {inc['_id']}")
             return
         h = hos[0]
         cp = self.s.checkpoints.find_one({"checkpoint_id": h.get("checkpoint_id")}, {"thread_id": 1})
-        ok = (str(h.get("to", "")).startswith("nurse") and cp is not None and task is not None
+        ok = (str(h.get("to", "")).startswith("recovery") and cp is not None and task is not None
               and task.get("owner") == h["to"] and int(task.get("generation", 0)) >= 2)
-        self.r.add("d. nurse takeover from checkpoint", ok,
+        self.r.add("d. recovery takeover from checkpoint", ok,
                    f"{h.get('to')} claimed {res.get('task')} gen {task.get('generation') if task else '?'}, "
                    f"checkpoint {str(h.get('checkpoint_id'))[:13]}… (thread {cp.get('thread_id') if cp else 'MISSING'}) "
                    f"resume_at={h.get('resume_at')} reconciled={[r.get('result') for r in h.get('reconciled') or []]}",
@@ -398,10 +398,10 @@ class Demo:
                    f"{len(applied)}x on the estate ({len(receipts)} receipt(s))" if not reapplied
                    else f"re-sent after kill: {reapplied}")
         spare, secs = self.wait("respawn", lambda: self.s.agents.find_one(
-            {"standby_for": victim, "status": {"$ne": "dead"}}), config.NURSE_RESPAWN_S + 15)
-        self.r.add("d. supervisor respawns a nurse standby", spare is not None,
+            {"standby_for": victim, "status": {"$ne": "dead"}}), config.RECOVERY_RESPAWN_S + 15)
+        self.r.add("d. supervisor respawns a recovery standby", spare is not None,
                    f"{spare['_id']} on the bench (standby_for {victim})" if spare else
-                   f"no standby_for={victim} within {config.NURSE_RESPAWN_S + 15:.0f}s")
+                   f"no standby_for={victim} within {config.RECOVERY_RESPAWN_S + 15:.0f}s")
 
     def check_resolved(self, inc: dict, obs: dict, tag: str) -> None:
         inc = self.s.incidents.find_one({"_id": inc["_id"]})
@@ -457,11 +457,11 @@ class Demo:
                    f"hops {r2 and r2.get('avg_hops')} | speedup {sc.get('speedup')}x")
         return {"obs": obs, "inc": inc}
 
-    def gardener(self, timeout: float) -> bool:
-        log("=== GARDENER: recurring fault → upgrade request → approve → deploy → prove ===")
+    def upgrader(self, timeout: float) -> bool:
+        log("=== UPGRADER: recurring fault → upgrade request → approve → deploy → prove ===")
         upg, secs = self.wait("upgrade request", lambda: self.s.upgrade_requests.find_one(
             {"system": "mainframe", "fault_class": "batch_abort"}), 30)
-        self.r.add("g. sentinel files upgrade request", upg is not None,
+        self.r.add("g. monitor files upgrade request", upg is not None,
                    f"{upg['_id']} '{upg.get('weakness')}' evidence={upg.get('evidence')}" if upg else "none within 30s", secs)
         if not upg:
             return False
@@ -487,7 +487,7 @@ class Demo:
             time.sleep(0.5)
         doc = self.s.upgrade_requests.find_one({"_id": upg["_id"]})
         tests = doc.get("tests") or {}
-        self.r.add("g. gardener plans + tests + asks approval", bool(approved and tests.get("passed") and doc.get("diff")),
+        self.r.add("g. upgrader plans + tests + asks approval", bool(approved and tests.get("passed") and doc.get("diff")),
                    f"diff {doc.get('diff_lines')} lines, tests passed={tests.get('passed')} "
                    f"(pytest={tests.get('pytest_passed')}, replay={tests.get('replay_passed')}), approval "
                    f"{approved['_id'] if approved else 'NEVER REQUESTED'}"
@@ -497,7 +497,7 @@ class Demo:
         stale = list(self.s.playbooks.find({"system": "mainframe", "system_version": {"$lt": mf.get("version", 0)}},
                                            {"stale": 1}))
         # Under autoplay + Red fleet the upgrade can deploy before this phase starts, so before_md5 may already be the
-        # patched file: compare against the Gardener's backup of the original when it has one.
+        # patched file: compare against the Upgrader's backup of the original when it has one.
         backup = Path(doc.get("backup") or "")
         if backup.is_file():
             before_md5 = md5(backup)
@@ -507,7 +507,7 @@ class Demo:
                    f"mainframe version {doc.get('version_before')}→{mf.get('version')}, validation_enabled="
                    f"{st.get('validation_enabled')}, backup {Path(doc.get('backup') or '?').name}")
         stale_ok = bool(stale) and all(p.get("stale") for p in stale)
-        if not stale_ok:  # the sentinel notices the version bump on its next sweep
+        if not stale_ok:  # the monitor notices the version bump on its next sweep
             time.sleep(3)
             stale = list(self.s.playbooks.find({"system": "mainframe", "system_version": {"$lt": mf.get("version", 0)}},
                                                {"stale": 1}))
@@ -583,7 +583,7 @@ class Demo:
         st = {s["op"]: s for s in inc1.get("steps") or []}
         rh, rb = st.get("release_hold") or {}, st.get("restart_batch") or {}
         m = self.s.schema_mappings.find_one({"_id": "mainframe.workflow.restart_batch"}) or {}
-        said = self.s.thoughts.find_one({"incident": inc1["_id"], "agent": "guard-1", "kind": "learn",
+        said = self.s.thoughts.find_one({"incident": inc1["_id"], "agent": "verifier-1", "kind": "learn",
                                          "text": {"$regex": "^workflow changed: restart_batch now needs release_hold"}})
         # the refused attempt as the incident recorded it (world.op_receipts is wiped by the round reset)
         refused = {"_id": wd["refused"]} if wd.get("refused") in (rb.get("attempts") or [])[:-1] else None
@@ -611,12 +611,12 @@ class Demo:
                    f"v{(rh2.get('workflow') or {}).get('version')}; restart_batch attempts {len(rb2.get('attempts') or [])}")
 
     def final_reset(self) -> None:
-        log("POST /api/reset {mode: full} (demo reset: Gardener revert)")
+        log("POST /api/reset {mode: full} (demo reset: Upgrader revert)")
         out = self.post("/api/reset", {"mode": "full"})
         time.sleep(2)
         st = self.mf_state()
         mf = self.w.systems.find_one({"_id": "mainframe"}) or {}
-        gr = out.get("gardener_revert") or {}
+        gr = out.get("upgrader_revert") or {}
         ok = st.get("validation_enabled") is False and mf.get("version") == 1 and not self.s.playbooks.count_documents({})
         self.r.add("g. demo reset restores legacy mainframe.py", ok,
                    f"revert changed={gr.get('changed') if isinstance(gr, dict) else gr}, validation_enabled="
@@ -625,9 +625,9 @@ class Demo:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base", default=os.environ.get("WARROOM_URL", f"http://127.0.0.1:{config.WARROOM_PORT}"))
+    ap.add_argument("--base", default=os.environ.get("CONSOLE_URL", f"http://127.0.0.1:{config.CONSOLE_PORT}"))
     ap.add_argument("--no-reset", action="store_true", help="don't full-reset before night 1")
-    ap.add_argument("--keep", action="store_true", help="don't full-reset (Gardener revert) at the end")
+    ap.add_argument("--keep", action="store_true", help="don't full-reset (Upgrader revert) at the end")
     ap.add_argument("--approve-delay", type=float, default=1.5, help="seconds a pending approval stays on screen")
     ap.add_argument("--night-timeout", type=float, default=240)
     ap.add_argument("--night3-watch", type=float, default=env_float("NIGHT3_WATCH_S", 25),
@@ -651,7 +651,7 @@ def main() -> int:
             n1 = d.night1(a.night_timeout)
             if n1:
                 n2 = d.night2(n1, a.night_timeout)
-                if n2 and d.gardener(a.night_timeout):
+                if n2 and d.upgrader(a.night_timeout):
                     d.night3(a.night3_watch)
             if a.check_ai and config.ANTHROPIC_API_KEY and (config.AI_SECOND_OPINION or config.AI_DRIVES):
                 d.check_ai([n["inc"]["_id"] for n in (n1, n2) if n])

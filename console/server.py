@@ -87,11 +87,11 @@ def _page(name: str) -> FileResponse:
 
 @app.get("/")
 async def index(view: str | None = None) -> FileResponse:
-    """The war room page. ``WARROOM_VIEW`` (diagram | flow, default diagram) picks what ``/`` serves;
+    """The war room page. ``CONSOLE_VIEW`` (diagram | flow, default diagram) picks what ``/`` serves;
     ``?view=diagram|flow`` overrides it."""
     if view in VIEWS:
         return _page(view)
-    default = os.environ.get("WARROOM_VIEW", "diagram").strip().lower()
+    default = os.environ.get("CONSOLE_VIEW", "diagram").strip().lower()
     return _page(default if default in VIEWS else "diagram")
 
 

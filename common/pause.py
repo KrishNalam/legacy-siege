@@ -1,15 +1,15 @@
-"""Gardener pause (GARDENER_PAUSE=1, default OFF): every agent, swarm and Red fleet, holds still while the
-Gardener writes and hot-reloads a system, then carries on.
+"""Upgrader pause (UPGRADER_PAUSE=1, default OFF): every agent, swarm and Red fleet, holds still while the
+Upgrader writes and hot-reloads a system, then carries on.
 
-One doc, `swarm.stats{_id:"gardener_pause"}` = {active, by, system, upgrade, reason, since, until, ended_at}.
-It is a **lease**: the pause counts only while `until` is in the future, and the Gardener renews it every
-few seconds from a background thread for as long as the upgrade runs. If the Gardener dies mid-upgrade
-(SIGKILL, crash, box reboot) nobody renews it, and within GARDENER_PAUSE_LEASE_S every agent resumes on
-its own. A restarted Gardener also clears it at startup, and a full reset wipes swarm.stats.
+One doc, `swarm.stats{_id:"upgrader_pause"}` = {active, by, system, upgrade, reason, since, until, ended_at}.
+It is a **lease**: the pause counts only while `until` is in the future, and the Upgrader renews it every
+few seconds from a background thread for as long as the upgrade runs. If the Upgrader dies mid-upgrade
+(SIGKILL, crash, box reboot) nobody renews it, and within UPGRADER_PAUSE_LEASE_S every agent resumes on
+its own. A restarted Upgrader also clears it at startup, and a full reset wipes swarm.stats.
 
 The pause is cooperative, not SIGSTOP: agents stop at their next safe point (top of a tick / loop),
 keep heartbeating and renewing their work leases, and simply don't start new work. So nobody is declared
-dead, no lease expires and no nurse takes over because of the pause.
+dead, no lease expires and no recovery takes over because of the pause.
 """
 from __future__ import annotations
 
@@ -21,18 +21,18 @@ from datetime import timedelta
 
 from common.db import col, now
 
-DOC = "gardener_pause"
+DOC = "upgrader_pause"
 _CHECK_EVERY_S = 1.0  # an agent re-reads the pause doc at most this often (keeps Atlas round trips low)
 _cache: dict = {"at": -1e9, "doc": None}
 
 
 def enabled() -> bool:
-    return os.environ.get("GARDENER_PAUSE", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("UPGRADER_PAUSE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def lease_s() -> float:
     try:
-        return max(2.0, float(os.environ.get("GARDENER_PAUSE_LEASE_S") or 15))
+        return max(2.0, float(os.environ.get("UPGRADER_PAUSE_LEASE_S") or 15))
     except ValueError:
         return 15.0
 

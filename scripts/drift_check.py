@@ -7,14 +7,14 @@
 Also reused by scripts.demo_check --drift; the default demo stays unchanged. Beats checked:
   a. bank-drift renames unix's manifest field balance -> acct_bal; unix stays UP, the portal degrades blaming unix
   b. one incident; the walk portal -> unix finds schema_drift on unix (MongoDB $jsonSchema + field diff)
-  c. map_field + refresh_cache verified by guard-1 with read-back evidence (values line up)
-  d. swarm.schema_mappings holds balance -> acct_bal at v2; the guard says "mapping learned v2"
-  e. incident resolved, portal up, playbook saved; no Gardener upgrade request for schema_drift
+  c. map_field + refresh_cache verified by verifier-1 with read-back evidence (values line up)
+  d. swarm.schema_mappings holds balance -> acct_bal at v2; the verifier says "mapping learned v2"
+  e. incident resolved, portal up, playbook saved; no Upgrader upgrade request for schema_drift
   f. (default) a second vendor patch acct_bal -> ledger_bal is diffed against the LEARNED schema -> v3
   g. (default) next round, the same balance -> acct_bal patch again: the round reset kept the verified mapping
-     history, so the unix hop says "seen before: mapping v2 reused" (no Claude call), the Guard reuses v2, and
+     history, so the unix hop says "seen before: mapping v2 reused" (no Claude call), the Verifier reuses v2, and
      $vectorSearch recall makes it 1 hop
-With AI_SECOND_OPINION=1 + a key on the stack, an extra row checks incident.ai (kind schema_mapping, Guard verdict).
+With AI_SECOND_OPINION=1 + a key on the stack, an extra row checks incident.ai (kind schema_mapping, Verifier verdict).
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class Drift(Demo):
     def wait_good_sample(self) -> bool:
         got, secs = self.wait("good sample", lambda: self.s.schema_samples.find_one({"_id": "good:unix:xfer_manifest"}),
                               30)
-        return self.r.add("good sample", bool(got), "sentinel stored a known-good xfer_manifest sample"
+        return self.r.add("good sample", bool(got), "monitor stored a known-good xfer_manifest sample"
                           if got else "no good sample captured in 30s", secs)
 
     def drift(self, start, old: str, new: str, version: int, timeout: float) -> bool:
@@ -60,19 +60,19 @@ class Drift(Demo):
                     break
             time.sleep(0.5)
         secs = time.monotonic() - t0
-        early = self.s.thoughts.find_one({"agent": {"$regex": "^sentinel"}, "text": {"$regex": f"feed schema changed: "
+        early = self.s.thoughts.find_one({"agent": {"$regex": "^monitor"}, "text": {"$regex": f"feed schema changed: "
                                           f"{old} missing"}, "ts": {"$gte": started}}, sort=[("ts", -1)])
         if early:
-            log(f"sentinel noticed early: {early['text'][:90]}")
-        self.r.add(f"v{version} sentinel before portal", bool(early) and portal_bad is not None
+            log(f"monitor noticed early: {early['text'][:90]}")
+        self.r.add(f"v{version} monitor before portal", bool(early) and portal_bad is not None
                    and early["ts"] < portal_bad_at,
-                   f"sentinel notice={(early or {}).get('ts')}; portal degradation observed="
+                   f"monitor notice={(early or {}).get('ts')}; portal degradation observed="
                    f"{portal_bad_at if portal_bad is not None else 'never'}")
         feed = self.sys_http.get("/unix/state").json().get("feed") or {}
         rec = (feed.get("sample") or [{}])[0]
         self.r.add(f"v{version} a. drift", portal_bad is not None and not unix_down and new in rec and old not in rec,
                    f"manifest field {old} → {new} (schema v{feed.get('schema_version')}); unix stayed up={not unix_down}; "
-                   f"portal degraded at {portal_bad if portal_bad is None else round(portal_bad, 1)}s; sentinel noticed "
+                   f"portal degraded at {portal_bad if portal_bad is None else round(portal_bad, 1)}s; monitor noticed "
                    f"first: {bool(early)}", portal_bad)
         inc = self.s.incidents.find_one({"_id": inc_id}) if inc_id else None
         if not inc:
@@ -85,12 +85,12 @@ class Drift(Demo):
         st = {s["op"]: s for s in inc.get("steps") or []}
         mf, rc = st.get("map_field") or {}, st.get("refresh_cache") or {}
         led = self.s.ledger.find_one({"action_id": mf.get("action_id")}) or {}
-        self.r.add(f"v{version} c. guard", mf.get("status") == "verified" and rc.get("status") == "verified"
+        self.r.add(f"v{version} c. verifier", mf.get("status") == "verified" and rc.get("status") == "verified"
                    and "line up" in (mf.get("evidence") or "") and led.get("status") == "verified",
                    f"map_field(source={mf.get('params', {}).get('source')}) {mf.get('status')}: "
                    f"{(mf.get('evidence') or '')[:90]}")
         m = self.s.schema_mappings.find_one({"_id": MID}) or {}
-        said = self.s.thoughts.find_one({"kind": "learn", "agent": "guard-1",
+        said = self.s.thoughts.find_one({"kind": "learn", "agent": "verifier-1",
                                          "text": {"$regex": f"{old} → {new} · mapping learned v{version}"}})
         self.r.add(f"v{version} d. mapping", m.get("source") == new and m.get("version") == version and bool(said),
                    f"schema_mappings {MID}: source={m.get('source')} v{m.get('version')} "
@@ -99,9 +99,9 @@ class Drift(Demo):
         ai = (self.s.incidents.find_one({"_id": inc_id}, {"ai": 1}) or {}).get("ai")
         if ai:
             self.r.add(f"v{version} ai", ai.get("kind") == "schema_mapping"
-                       and (ai.get("guard") or {}).get("verdict") == "verified",
+                       and (ai.get("verifier") or {}).get("verdict") == "verified",
                        f"proposed_by={ai.get('proposed_by')} model={ai.get('model')} "
-                       f"verdict={(ai.get('verdicts') or [{}])[0].get('verdict')} guard={(ai.get('guard') or {}).get('reason')}")
+                       f"verdict={(ai.get('verdicts') or [{}])[0].get('verdict')} verifier={(ai.get('verifier') or {}).get('reason')}")
         upg = self.s.upgrade_requests.count_documents({"fault_class": "schema_drift"})
         return self.r.add(f"v{version} e. resolved", inc.get("status") == "resolved" and bool(inc.get("playbook_id"))
                           and all(v == "up" for v in health.values()) and upg == 0,
@@ -126,12 +126,12 @@ def _repeat(self, timeout: float) -> bool:
                                   "findings.params.proposed_by": "memory"}, {"findings.facts": 1})
     said = said and {"text": next((f for f in said["findings"]["facts"] if f.startswith("seen before:")), "")}
     m = self.s.schema_mappings.find_one({"_id": MID}) or {}
-    guard = self.s.thoughts.find_one({"incident": inc["_id"], "kind": "learn",
+    verifier = self.s.thoughts.find_one({"incident": inc["_id"], "kind": "learn",
                                       "text": {"$regex": "seen before: mapping v2 reused"}})
     return self.r.add("repeat g. memory", inc["status"] == "resolved" and (inc.get("recall") or {}).get("used")
                       and len(inc.get("diagnosis_path") or []) == 1 and bool(said and said["text"])
                       and m.get("source") == "acct_bal" and m.get("version") == 2 and m.get("reused") is True
-                      and bool(guard),
+                      and bool(verifier),
                       f"{inc['_id']}: recall used={(inc.get('recall') or {}).get('used')}, path "
                       f"{'→'.join(inc.get('diagnosis_path') or [])}, TTR {(inc.get('metrics') or {}).get('ttr_s')}s, "
                       f"mapping v{m.get('version')} {m.get('source')} reused={m.get('reused')} "
@@ -144,7 +144,7 @@ Drift.repeat = _repeat
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--base", default=os.environ.get("WARROOM_URL", f"http://127.0.0.1:{config.WARROOM_PORT}"))
+    ap.add_argument("--base", default=os.environ.get("CONSOLE_URL", f"http://127.0.0.1:{config.CONSOLE_PORT}"))
     ap.add_argument("--no-reset", action="store_true")
     ap.add_argument("--keep", action="store_true", help="don't full-reset at the end")
     ap.add_argument("--once", action="store_true", help="skip the second drift (v3) and the repeat round")
@@ -157,7 +157,7 @@ def main() -> int:
         if d.preflight(reset=not a.no_reset) and d.wait_good_sample():
             ok = d.drift(lambda: d.post("/api/scenario/bank-drift"), "balance", "acct_bal", 2, a.timeout)
             if ok and not a.once:
-                # no wait: the Guard re-captured the good sample when it stored v2 (review fix 1)
+                # no wait: the Verifier re-captured the good sample when it stored v2 (review fix 1)
                 g = d.s.schema_samples.find_one({"_id": "good:unix:xfer_manifest"}) or {}
                 ok = rep.add("v2 good sample", "acct_bal" in (g.get("record") or {}),
                              f"good sample right after v2 carries acct_bal: {'acct_bal' in (g.get('record') or {})}")

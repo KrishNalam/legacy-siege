@@ -1,4 +1,4 @@
-"""The fixture system's own small test file (what the Gardener's Test step runs)."""
+"""The fixture system's own small test file (what the Upgrader's Test step runs)."""
 from systems import mainframe
 
 

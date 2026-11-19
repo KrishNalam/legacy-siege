@@ -36,27 +36,27 @@ const FAULT = {
   credential_exploit: "an attacker is using a default password", slow_apply: "its changes apply late",
 };
 const ROLE = {
-  queen: { c: "#ffc94d", tag: "coordinator" }, scout: { c: "#5cc8ff", tag: "investigator" },
-  worker: { c: "#8fb0ff", tag: "fixer" }, guard: { c: "#34e39a", tag: "the checker" },
-  nurse: { c: "#ff9ccf", tag: "takes over dead bees’ jobs" }, sentinel: { c: "#7fd8ff", tag: "watches system health" },
-  gardener: { c: "#a6f0a0", tag: "writes permanent code fixes" }, waggle: { c: "#6ee7d8", tag: "shares what was learned" },
+  coordinator: { c: "#ffc94d", tag: "coordinator" }, investigator: { c: "#5cc8ff", tag: "investigator" },
+  operator: { c: "#8fb0ff", tag: "fixer" }, verifier: { c: "#34e39a", tag: "the checker" },
+  recovery: { c: "#ff9ccf", tag: "takes over dead bees’ jobs" }, monitor: { c: "#7fd8ff", tag: "watches system health" },
+  upgrader: { c: "#a6f0a0", tag: "writes permanent code fixes" }, reporter: { c: "#6ee7d8", tag: "shares what was learned" },
 };
-const NAMES = { "worker-web-1": `Portal ${BEE_NAME.worker.toLowerCase()}`, "worker-unix-1": `Unix ${BEE_NAME.worker.toLowerCase()}`,
-  "worker-mainframe-1": `Mainframe ${BEE_NAME.worker.toLowerCase()}`, "queen-1": BEE_NAME.queen, "queen-2": `Backup ${BEE_NAME.queen.toLowerCase()}`,
-  "guard-1": BEE_NAME.guard, "sentinel-1": BEE_NAME.sentinel, "gardener-1": BEE_NAME.gardener, "scout-1": BEE_NAME.scout, "nurse-1": BEE_NAME.nurse,
-  "waggle-1": BEE_NAME.waggle, "platform-1": BEE_NAME.platform };
+const NAMES = { "operator-web-1": `Portal ${BEE_NAME.operator.toLowerCase()}`, "operator-unix-1": `Unix ${BEE_NAME.operator.toLowerCase()}`,
+  "operator-mainframe-1": `Mainframe ${BEE_NAME.operator.toLowerCase()}`, "coordinator-1": BEE_NAME.coordinator, "coordinator-2": `Backup ${BEE_NAME.coordinator.toLowerCase()}`,
+  "verifier-1": BEE_NAME.verifier, "monitor-1": BEE_NAME.monitor, "upgrader-1": BEE_NAME.upgrader, "investigator-1": BEE_NAME.investigator, "recovery-1": BEE_NAME.recovery,
+  "reporter-1": BEE_NAME.reporter, "toolsmith-1": BEE_NAME.toolsmith };
 function agentName(id) {
   if (!id) return "a bee";
   const a = state.agents.get(id);
-  if (a?.role === "queen") {
+  if (a?.role === "coordinator") {
     if (a.status === "dead" || a.status === "standby") return a.status === "dead" ? "Queen" : "Backup queen";
-    return [...state.agents.values()].some((q) => q.role === "queen" && q.status === "dead") ? "New queen" : "Queen";
+    return [...state.agents.values()].some((q) => q.role === "coordinator" && q.status === "dead") ? "New queen" : "Queen";
   }
   if (NAMES[id]) return NAMES[id];
   const m = id.match(/^(\w+?)-(?:(\w+)-)?(\d+)$/);
   if (!m) return id;
   const base = BEE_NAME[m[1]] || m[1][0].toUpperCase() + m[1].slice(1);
-  return m[2] ? `${sn(m[2] === "web" ? "portal" : m[2])} ${BEE_NAME.worker.toLowerCase()} ${m[3]}` : `${base} ${m[3]}`;
+  return m[2] ? `${sn(m[2] === "web" ? "portal" : m[2])} ${BEE_NAME.operator.toLowerCase()} ${m[3]}` : `${base} ${m[3]}`;
 }
 const roleOf = (id) => state.agents.get(id)?.role || String(id || "").split("-")[0];
 
@@ -94,7 +94,7 @@ function translate(t) {
   if (/^Loaded .*checkpoint/.test(x)) return { text: "Loaded the dead bee’s saved progress from MongoDB. Finished steps are not repeated.", story: false };
   if (/already took effect/.test(x)) return { text: "The dead bee’s last action had already worked, so it is not sent twice.", story: true };
   if (/resending the SAME action id/.test(x)) return { text: "Re-sending the same action safely (the system ignores duplicates).", story: false };
-  if ((m = x.match(/^(\S+) went silent — (\S+) takes the queen lease/))) return { text: `${esc(agentName(m[1]))} went silent. <span class="g">I’m queen now</span> and carry on.`, story: true };
+  if ((m = x.match(/^(\S+) went silent — (\S+) takes the coordinator lease/))) return { text: `${esc(agentName(m[1]))} went silent. <span class="g">I’m queen now</span> and carry on.`, story: true };
   if ((m = x.match(/^Resolved (INC-\d+) in (\d+)s/))) return { text: `<span class="g">All green.</span> Fixed in ${m[2]} s. Lesson saved for next time.`, story: true };
   if ((m = x.match(/resolved (\d+) times .*filed/))) return { text: `Same failure ${m[1]} times → asked the Beekeeper for a permanent code fix.`, story: true };
   if ((m = x.match(/proposed a (\d+)-line diff/))) return { text: `Wrote a ${m[1]}-line code fix.`, story: true };
@@ -112,7 +112,7 @@ function translate(t) {
   if ((m = x.match(/^(\w+) \/health says up:/))) return { text: `${S(m[1])} claims it’s fine, but its logs show the crash.` };
   if ((m = x.match(/^Sending (\w+)(?:\(.*?\))? to (\w+)/))) return { text: `Doing it: ${esc(op(m[1]))} on the ${S(m[2])}.` };
   if ((m = x.match(/^(\w+) answered accepted=True applied=True/))) return { text: `${S(m[1])} replied “done”. Waiting for the checker…` };
-  if (/^Guard rejected/.test(x)) return { text: "The checker rejected it. Trying again." };
+  if (/^Verifier rejected/.test(x)) return { text: "The checker rejected it. Trying again." };
   if ((m = x.match(/^Reading back (\w+) to check (\w+)/))) return { text: `Re-checking the ${S(m[1])}: did “${esc(op(m[2]))}” really happen?` };
   if ((m = x.match(/^Hop (\d+): sending .* to examine (\w+)/))) return { text: `Check ${m[1]}: sending a worker to the ${S(m[2])}.` };
   if ((m = x.match(/^Dispatching (\w+) to/))) return { text: `Assigned the next step: ${esc(op(m[1]))}.` };
@@ -121,7 +121,7 @@ function translate(t) {
   if (/Checking the hive's memory/.test(x)) return { text: "Asking the shared memory: have we seen this before?" };
   if (/^Claimed INC/.test(x)) return { text: "Took the case." };
   if ((m = x.match(/^Assigning INC-\d+ to ([\w-]+)/))) return { text: `Gave the case to the ${esc(agentName(m[1]))}.` };
-  if (/^Holding the queen lease/.test(x)) return { text: "In charge. Goal: every system green." };
+  if (/^Holding the coordinator lease/.test(x)) return { text: "In charge. Goal: every system green." };
   if ((m = x.match(/^INC-\d+ opened \((.*?)\)/))) return { text: `New problem (${esc(m[1].split(/,\s*/).map(sn).join(", "))}). Goal stands: all green.` };
   if ((m = x.match(/^(\w+) also unhealthy/))) return { text: `${S(m[1])} is hurt too: same case.` };
   if (/needs your approval/.test(x)) return { text: "Asked the human for an OK." };
@@ -188,10 +188,10 @@ function nowLine() {
   const rid = runId();
   const recentReject = [...state.thoughts].reverse().find((t) => isLie(t) && serverNow() - ts(t.ts) < 7000);
   if (recentReject) return `The checker caught the ${esc(sn(recentReject.system || "mainframe"))} <b>lying</b>: it said “done”, nothing changed.`;
-  const deadNow = [...state.agents.values()].find((a) => a.status === "dead" && a.role !== "nurse" && (a.task || a.incident));
+  const deadNow = [...state.agents.values()].find((a) => a.status === "dead" && a.role !== "recovery" && (a.task || a.incident));
   const lastHo = inc && (inc.handoffs || [])[inc.handoffs.length - 1];
   if (lastHo && serverNow() - ts(lastHo.ts || lastHo.at) < 9000) return `The ${esc(agentName(lastHo.to))} <span class="g">took over</span> the dead ${esc(agentName(lastHo.from))}’s job from its saved progress.`;
-  if (deadNow && inc?.active) return `The ${esc(agentName(deadNow._id))} was <b>killed</b> mid-job. A nurse bee will take over…`;
+  if (deadNow && inc?.active) return `The ${esc(agentName(deadNow._id))} was <b>killed</b> mid-job. A reserve bee will take over…`;
   if (inc?.active) {
     const path = inc.diagnosis_path || [];
     if (inc.recall?.used && inc.root_cause_system) return `Seen this before → straight to the <b>${esc(sn(inc.root_cause_system))}</b>, no search needed.`;
@@ -227,8 +227,8 @@ async function act(btn, fn) {
 let toastT = null;
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 5000); }
 function liveQueen() {
-  const qs = [...state.agents.values()].filter((a) => a.role === "queen" && a.status !== "dead");
-  return (qs.find((a) => a.status !== "standby") || qs[0])?._id || "queen-1";
+  const qs = [...state.agents.values()].filter((a) => a.role === "coordinator" && a.status !== "dead");
+  return (qs.find((a) => a.status !== "standby") || qs[0])?._id || "coordinator-1";
 }
 let shownApproval = null;
 function renderApproval() {
@@ -284,16 +284,16 @@ const SW = 170, SH = 100, AW = 160, AH = 112;
 const SYSXY = { portal: [560, 302], unix: [790, 302], mainframe: [1020, 302] };
 const TOP = 146, BOT = 446;
 const SEATS = {
-  "queen-1": [105, TOP], "queen-2": [335, TOP], "scout-1": [565, TOP], "scout-2": [795, TOP], "guard-1": [1025, TOP],
-  "sentinel-1": [1255, TOP], "gardener-1": [1425, TOP],
-  "waggle-1": [335, BOT], "worker-web-1": [565, BOT], "worker-unix-1": [795, BOT], "worker-mainframe-1": [1025, BOT],
-  "nurse-1": [1255, BOT], "nurse-2": [1425, BOT],
+  "coordinator-1": [105, TOP], "coordinator-2": [335, TOP], "investigator-1": [565, TOP], "investigator-2": [795, TOP], "verifier-1": [1025, TOP],
+  "monitor-1": [1255, TOP], "upgrader-1": [1425, TOP],
+  "reporter-1": [335, BOT], "operator-web-1": [565, BOT], "operator-unix-1": [795, BOT], "operator-mainframe-1": [1025, BOT],
+  "recovery-1": [1255, BOT], "recovery-2": [1425, BOT],
 };
 const SPARE = [[105, BOT], [1255, BOT + 0], [1425, BOT + 0]];
 const ATK = { x: 40, y: 286, w: 240 }, MEM = { x: 1330, y: 286, w: 210 };
-const GLYPH = { queen: "Q", scout: "S", worker: "W", guard: "G", nurse: "N", sentinel: "L", gardener: "R", waggle: "M" };
-const TAG = { queen: "COORDINATOR", scout: "INVESTIGATOR", worker: "FIXER", guard: "THE CHECKER", nurse: "STANDBY · TAKES OVER",
-  sentinel: "LOOKOUT", gardener: "WRITES CODE FIXES", waggle: "MESSENGER" };
+const GLYPH = { coordinator: "Q", investigator: "S", operator: "W", verifier: "G", recovery: "N", monitor: "L", upgrader: "R", reporter: "M" };
+const TAG = { coordinator: "COORDINATOR", investigator: "INVESTIGATOR", operator: "FIXER", verifier: "THE CHECKER", recovery: "STANDBY · TAKES OVER",
+  monitor: "LOOKOUT", upgrader: "WRITES CODE FIXES", reporter: "MESSENGER" };
 const SYSROLE = { portal: "THE BANK WEBSITE", unix: "MOVES THE FILES", mainframe: "THE LEDGER (1987)" };
 const U = (s) => esc(String(s ?? "")).toUpperCase();
 const SHORT_OPS = { quarantine_record: "Set aside the bad record", restart_batch: "Restart the batch", rerun_transfer: "Re-send the files",
@@ -349,15 +349,15 @@ function seatModel(a, since, lt, inc) {
   }
   if (a.status === "standby") cls += " standby";
   if (a.phase === "awaiting_approval") cls += " ask";
-  if (role === "guard" && t?.kind === "reject" && serverNow() - ts(t.ts) < 15000) { cls = "work caught"; ph = isMemReject(t) ? "CAUGHT A POISONED MEMORY" : "CAUGHT A LIE"; }
-  else if (role === "guard" && t?.kind === "verify" && fresh) { cls += " ok"; ph = "VERIFIED ✓"; }
-  if (t?.kind === "handoff" && fresh && role === "nurse") { cls = "work saved"; ph = "TOOK OVER A JOB"; }
+  if (role === "verifier" && t?.kind === "reject" && serverNow() - ts(t.ts) < 15000) { cls = "work caught"; ph = isMemReject(t) ? "CAUGHT A POISONED MEMORY" : "CAUGHT A LIE"; }
+  else if (role === "verifier" && t?.kind === "verify" && fresh) { cls += " ok"; ph = "VERIFIED ✓"; }
+  if (t?.kind === "handoff" && fresh && role === "recovery") { cls = "work saved"; ph = "TOOK OVER A JOB"; }
   const ro = state.roster instanceof Map ? state.roster.get(a._id) : null; // W22 comms roster, when it is on
   if (a.status === "dead") { cls = "dead"; ph = ro?.taken_over_by?.to ? `† KILLED · JOB → ${U(agentName(ro.taken_over_by.to))}` : "† KILLED"; }
   if (lt.last && t && lt.last._id === t._id && fresh) cls += " turn";
   let tx = t ? (translate(t)?.text || "") : "";
   tx = tx.replace(/<[^>]+>/g, "");
-  if (!tx) tx = a.status === "dead" ? "Its process was killed." : role === "nurse" ? "Waits to take over a dead agent’s job." : "";
+  if (!tx) tx = a.status === "dead" ? "Its process was killed." : role === "recovery" ? "Waits to take over a dead agent’s job." : "";
   const boss = ro?.parent && a.status !== "dead" && cls.startsWith("work") ? ` · FOR ${U(agentName(ro.parent))}` : "";
   return { id: a._id, role, sys, cls, ph, tx, life, name: agentName(a._id), boss };
 }
@@ -389,8 +389,8 @@ function defenceFor(e, nightIncs) {
   if (e.fault === "agent_kill" || e.fault === "agent_freeze") { // a frozen bee loses its lease like a dead one: same nurse takeover
     const v = e.result?.agent;
     if (!v) return ["failed", "error"].includes(e.status) || e.result?.how === "gave_up" ? { c: "wait", t: `NO BUSY AGENT TO ${e.fault === "agent_kill" ? "KILL" : "FREEZE"}` } : { c: "wait", t: "HUNTING A BUSY AGENT…" };
-    if (roleOf(v) === "queen") {
-      const q = [...state.thoughts].reverse().find((t) => /takes the queen lease/.test(t.text || "") && ts(t.ts) >= t0);
+    if (roleOf(v) === "coordinator") {
+      const q = [...state.thoughts].reverse().find((t) => /takes the coordinator lease/.test(t.text || "") && ts(t.ts) >= t0);
       return q ? { c: "ok", t: `${U(agentName(q.agent))} TOOK OVER AS QUEEN` } : { c: "wait", t: "BACKUP QUEEN NOTICES THE SILENCE…" };
     }
     const ho = nightIncs.flatMap((i) => i.handoffs || []).find((h) => h.from === v);
@@ -634,7 +634,7 @@ function renderBees() {
   // memory: recalled → the scout; lesson saved ← the fixed system
   const memH = 96;
   if (recallOn) {
-    const sc = inc.owner && seats[inc.owner] ? inc.owner : Object.keys(seats).find((i) => roleOf(i) === "scout");
+    const sc = inc.owner && seats[inc.owner] ? inc.owner : Object.keys(seats).find((i) => roleOf(i) === "investigator");
     if (sc) { const p = seats[sc], mx = MEM.x + 30, px = p[0] + AW / 2 + 30, y = CT - 10;
       path(`recall:${inc._id}`, `M${mx} ${MEM.y} L${mx} ${y} L${px} ${y} L${px} ${p[1] + AH - 2}`, "amb on", "REMEMBERED: SKIP THE SEARCH", mx - 8, y - 4, "end"); }
   }
@@ -713,12 +713,12 @@ function rosterRowsHtml(n = 5) {
 const BOXR = {
   // Chaos | (Legacy over Gardener) | Bees; Legacy + Gardener sized to their content (Krish ledger 63). The MongoDB spine runs below.
   chaos: { x: 40, y: 104, w: 340, h: 600 }, legacy: { x: 500, y: 104, w: 560, h: 220 },
-  bees: { x: 1220, y: 104, w: 340, h: 600 }, gardener: { x: 500, y: 374, w: 560, h: 96 },
+  bees: { x: 1220, y: 104, w: 340, h: 600 }, upgrader: { x: 500, y: 374, w: 560, h: 96 },
 };
 const FULL = { x: 0, y: 84, w: 1600, h: 760 };
-const ZOOMS = ["overview", "chaos", "legacy", "bees", "gardener"];
-const KEYZ = { 1: "chaos", 2: "legacy", 3: "bees", 4: "gardener" };
-const TITLE = { overview: "", chaos: `EXHIBIT A.1: INSIDE ${G.attackers}`, legacy: `EXHIBIT A.2: INSIDE ${G.hive}`, bees: `EXHIBIT A.3: INSIDE ${G.colony}`, gardener: `EXHIBIT A.4: INSIDE ${G.beekeeper}` };
+const ZOOMS = ["overview", "chaos", "legacy", "bees", "upgrader"];
+const KEYZ = { 1: "chaos", 2: "legacy", 3: "bees", 4: "upgrader" };
+const TITLE = { overview: "", chaos: `EXHIBIT A.1: INSIDE ${G.attackers}`, legacy: `EXHIBIT A.2: INSIDE ${G.hive}`, bees: `EXHIBIT A.3: INSIDE ${G.colony}`, upgrader: `EXHIBIT A.4: INSIDE ${G.beekeeper}` };
 let zoom = (() => { try { const z = new URLSearchParams(location.search).get("zoom"); return ZOOMS.includes(z) ? z : "overview"; } catch { return "overview"; } })();
 let zooming = false;
 // transform that maps the FULL exhibit onto box b (and its inverse)
@@ -732,7 +732,7 @@ function setZoom(z) {
   if (mode === "how") { mode = "live"; $("#v-how").hidden = true; }
   zoom = z; // render the destination once before it animates in
   for (const v of ZOOMS) $(`#v-${v}`).hidden = !(v === "overview" || v === (inward ? z : from));
-  try { ({ chaos: renderChaos, legacy: renderLegacy, bees: renderBees, gardener: renderGardener, overview: renderOverview })[inward ? z : "overview"](); } catch (e) { console.error(e); }
+  try { ({ chaos: renderChaos, legacy: renderLegacy, bees: renderBees, upgrader: renderGardener, overview: renderOverview })[inward ? z : "overview"](); } catch (e) { console.error(e); }
   for (const el of [ov, det]) el.classList.remove("anim");
   // start state
   ov.style.transform = inward ? "none" : fromBox(box); ov.style.opacity = inward ? "1" : "0";
@@ -787,7 +787,7 @@ function spineFor(m, prev) {
 // the Bees box's hive grid: one cell per swarm agent (the Gardener is a separate system outside the swarm)
 function hiveCells() {
   const R = state.roster instanceof Map ? state.roster : null;
-  return [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener")
+  return [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "upgrader")
     .sort((a, b) => String(a._id).localeCompare(String(b._id), undefined, { numeric: true }))
     .map((a) => {
       const r = R?.get(a._id), role = a.role || roleOf(a._id);
@@ -820,7 +820,7 @@ function liesTonight(since, live) {
 // the Bees' one-line status: who is doing what, in as few words as possible
 function beeNow(agents, live) {
   const PH = { diagnosing: "TRACING", step_sent: "FIXING", awaiting_verify: "CHECKING", awaiting_approval: "WAITS FOR YOU" };
-  const busy = agents.filter((a) => a.status !== "dead" && (a.phase || a.status === "working") && a.role !== "queen");
+  const busy = agents.filter((a) => a.status !== "dead" && (a.phase || a.status === "working") && a.role !== "coordinator");
   const a = busy.find((x) => x.phase === "step_sent") || busy.find((x) => x.phase) || busy[0];
   if (a) return `<span class="pn2">${U(agentName(a._id))}</span>${PH[a.phase] || "WORKING"}${SYSXY[a.target] ? ` ${U(sn(a.target))}` : ""}`;
   return live ? "ON IT" : '<span class="dim">ALL QUIET</span>';
@@ -830,7 +830,7 @@ function renderOverview() {
   const since = (runStartedAt() || 0) - 5000;
   const inc = focusIncident(), live = inc?.active ? inc : null;
   const ds = duels(), lt = lastThoughts(since);
-  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener"); // swarm only
+  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "upgrader"); // swarm only
   const dead = agents.filter((a) => a.status === "dead").length, working = agents.filter((a) => a.status === "working" || a.phase).length;
   const { rejects, lieSys } = liesTonight(since, live);
   const hos = nightIncidents().flatMap((i) => i.handoffs || []).length;
@@ -841,7 +841,7 @@ function renderOverview() {
   const r = rounds(), liveR2 = [...state.incidents.values()].find((i) => i.active && i.round === 2);
   const t1 = r[1]?.ttr, t2 = r[2]?.ttr ?? (liveR2 ? (serverNow() - ts(liveR2.opened_at)) / 1000 : null);
   const mx = Math.max(t1 || 0, t2 || 0, 1), bw = (t) => Math.round((t / mx) * 150);
-  const ETAF = { chaos: ["chaos"], legacy: ["bees", fixing], bees: ["bees"], gardener: ["gardener"] };
+  const ETAF = { chaos: ["chaos"], legacy: ["bees", fixing], bees: ["bees"], upgrader: ["upgrader"] };
   const liveLine = (k, html) => `<div class="nowl"><span class="lk">NOW</span>${html} <span class="eta" data-eta="${k}">${etaChip(...ETAF[k])}</span></div>`; // W24 progress/ETA
   const B = BOXR;
   const lieFresh = rejects.some((t) => serverNow() - ts(t.ts) < 12000);
@@ -877,8 +877,8 @@ function renderOverview() {
     ${liveLine("bees", beeNow(agents, live))}</div>`;
 
   // THE GARDENER
-  const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
-  const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="${pos(B.gardener)}">
+  const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "upgrader");
+  const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="upgrader" style="${pos(B.upgrader)}">
     <div class="bh"><span class="bt">${G.beekeeper}</span><span class="dim">${G.beekeeperSub}</span></div>
     </div>`; // Krish ledger 62: stage steps + NOW only when zoomed in
 
@@ -889,7 +889,7 @@ function renderOverview() {
   const fixNow = state.thoughts.some((t) => (t.kind === "verify" || /^Verified /.test(t.text || "")) && serverNow() - ts(t.ts) < 8000);
   const deployed = u && ["deployed", "proven"].includes(u.status);
   const cx = B.chaos.x + B.chaos.w, lx1 = B.legacy.x, lx2 = B.legacy.x + B.legacy.w, bx = B.bees.x;
-  const gy = B.gardener.y, gx2 = B.gardener.x + B.gardener.w;
+  const gy = B.upgrader.y, gx2 = B.upgrader.x + B.upgrader.w;
   const WIRES = {
     atk: { d: `M${cx + 6} 250 L${lx1 - 12} 250`, cls: `red ${atkNow ? "on" : ""}`, label: "ATTACKS", lx: (cx + lx1) / 2, ly: 242 },
     fix: { d: `M${bx - 6} 250 L${lx2 + 12} 250`, cls: `${fixNow ? "grn on" : live ? "on" : ""}`, label: "WATCH + FIX", lx: (bx + lx2) / 2, ly: 242 },
@@ -899,7 +899,7 @@ function renderOverview() {
     req: { d: `M${bx - 6} ${gy + 22} L${gx2 + 12} ${gy + 22}`, cls: `${u ? "amb" : ""} ${u && ["requested", "planning"].includes(u.status) ? "on" : ""}`, label: "HELP · REPEATS", lx: (gx2 + bx) / 2, ly: gy + 15 },
     tools: { d: `M${gx2 + 6} ${gy + 52} L${bx - 12} ${gy + 52}`, cls: `${u?.status === "proven" ? "grn" : ""}`, label: "TOOLS → SCOUTS", lx: (gx2 + bx) / 2, ly: gy + 45 },
     pause: { d: `M${gx2 + 6} ${gy + 82} L${bx - 12} ${gy + 82}`, cls: `${u?.status === "deployed" ? "amb on" : ""}`, label: "PAUSE TO UPGRADE", lx: (gx2 + bx) / 2, ly: gy + 75 },
-    prove: { d: `M${cx + 6} ${gy + 56} L${B.gardener.x - 12} ${gy + 56}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? ["REPLAYED:", "NOTHING BROKE"] : ["PROOF:", "REPLAY"], lx: (cx + B.gardener.x) / 2, ly: gy + 34 },
+    prove: { d: `M${cx + 6} ${gy + 56} L${B.upgrader.x - 12} ${gy + 56}`, cls: `${u?.status === "proven" ? "grn" : u?.status === "deployed" ? "red on" : ""}`, label: u?.status === "proven" ? ["REPLAYED:", "NOTHING BROKE"] : ["PROOF:", "REPLAY"], lx: (cx + B.upgrader.x) / 2, ly: gy + 34 },
   };
   const mk = (cls) => (cls.includes("red") ? "r" : cls.includes("amb") ? "a" : cls.includes("grn") ? "g" : "i");
   const W = [{ k: "defs", html: `<defs>${[["r", "var(--red)"], ["a", "var(--amber)"], ["g", "var(--green)"], ["i", "var(--faint)"]].map(([n, c]) => `<marker id="ah-${n}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="${c}"/></marker>`).join("")}</defs>` }];
@@ -952,25 +952,25 @@ const HOW = {
     lead: "EVERY AGENT IS ITS OWN PROCESS. ALL STATE LIVES IN MONGODB.",
     n: [
       ["sent", 40, 160, 190, 84, "SENTINEL ×2", "watch /health", "agent"],
-      ["queen", 270, 160, 190, 84, "QUEEN", "+ backup queen", "agent"],
+      ["coordinator", 270, 160, 190, 84, "QUEEN", "+ backup queen", "agent"],
       ["scouts", 500, 160, 210, 84, "SCOUTS", "trace the cause", "agent"],
       ["workers", 750, 160, 210, 84, "FORAGERS", "send one fix", "agent"],
-      ["guard", 1000, 160, 210, 84, "GUARD", "read back: is it true?", "agent"],
+      ["verifier", 1000, 160, 210, 84, "GUARD", "read back: is it true?", "agent"],
       ["legacy", 1250, 160, 300, 84, G.hive, "/ops · /state", "sys"],
-      ["nurse", 750, 330, 210, 76, "RESERVE", "takes over a dead job", "agent"],
+      ["recovery", 750, 330, 210, 76, "RESERVE", "takes over a dead job", "agent"],
       ["comms", 270, 330, 190, 76, "COMMS", "messages · roster", "agent"],
       ["ai", 500, 330, 210, 76, "CLAUDE", "second opinion", "ai"],
       ["incidents", 40, 520, 190, 56, "incidents", "", "db"], ["agents", 270, 520, 190, 56, "agents", "heartbeats", "db"],
       ["playbooks", 500, 520, 210, 56, "playbooks", "$vectorSearch", "db"], ["checkpoints", 750, 520, 210, 56, "checkpoints", "LangGraph", "db"],
       ["ledger", 1000, 520, 210, 56, "ledger", "every attempt", "db"], ["approvals", 1250, 520, 300, 56, "approvals", "a human OK", "db"],
     ],
-    e: [["sent", "queen", "ALARM"], ["queen", "scouts", "ASSIGN"], ["scouts", "workers", "STEPS"], ["workers", "guard", "CHECK"], ["guard", "legacy", "READ BACK", "grn"],
-      ["workers", "legacy", "", "", "M855 160 L855 130 L1400 130 L1400 154"], ["nurse", "workers", "RESUME", "amb"], ["checkpoints", "nurse", "", "amb"],
-      ["sent", "incidents", ""], ["queen", "agents", "", "faint"], ["scouts", "playbooks", "RECALL", "amb", "M650 244 L650 514"], ["workers", "checkpoints", "", "faint", "M900 244 L900 514"],
-      ["guard", "ledger", "VERIFY", "grn"], ["ai", "scouts", "", "faint"], ["comms", "agents", "", "faint"], ["workers", "approvals", "RISKY?", "warn", "M940 244 L940 280 L1400 280 L1400 514"]],
+    e: [["sent", "coordinator", "ALARM"], ["coordinator", "scouts", "ASSIGN"], ["scouts", "workers", "STEPS"], ["workers", "verifier", "CHECK"], ["verifier", "legacy", "READ BACK", "grn"],
+      ["workers", "legacy", "", "", "M855 160 L855 130 L1400 130 L1400 154"], ["recovery", "workers", "RESUME", "amb"], ["checkpoints", "recovery", "", "amb"],
+      ["sent", "incidents", ""], ["coordinator", "agents", "", "faint"], ["scouts", "playbooks", "RECALL", "amb", "M650 244 L650 514"], ["workers", "checkpoints", "", "faint", "M900 244 L900 514"],
+      ["verifier", "ledger", "VERIFY", "grn"], ["ai", "scouts", "", "faint"], ["comms", "agents", "", "faint"], ["workers", "approvals", "RISKY?", "warn", "M940 244 L940 280 L1400 280 L1400 514"]],
     note: "LEASES IN MONGODB: KILL ANY AGENT, ANOTHER PICKS UP ITS JOB FROM THE CHECKPOINT · ONLY THE GUARD MAY SAY “VERIFIED”",
   },
-  gardener: {
+  upgrader: {
     lead: "A FAILURE THAT COMES BACK BECOMES NEW, TESTED CODE.",
     n: [
       ["sent", 40, 180, 200, 84, "SENTINEL", "same failure ×2", "agent"],
@@ -1095,7 +1095,7 @@ function renderGardener() {
   const at = u ? order.indexOf(u.status) : -1;
   const x0 = 60, wd = 200, gap = 13;
   const stages = NAMES.map((n, i) => { const st = u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "cur" : ""; return `<div class="gz ${st}" style="left:${x0 + i * (wd + gap)}px;top:160px;width:${wd}px"><div class="gzn"><b>${st === "done" ? "✓" : i + 1}</b> ${n}</div><div class="pd">${WHY[i]}</div></div>`; }).join("");
-  const thoughts = state.thoughts.filter((t) => roleOf(t.agent) === "gardener" || t.kind === "upgrade").slice(-9);
+  const thoughts = state.thoughts.filter((t) => roleOf(t.agent) === "upgrader" || t.kind === "upgrade").slice(-9);
   const tests = u?.tests ? ((u.tests.pytest_passed ?? u.tests.passed) ? '<span class="g">PASSED</span>' : '<span class="r">FAILED</span>') : "—";
   const kv = [["SYSTEM", u ? U(sn(u.system)) : "—"], ["WEAKNESS", u ? esc(u.weakness || "") : "—"], ["EVIDENCE", u ? esc((u.evidence || []).join(" · ")) : "—"],
     ["CODE CHANGE", u?.diff_lines ? `${u.diff_lines} LINES` : u?.diff ? `${String(u.diff).split("\n").length} LINES` : "—"], ["TESTS", tests],
@@ -1107,7 +1107,7 @@ function renderGardener() {
     ${stages}
     <div class="zcol" style="left:60px;top:330px;width:700px"><div class="bl-k">THE CODE FIX</div>${kv.map(([k, v]) => `<div class="kv"><span class="dim">${k}</span><span>${v}</span></div>`).join("")}</div>
     <div class="zcol" style="left:820px;top:330px;width:740px"><div class="bl-k">WHAT THE BEEKEEPER IS DOING</div>${thoughts.length ? thoughts.map((t) => `<div class="kv"><span class="dim">${new Date(t.ts).toLocaleTimeString([], { hour12: false })}</span><span>${esc((translate(t)?.text || "").replace(/<[^>]+>/g, ""))}</span></div>`).join("") : '<div class="pd">Waiting: after the same failure is fixed on two nights, the Beekeeper writes a permanent code fix.</div>'}</div>
-    <div class="eta" data-eta="gardener" style="left:60px;top:640px;width:1500px">${progressPanel("gardener")}</div>
+    <div class="eta" data-eta="upgrader" style="left:60px;top:640px;width:1500px">${progressPanel("upgrader")}</div>
   </div>`;
   const host = $("#gard-body");
   if (host.dataset.h !== html) { host.innerHTML = html; host.dataset.h = html; }
@@ -1121,7 +1121,7 @@ function renderDiagram() {
   $("#ex-title").textContent = TITLE[zoom];
   $("#z-back").hidden = zoom === "overview";
   $("#row2").style.visibility = zoom === "overview" ? "hidden" : ""; // Krish ledger 63: no empty row 2
-  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "gardener"); // swarm only
+  const agents = [...state.agents.values()].filter((a) => !String(a._id).startsWith("red-") && (a.role || roleOf(a._id)) !== "upgrader"); // swarm only
   $("#ex-a-l").textContent = ""; // Krish ledger 62: no AGENTS ALIVE
   const t0 = runStartedAt();
   const el = rid && t0 ? Math.max(0, Math.floor((serverNow() - t0) / 1000)) : null;
@@ -1133,7 +1133,7 @@ function renderDiagram() {
   for (const v of ZOOMS) { const el2 = $(`#v-${v}`), hide = how || v !== zoom; if (el2.hidden !== hide) el2.hidden = hide; }
   if ($("#v-how").hidden !== !how) $("#v-how").hidden = !how;
   if (how) return renderHow();
-  ({ overview: renderOverview, chaos: renderChaos, legacy: renderLegacy, bees: renderBees, gardener: renderGardener })[zoom]();
+  ({ overview: renderOverview, chaos: renderChaos, legacy: renderLegacy, bees: renderBees, upgrader: renderGardener })[zoom]();
 }
 
 function bindZoom() {
@@ -1182,12 +1182,12 @@ function renderTop() {
     if (mr === 1) { await api("POST", "/api/reset", { mode: "next_round" }); return api("POST", "/api/scenario/bank-night-2"); }
     return api("POST", "/api/scenario/bank-night-3");
   });
-  const armed = [...state.agents.values()].some((a) => a.role === "worker" && a.status !== "dead" && a.phase === "step_sent");
+  const armed = [...state.agents.values()].some((a) => a.role === "operator" && a.status !== "dead" && a.phase === "step_sent");
   $("#btn-kill").classList.toggle("armed", armed);
 }
 
 function bind() {
-  $("#btn-kill").addEventListener("click", (e) => act(e.currentTarget, () => api("POST", "/api/kill", { selector: { role: "worker", phase: "step_sent" } })));
+  $("#btn-kill").addEventListener("click", (e) => act(e.currentTarget, () => api("POST", "/api/kill", { selector: { role: "operator", phase: "step_sent" } })));
   $("#btn-queen").addEventListener("click", (e) => act(e.currentTarget, () => api("POST", "/api/kill", { selector: { agent: liveQueen() } })));
   const pop = $("#more-pop");
   $("#btn-more").addEventListener("click", (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; });

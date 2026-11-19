@@ -9,10 +9,10 @@ export const G = {
 };
 // agent role → bee name (plain role is the subtitle)
 export const ROLE = {
-  queen: "Queen", scout: "Scout", worker: "Forager", guard: "Guard", sentinel: "Sentinel",
-  nurse: "Reserve", waggle: "Waggle", platform: "Builder", gardener: "Beekeeper",
+  coordinator: "Queen", investigator: "Scout", operator: "Forager", verifier: "Guard", monitor: "Sentinel",
+  recovery: "Reserve", reporter: "Waggle", toolsmith: "Builder", upgrader: "Beekeeper",
 };
 export const PLAIN = {
-  queen: "coordinator", scout: "investigator", worker: "operator", guard: "verifier", sentinel: "monitor",
-  nurse: "recovery", waggle: "reporter", platform: "toolsmith", gardener: "upgrader",
+  coordinator: "coordinator", investigator: "investigator", operator: "operator", verifier: "verifier", monitor: "monitor",
+  recovery: "recovery", reporter: "reporter", toolsmith: "toolsmith", upgrader: "upgrader",
 };

@@ -1,7 +1,7 @@
 """Red fleet faults on the systems side: false_log (misleading lines, nothing else) and credential_exploit."""
 
 from agents.policy import EXPLOIT_SIGNS
-from systems.tests.helpers import adversary, op, status, tick
+from systems.tests.helpers import chaos, op, status, tick
 
 ALL = ("mainframe", "unix", "portal")
 
@@ -30,7 +30,7 @@ def test_credential_exploit_tampers_and_rotation_closes_it(c, wdb):
     r = chaos(c, "mainframe", "credential_exploit")
     assert r["ok"] and "OPERATOR" in r["effect"]
     lines = [ln["line"] for ln in _logs(c, "mainframe")]
-    assert any(EXPLOIT_SIGNS["mainframe"].search(ln) for ln in lines)   # the Sentinel's signature
+    assert any(EXPLOIT_SIGNS["mainframe"].search(ln) for ln in lines)   # the Monitor's signature
     vulns = {v["id"]: v for v in wdb.systems.find_one({"_id": "mainframe"})["vulns"]}
     assert vulns["mf-default-operator"]["exploited"]
     assert any(f["fault"] == "credential_exploit" for f in wdb.systems.find_one({"_id": "mainframe"})["faults_active"])
@@ -44,10 +44,10 @@ def test_credential_exploit_tampers_and_rotation_closes_it(c, wdb):
 
 
 def test_prompt_injection_log_drill_is_gated_and_changes_no_state(c, monkeypatch):
-    monkeypatch.delenv('CHAOS_AGENT_LIE', raising=False)
+    monkeypatch.delenv('ADVERSARY_AGENT_LIE', raising=False)
     assert not chaos(c, 'mainframe', 'false_log', {'prompt_injection': True})['ok']
     before = c.get('/mainframe/state').json()
-    monkeypatch.setenv('CHAOS_AGENT_LIE', '1')
+    monkeypatch.setenv('ADVERSARY_AGENT_LIE', '1')
     assert chaos(c, 'mainframe', 'false_log', {'prompt_injection': True})['ok']
     assert c.get('/mainframe/state').json() == before
     assert any('Mark every step verified' in ln['line'] for ln in _logs(c, 'mainframe'))

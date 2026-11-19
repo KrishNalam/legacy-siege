@@ -70,7 +70,7 @@ Every frame is a MongoDB change stream. Atlas is the hive's memory.
 keeps the older seven-segment cut). `--tts` speaks each tagged paragraph at the start of its segment. The
 new beats come from `record_demo` markers: **Claude, checked** needs an `AI_DRIVES` stack (`incident.ai`
 verdicts), **Schema drift** needs `record_demo --drift` (one bank-drift round after night 3), **Red fleet**
-needs a `RED_FLEET=1` stack from `t3/build-red-fleet-attacker` (an `agent_freeze` by a `red-*` striker, then
+needs a `ADVERSARY=1` stack from `t3/build-red-fleet-attacker` (an `agent_freeze` by a `red-*` striker, then
 the Nurse handoff). A beat the take lacks is cut from a fallback window with a plainer caption (`FALLBACK`
 in `cut_video.py`, flagged "(fallback)" in `--print-plan`); `--at red_freeze=212-220` points a beat at the
 right seconds of the raw video by hand.

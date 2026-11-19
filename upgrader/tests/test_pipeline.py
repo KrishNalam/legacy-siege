@@ -93,7 +93,7 @@ def decide_later(upg_id, decision, delay=0.3):
 def test_plan_produces_small_diff_and_evidence(env):
     upg_id = new_request()
     doc = pipeline.plan(upg_id)
-    assert doc["status"] == "planning" and doc["owner"] == "gardener-1"
+    assert doc["status"] == "planning" and doc["owner"] == "upgrader-1"
     assert 0 < doc["diff_lines"] < 50 and doc["diff"].startswith("--- a/systems/mainframe.py")
     assert doc["evidence_summary"]["poison_records"] == ["R-17", "R-42"]
     assert doc["evidence_summary"]["total_ttr_s"] == 83.0
@@ -122,7 +122,7 @@ def test_full_pipeline_approve_deploy_prove(env, monkeypatch):
     led = col("ledger").find_one({"action_id": f"{upg_id}-deploy"})
     assert led["status"] == "verified" and led["approver"] == "beekeeper"
     assert led["params"]["diff_sha256"] == patcher.sha256(doc["diff"]) and led["version_after"] == 2
-    kinds = {t["kind"] for t in col("thoughts").find({"agent": "gardener-1"})}
+    kinds = {t["kind"] for t in col("thoughts").find({"agent": "upgrader-1"})}
     assert kinds - {"progress"} == {"upgrade"}  # PROGRESS_ETA adds progress lines
     # a second request for the same weakness is refused: already remediated
     col("upgrade_requests").insert_one({"_id": "UPG-0002", "system": "mainframe", "status": "requested",
@@ -244,8 +244,8 @@ def test_missing_system_tests_reason_is_explicit(env):
 
 def test_main_registers_heartbeats_and_picks_requests(env):
     gmain.register()
-    a = col("agents").find_one({"_id": "gardener-1"})
-    assert a["role"] == "gardener" and a["status"] == "idle" and a["target"] == "workshop" and a["generation"] == 1
+    a = col("agents").find_one({"_id": "upgrader-1"})
+    assert a["role"] == "upgrader" and a["status"] == "idle" and a["target"] == "workshop" and a["generation"] == 1
     stop = threading.Event()
     monkey_hb = threading.Thread(target=gmain.heartbeat, args=(stop,), daemon=True)
     from common import config
@@ -255,7 +255,7 @@ def test_main_registers_heartbeats_and_picks_requests(env):
         before = a["last_seen"]
         monkey_hb.start()
         time.sleep(0.4)
-        assert col("agents").find_one({"_id": "gardener-1"})["last_seen"] > before
+        assert col("agents").find_one({"_id": "upgrader-1"})["last_seen"] > before
     finally:
         stop.set()
         config.HEARTBEAT_S = old
@@ -270,8 +270,8 @@ def test_main_registers_heartbeats_and_picks_requests(env):
     assert woke
 
 
-def test_reset_while_awaiting_approval_unblocks_the_gardener(env):
-    """A full reset wipes the approval the Gardener is waiting on: it must give up and go back to watching
+def test_reset_while_awaiting_approval_unblocks_the_upgrader(env):
+    """A full reset wipes the approval the Upgrader is waiting on: it must give up and go back to watching
     for new requests (not wait forever), so the next upgrade request after the reset is picked up."""
     upg_id = new_request()
     done = threading.Event()
@@ -285,7 +285,7 @@ def test_reset_while_awaiting_approval_unblocks_the_gardener(env):
     time.sleep(0.5)
     assert not done.is_set()  # really waiting for the Beekeeper
     setup_db.reset()  # the demo's Reset ▸ Full
-    assert done.wait(10), "gardener still blocked on a wiped approval"
+    assert done.wait(10), "upgrader still blocked on a wiped approval"
     assert col("upgrade_requests").count_documents({}) == 0  # nothing resurrected or marked rejected
     new_request("UPG-0001")  # counters restart after a reset: same id, new request
     assert gmain.next_request()["_id"] == "UPG-0001"

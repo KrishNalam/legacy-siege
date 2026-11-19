@@ -1,10 +1,10 @@
-"""Registry of predetermined, reviewed remediations the Gardener may ship.
+"""Registry of predetermined, reviewed remediations the Upgrader may ship.
 
-The Gardener never invents code: an upgrade request is matched to one of these by target system and,
+The Upgrader never invents code: an upgrade request is matched to one of these by target system and,
 when the request names one, its fault class (advisory: if a system has a single remediation it is used
 whatever the class is called). Each remediation module exposes NAME, SYSTEM, FUNCTION, FAULT_CLASSES,
 PROVE_FAULT and the render/detect helpers upgrader.pipeline uses. Problems no code remediation covers
-can still be shipped with a vetted platform tool (upgrader.tools, remediation_kind "tool").
+can still be shipped with a vetted toolsmith tool (upgrader.tools, remediation_kind "tool").
 """
 from __future__ import annotations
 

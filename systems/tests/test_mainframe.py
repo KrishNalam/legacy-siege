@@ -1,12 +1,12 @@
-"""Mainframe contract tests. Must pass BEFORE and AFTER the Gardener's validate_record patch.
+"""Mainframe contract tests. Must pass BEFORE and AFTER the Upgrader's validate_record patch.
 
 They check the API surface, receipts and honesty rules — not "a malformed record ABENDs"
-(that is exactly what the Gardener's upgrade changes; see test_cascade.py).
+(that is exactly what the Upgrader's upgrade changes; see test_cascade.py).
 """
 from datetime import datetime
 
 import systems.mainframe as mf
-from systems.tests.helpers import adversary, op, status, tick
+from systems.tests.helpers import chaos, op, status, tick
 
 GOOD = mf.format_record("TX000042", "20261114", "4211000101", "4211000102", 12345, memo="ACH TRANSFER")
 

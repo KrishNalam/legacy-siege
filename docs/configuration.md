@@ -2,7 +2,7 @@
 
 All settings are environment variables. They are read from the shell or from a `.env` file at the repo root ([`.env.example`](../.env.example) is a starting point).
 Defaults are the values in the code (`common/config.py`, `agents/settings.py` and the module named in each table).
-Switches are off unless set to `1`, `true`, `yes` or `on`. The one exception is `RED_FLEET_ALLOW_LIVE`, which must be exactly `1`.
+Switches are off unless set to `1`, `true`, `yes` or `on`. The one exception is `ADVERSARY_ALLOW_LIVE`, which must be exactly `1`.
 
 Restart `run.py` after changing anything.
 
@@ -14,11 +14,11 @@ Restart `run.py` after changing anything.
 | `WORLD_DB` | `world` | The estate and chaos database ("Red"). |
 | `SWARM_DB` | `swarm` | The agents' database ("Blue"). |
 | `SYSTEMS_PORT` | `8701` | Legacy systems API port. |
-| `WARROOM_PORT` | `8700` | War room port. `run.py` also accepts `PORT` if `WARROOM_PORT` is unset. |
+| `CONSOLE_PORT` | `8700` | War room port. `run.py` also accepts `PORT` if `CONSOLE_PORT` is unset. |
 | `SYSTEMS_URL` | `http://127.0.0.1:$SYSTEMS_PORT` | Where agents and the Gardener reach the systems API. |
-| `WARROOM_URL` | `http://127.0.0.1:$WARROOM_PORT` | Where the rehearsal scripts reach the war room. |
+| `CONSOLE_URL` | `http://127.0.0.1:$CONSOLE_PORT` | Where the rehearsal scripts reach the war room. |
 | `PACE` | `1.0` | Multiplier on deliberate "thinking" pauses. `0` in tests. |
-| `WARROOM_VIEW` | `diagram` | What `/` serves: `diagram` or `flow`. |
+| `CONSOLE_VIEW` | `diagram` | What `/` serves: `diagram` or `flow`. |
 
 ## AI (all optional)
 
@@ -42,7 +42,7 @@ Restart `run.py` after changing anything.
 |---|---|---|
 | `HEARTBEAT_S` | `3` | Agent heartbeat and lease renewal interval. |
 | `LEASE_S` | `10` | Lease length. An agent silent this long is marked dead (`DEAD_AFTER_S` defaults to it). |
-| `NURSE_RESPAWN_S` | `15` | Delay before the supervisor replaces a dead agent. |
+| `RECOVERY_RESPAWN_S` | `15` | Delay before the supervisor replaces a dead agent. |
 | `RECALL_THRESHOLD` | `0.70` | Minimum vector-search score for a playbook to be used. |
 | `UPGRADE_AFTER` | `2` | Distinct nights with the same fault before the Sentinel asks the Gardener for an upgrade. |
 | `PROVE_WINDOW_S` | `30` | How long the Gardener watches for incidents after replaying the fault. |
@@ -52,7 +52,7 @@ Restart `run.py` after changing anything.
 | `SYSTEMS_TICK_FIXED` | off | Tick on a fixed cadence (helps against a remote cluster). |
 | `BATCH_EVERY_TICKS` / `CASCADE_TICKS` | `2` / `3` | Mainframe batch cadence / how long downstream tolerates stale data. |
 
-More swarm knobs live in `agents/settings.py` (`SENTINEL_POLL_S`, `GUARD_GRACE_S`, `TASK_TIMEOUT_S`, `MAX_ATTEMPTS`, …).
+More swarm knobs live in `agents/settings.py` (`MONITOR_POLL_S`, `VERIFIER_GRACE_S`, `TASK_TIMEOUT_S`, `MAX_ATTEMPTS`, …).
 
 ## Demo
 
@@ -68,22 +68,22 @@ More swarm knobs live in `agents/settings.py` (`SENTINEL_POLL_S`, `GUARD_GRACE_S
 
 | Variable | Default | What it does |
 |---|---|---|
-| `GARDENER_SANDBOX_URI` | unset | Run the Gardener's throwaway test database on another MongoDB (for example a local container). Falls back to `MONGODB_URI` if it doesn't answer. |
-| `GARDENER_HELP` | off | Workers whose step fails twice ask the Gardener for help; adds agent `sentinel-2`. |
-| `GARDENER_HELP_WAIT_S` | `5` | How long a worker waits for that answer. |
-| `GARDENER_PAUSE` | off | All agents pause while the Gardener swaps code. |
-| `GARDENER_PAUSE_LEASE_S` | `15` | The pause expires on its own after this long if the Gardener dies. |
+| `UPGRADER_SANDBOX_URI` | unset | Run the Gardener's throwaway test database on another MongoDB (for example a local container). Falls back to `MONGODB_URI` if it doesn't answer. |
+| `UPGRADER_HELP` | off | Workers whose step fails twice ask the Gardener for help; adds agent `sentinel-2`. |
+| `UPGRADER_HELP_WAIT_S` | `5` | How long a worker waits for that answer. |
+| `UPGRADER_PAUSE` | off | All agents pause while the Gardener swaps code. |
+| `UPGRADER_PAUSE_LEASE_S` | `15` | The pause expires on its own after this long if the Gardener dies. |
 
 ## Swarm switches
 
 | Switch | What it adds |
 |---|---|
-| `SWARM_DYNAMIC` | Scouts and workers are spawned on demand (`SWARM_MAX_AGENTS` 24, `SWARM_WARM` 2 spares, `SWARM_IDLE_S` 15). |
-| `SWARM_COMMS` | Prioritised message feed and a live roster (`/api/roster`). |
-| `SWARM_RECOVERY` | Re-plan fixes that keep failing. |
+| `AGENTS_AUTOSCALE` | Scouts and workers are spawned on demand (`AGENTS_MAX_AGENTS` 24, `AGENTS_WARM` 2 spares, `AGENTS_IDLE_S` 15). |
+| `AGENTS_COMMS` | Prioritised message feed and a live roster (`/api/roster`). |
+| `AGENTS_RECOVERY` | Re-plan fixes that keep failing. |
 | `FAILURE_MEMORY` | Remember failed attempts as versioned lessons. |
-| `SWARM_LEASE_DEADLINE` | Agents also stop acting when their last lease renewal is too old. |
-| `PLATFORM_ENGINEERS` | Adds agent `platform-1`, which builds reusable tools from repeated slow steps. |
+| `AGENTS_LEASE_DEADLINE` | Agents also stop acting when their last lease renewal is too old. |
+| `TOOLSMITH_ENGINEERS` | Adds agent `platform-1`, which builds reusable tools from repeated slow steps. |
 | `MONGO_SPINE` | `$jsonSchema` validators, change-stream pre-images and a lease chain-of-custody collection. |
 | `PROGRESS_ETA` | Step-by-step ETAs learned from past runs. |
 
@@ -91,15 +91,15 @@ More swarm knobs live in `agents/settings.py` (`SENTINEL_POLL_S`, `GUARD_GRACE_S
 
 | Switch | What it adds |
 |---|---|
-| `RED_FLEET` | `python -m adversary.redfleet`: five AI attacker processes. Refuses `WORLD_DB=world` / `SWARM_DB=swarm` unless `RED_FLEET_ALLOW_LIVE=1`. |
-| `RED_FLEET_AGENTS` | Comma list of attackers to run (default: all). |
-| `RED_FLEET_MAX_ATTACKS` | Strikes per attacker per night (default `2`, `0` = unlimited). |
-| `RED_FLEET_COOLDOWN_S` | Seconds between one attacker's strikes (default `30`). |
-| `RED_FLEET_LLM` | Set to `0` to make attackers pick from their menu without Claude. |
-| `RED_COMMANDER` | A commander that plans multi-step campaigns (needs `RED_FLEET`). |
-| `RED_PLANNER` | Scouts that brief the commander (needs `RED_COMMANDER`). |
+| `ADVERSARY` | `python -m adversary.redfleet`: five AI attacker processes. Refuses `WORLD_DB=world` / `SWARM_DB=swarm` unless `ADVERSARY_ALLOW_LIVE=1`. |
+| `ADVERSARY_AGENTS` | Comma list of attackers to run (default: all). |
+| `ADVERSARY_MAX_ATTACKS` | Strikes per attacker per night (default `2`, `0` = unlimited). |
+| `ADVERSARY_COOLDOWN_S` | Seconds between one attacker's strikes (default `30`). |
+| `ADVERSARY_LLM` | Set to `0` to make attackers pick from their menu without Claude. |
+| `ADVERSARY_COMMANDER` | A commander that plans multi-step campaigns (needs `ADVERSARY`). |
+| `ADVERSARY_PLANNER` | Scouts that brief the commander (needs `ADVERSARY_COMMANDER`). |
 | `RUNNER_DECIDES` | Every Red strike goes through an admission check. |
-| `CHAOS_OUTCOMES` | Record what each attack achieved, for seeded attacks too. |
-| `CHAOS_AGENT_LIE` | Fault `lie_to_agent`: a prompt-injection line in the logs. |
-| `CHAOS_AGENT_FREEZE` | Fault `agent_freeze`: `SIGSTOP` an agent, then wake it. |
-| `CHAOS_POISON_MEMORY` | Fault `poison_memory` and a sixth attacker that plants a bad playbook. The visible defence needs `SWARM_RECOVERY=1` and `FAILURE_MEMORY=1`. |
+| `ADVERSARY_OUTCOMES` | Record what each attack achieved, for seeded attacks too. |
+| `ADVERSARY_AGENT_LIE` | Fault `lie_to_agent`: a prompt-injection line in the logs. |
+| `ADVERSARY_AGENT_FREEZE` | Fault `agent_freeze`: `SIGSTOP` an agent, then wake it. |
+| `ADVERSARY_POISON_MEMORY` | Fault `poison_memory` and a sixth attacker that plants a bad playbook. The visible defence needs `AGENTS_RECOVERY=1` and `FAILURE_MEMORY=1`. |

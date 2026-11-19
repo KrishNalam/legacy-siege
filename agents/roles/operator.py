@@ -1,7 +1,7 @@
-"""Worker bee (specialty mainframe | unix | web).
+"""Operator bee (specialty mainframe | unix | web).
 
 Claims tasks for its specialty with an atomic lease, then runs the task as a LangGraph graph whose
-checkpoint thread is the TASK id — so if this process is SIGKILLed, a Nurse loads the same thread and
+checkpoint thread is the TASK id — so if this process is SIGKILLed, a Recovery loads the same thread and
 continues exactly where it stopped.
 
     diagnose task:  investigate -> report
@@ -25,7 +25,7 @@ from ..policy import fmt_op
 from ..harness import Agent, checkpointer, main_loop, retrying
 from ..http import SystemsUnavailable
 from .. import lessons
-from upgrader import help as gardener_help
+from upgrader import help as upgrader_help
 
 
 LOG_WINDOW_S = 300  # only logs from shortly before the incident opened count as clues
@@ -115,7 +115,7 @@ def build_graph(agent: Agent):
             if s["status"] == "failed" and workflow.refusal(s) and workflow.adapt(agent, task, _who(config)[1], s):
                 return select(state, config)  # WORKFLOW_DRIFT: a prerequisite step now comes first
             if s["status"] == "failed" and len(s.get("attempts") or []) >= recovery.budget(s):
-                agent.think(f"{s['step_id']} failed {len(s.get('attempts') or [])} attempts; giving the task back to the scout.",
+                agent.think(f"{s['step_id']} failed {len(s.get('attempts') or [])} attempts; giving the task back to the investigator.",
                             incident=task["incident"], system=s["system"], pause=False)
                 return {"step": None, "outcome": "failed"}
             return {"step": s["step_id"], "outcome": "working"}
@@ -134,33 +134,33 @@ def build_graph(agent: Agent):
             if step["status"] == "sent" and step.get("response") is None:
                 reconcile_sent(agent, task, gen, step)
             return {}
-        from .. import platform
-        platform.used(agent, task['incident'], step)
+        from .. import toolsmith
+        toolsmith.used(agent, task['incident'], step)
         n = len(step.get("attempts") or []) + 1
         if (n > 1 and step["status"] == "failed" and step.get("action_id") and recovery.enabled()
                 and step.get("resubmitted") != step["action_id"]):  # once per attempt: never a resubmit loop
-            # Reconcile before retry: the last attempt may have landed late (slow_apply) after the Guard gave up.
-            # Then the effect is already there: hand that attempt back to the Guard instead of sending again.
+            # Reconcile before retry: the last attempt may have landed late (slow_apply) after the Verifier gave up.
+            # Then the effect is already there: hand that attempt back to the Verifier instead of sending again.
             applied, facts = verify.check(step["op"], step.get("params") or {}, sysc.state, probe=sysc.probe,
                                           sent_at=step.get("sent_at"))
             if applied and steps.resubmit(task, me, gen, step):
                 agent.set(status="working", target=step["system"], phase="awaiting_verify",
                           incident=task["incident"], task=task["_id"])
                 agent.think(f"Before retrying: {step['system']} already shows {step['op']} took effect ({facts}); "
-                            f"{step['action_id']} landed late. Handing it back to the Guard, not sending it again.",
+                            f"{step['action_id']} landed late. Handing it back to the Verifier, not sending it again.",
                             kind="action", incident=task["incident"], system=step["system"], pause=False)
                 return {}
         aid = steps.attempt_id(step["step_id"], n)
         advice = {}
-        if n > 2 and gardener_help.enabled():  # failed verification twice: ask the Gardener (GARDENER_HELP=1)
-            advice = ask_gardener(agent, task, step)
+        if n > 2 and upgrader_help.enabled():  # failed verification twice: ask the Upgrader (UPGRADER_HELP=1)
+            advice = ask_upgrader(agent, task, step)
             if advice.get("params"):
                 step = steps.get_step(task["incident"], state["step"])
         # failure memory: this system lied about this op before -> the retry goes straight out
         fast = n > 1 and ((bool(step.get("distrust_ack")) and lessons.enabled()) or bool(advice.get("fast")))
         if n > 1:
-            agent.think(f"Guard rejected {step['action_id']}; opening new attempt {aid}"
-                        + ((" at once (the Gardener's advice)." if advice.get("fast") else " at once (a known lie, see the lesson).")
+            agent.think(f"Verifier rejected {step['action_id']}; opening new attempt {aid}"
+                        + ((" at once (the Upgrader's advice)." if advice.get("fast") else " at once (a known lie, see the lesson).")
                        if fast else "."), kind="action",
                         incident=task["incident"], system=step["system"], pause=not fast)
         approver = None
@@ -171,7 +171,7 @@ def build_graph(agent: Agent):
         if progress.enabled():  # PROGRESS_ETA: "step i/n · ETA ~N s (based on K past runs)" from the history
             n_all = len((col("incidents").find_one({"_id": task["incident"]}, {"steps": 1}) or {}).get("steps") or [])
             est = progress.estimate("swarm", f"step:{step['op']}", step["system"])
-            progress.emit(me, "worker", f"{fmt_op(step)} on {step['system']} (step {step.get('n')}/{n_all}) · "
+            progress.emit(me, "operator", f"{fmt_op(step)} on {step['system']} (step {step.get('n')}/{n_all}) · "
                           f"{progress.eta_text(est)}", action_type=f"step:{step['op']}", system=step["system"],
                           incident=task["incident"], step=step.get("n"), of=n_all or None, eta=est)
         agent.set(status="working", target=step["system"], phase="step_sent", incident=task["incident"],
@@ -187,7 +187,7 @@ def build_graph(agent: Agent):
         steps.record_response(task, me, gen, step, aid, resp)
         agent.set(phase="awaiting_verify")
         agent.think(f"{step['system']} answered accepted={resp.get('accepted')} applied={resp.get('applied')} "
-                    f"for {aid}; waiting for the Guard to read it back.", kind="action",
+                    f"for {aid}; waiting for the Verifier to read it back.", kind="action",
                     incident=task["incident"], system=step["system"])
         return {}
 
@@ -229,26 +229,26 @@ def build_graph(agent: Agent):
     return g.compile(checkpointer=checkpointer())
 
 
-def ask_gardener(agent: Agent, task: dict, step: dict) -> dict:
+def ask_upgrader(agent: Agent, task: dict, step: dict) -> dict:
     """A step failed verification twice: post a help request with the evidence, wait briefly for the
-    Gardener's answer and return its advice ({} if none). Advice params are written onto the step so the
-    next attempt (and the Guard's read-back of it) uses them. Idempotent: a resumed act reuses the answer."""
+    Upgrader's answer and return its advice ({} if none). Advice params are written onto the step so the
+    next attempt (and the Verifier's read-back of it) uses them. Idempotent: a resumed act reuses the answer."""
     inc, sid = task["incident"], step["step_id"]
     attempts = list(step.get("attempts") or [])
     ledger = list(col("ledger").find({"action_id": {"$in": attempts}}, {"action_id": 1, "evidence": 1, "status": 1})
                   .sort("ts", 1))
     evidence = [f"{d['action_id']} {d.get('status')}: {d.get('evidence') or ''}"[:200] for d in ledger]
     fc = (col("incidents").find_one({"_id": inc}, {"fault_class": 1}) or {}).get("fault_class")
-    req, new = gardener_help.ask(agent.id, inc, step, evidence, fc)
+    req, new = upgrader_help.ask(agent.id, inc, step, evidence, fc)
     if new:
         last = (ledger[-1].get("evidence") if ledger else None) or step.get("evidence") or "rejected"
-        agent.think(f"{sid} failed verification {len(attempts)}× ({str(last)[:90]}); asking the Gardener for help "
+        agent.think(f"{sid} failed verification {len(attempts)}× ({str(last)[:90]}); asking the Upgrader for help "
                     f"({req['_id']}).", kind="handoff", incident=inc, system=step["system"], pause=False)
-    ans = req.get("answer") if req.get("status") == "answered" else gardener_help.await_answer(
-        req["_id"], gardener_help.wait_s(), nap=agent.nap, check=lambda: agent.check("tasks", task["_id"]))
+    ans = req.get("answer") if req.get("status") == "answered" else upgrader_help.await_answer(
+        req["_id"], upgrader_help.wait_s(), nap=agent.nap, check=lambda: agent.check("tasks", task["_id"]))
     if not ans:
         if new:
-            agent.think(f"No answer from the Gardener in {gardener_help.wait_s():.0f}s; retrying {sid} as planned.",
+            agent.think(f"No answer from the Upgrader in {upgrader_help.wait_s():.0f}s; retrying {sid} as planned.",
                         incident=inc, system=step["system"], pause=False)
         return {}
     advice = dict(ans.get("advice") or {})
@@ -261,21 +261,21 @@ def ask_gardener(agent: Agent, task: dict, step: dict) -> dict:
         use.append(f"next attempt uses params {advice['params']}")
     if advice.get("fast"):
         use.append("next attempt goes out at once")
-    col("incidents").update_one({"_id": inc}, {"$set": {"steps.$[s].gardener_help": {
+    col("incidents").update_one({"_id": inc}, {"$set": {"steps.$[s].upgrader_help": {
         "request": req["_id"], "kind": ans.get("kind"), "ref": ans.get("ref"), "advice": advice}}},
         array_filters=[{"s.step_id": sid}])
     if new:
-        agent.think(f"Gardener's answer ({ans.get('kind')}) for {sid}: "
+        agent.think(f"Upgrader's answer ({ans.get('kind')}) for {sid}: "
                     + ("; ".join(use) if use else "nothing to change, retrying as planned")
-                    + "; the Guard still verifies it by read-back.", kind="action", incident=inc,
+                    + "; the Verifier still verifies it by read-back.", kind="action", incident=inc,
                     system=step["system"], pause=False)
     return advice
 
 
 def reconcile_sent(agent: Agent, task: dict, generation: int, st: dict, adopt: bool = False) -> dict:
-    """A step is 'sent' but this process never saw the system's answer (it crashed, or a nurse is
-    adopting a dead worker's step). Never resend blindly: READ BACK /state first.
-        already applied -> leave it for the Guard (no resend)
+    """A step is 'sent' but this process never saw the system's answer (it crashed, or a recovery is
+    adopting a dead operator's step). Never resend blindly: READ BACK /state first.
+        already applied -> leave it for the Verifier (no resend)
         not applied     -> resend with the SAME action_id (the system de-duplicates receipts)
     Returns {step_id, action_id, result[, response]}."""
     sysc = agent.systems
@@ -286,7 +286,7 @@ def reconcile_sent(agent: Agent, task: dict, generation: int, st: dict, adopt: b
         steps.take_over_sent(task, agent.id, generation, st)
     if applied:
         agent.think(f"{st['action_id']} was sent before the crash and already took effect ({facts}) — "
-                    f"handing to the Guard, not resending.", kind="handoff", incident=task["incident"],
+                    f"handing to the Verifier, not resending.", kind="handoff", incident=task["incident"],
                     system=st["system"])
         return {"step_id": st["step_id"], "action_id": st["action_id"], "result": "already_applied"}
     agent.think(f"{st['action_id']} is 'sent' but not applied ({facts}) — resending the SAME action id; "

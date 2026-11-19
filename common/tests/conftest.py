@@ -1,4 +1,4 @@
-"""Isolated DBs for common/ tests (llm's guard counter writes to swarm.stats), dropped afterwards."""
+"""Isolated DBs for common/ tests (llm's verifier counter writes to swarm.stats), dropped afterwards."""
 from __future__ import annotations
 
 import os

@@ -4,12 +4,12 @@ from agents.tests.conftest import reset_runtime, run_until_resolved, start_swarm
 
 def test_recovery_switch(monkeypatch):
     from agents import recovery
-    monkeypatch.delenv('RED_FLEET', raising=False)
-    monkeypatch.delenv('SWARM_RECOVERY', raising=False)
+    monkeypatch.delenv('ADVERSARY', raising=False)
+    monkeypatch.delenv('AGENTS_RECOVERY', raising=False)
     assert not recovery.enabled()
-    monkeypatch.setenv('RED_FLEET', '1')
-    assert not recovery.enabled()  # RED_FLEET alone must not change the lie / round-2 timing
-    monkeypatch.setenv('SWARM_RECOVERY', '1')
+    monkeypatch.setenv('ADVERSARY', '1')
+    assert not recovery.enabled()  # ADVERSARY alone must not change the lie / round-2 timing
+    monkeypatch.setenv('AGENTS_RECOVERY', '1')
     assert recovery.enabled()
 
 
@@ -17,7 +17,7 @@ def test_lies_slow_apply_then_disk_fill(db, fake):
     from common.db import col
     reset_runtime()
     fake.post('/_admin/reset')
-    hive = start_swarm({'SWARM_RECOVERY': '1', 'RECOVERY_BACKOFF_S': '0.1'}, log_name='recovery')
+    hive = start_swarm({'AGENTS_RECOVERY': '1', 'RECOVERY_BACKOFF_S': '0.1'}, log_name='recovery')
     try:
         fake.post('/mainframe/_chaos/lying_success', json={'params': {'count': 5}})
         fake.post('/mainframe/_chaos/slow_apply', json={'params': {'count': 1}})
@@ -42,7 +42,7 @@ def test_disk_fill_mid_repair_replans_instead_of_looping(db, fake):
     from common.db import col
     reset_runtime()
     fake.post('/_admin/reset')
-    hive = start_swarm({'SWARM_RECOVERY': '1', 'RECOVERY_BACKOFF_S': '0.1'}, log_name='recovery_replan')
+    hive = start_swarm({'AGENTS_RECOVERY': '1', 'RECOVERY_BACKOFF_S': '0.1'}, log_name='recovery_replan')
     fired = []
 
     def strike():

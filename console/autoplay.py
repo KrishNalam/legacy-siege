@@ -4,7 +4,7 @@ Cuts the presenter's clicks from ~8 to 3 (Night 1, the first Approve, Kill):
 
 * **Night 1 → Night 2**: ``AUTOPLAY_GAP_S`` after Night 1's incident resolves and the estate is green, it does
   the ``next_round`` reset (playbooks kept) and starts ``bank-night-2``.
-* **Night 2 → Night 3**: once Night 2 has resolved *and* the Gardener's upgrade is ``proven``, it starts
+* **Night 2 → Night 3**: once Night 2 has resolved *and* the Upgrader's upgrade is ``proven``, it starts
   ``bank-night-3`` (no reset, like the presenter flow).
 * **Approvals**: the first approval of a demo stays manual (Night 1's ``restart_batch``, a design-doc beat).
   Every later approval is auto-approved ``AUTOPLAY_APPROVE_S`` after it appears, with a visible line on the
@@ -83,7 +83,7 @@ class Autoplay:
         last_closed = max((i.get("closed_at") for i in incs if i.get("closed_at")), default=None)
         if _age_s(last_closed) < self.gap_s:
             return False
-        if NEXT[scenario] == "bank-night-3":  # night 3 replays the attack after the Gardener's upgrade
+        if NEXT[scenario] == "bank-night-3":  # night 3 replays the attack after the Upgrader's upgrade
             upg = s.upgrade_requests.find_one({"system": "mainframe", "fault_class": "batch_abort"},
                                               sort=[("ts", -1)])
             if not upg or upg.get("status") != "proven" or _age_s(upg.get("proven_at")) < self.gap_s:

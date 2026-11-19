@@ -1,19 +1,19 @@
-"""Gardener help desk (GARDENER_HELP=1, default OFF): two hand-offs from the swarm across
-its boundary into the Gardener (a separate system outside the swarm), one collection.
+"""Upgrader help desk (UPGRADER_HELP=1, default OFF): two hand-offs from the swarm across
+its boundary into the Upgrader (a separate system outside the swarm), one collection.
 
     swarm.gardener_requests  {_id, kind, from, system, status: open -> answering -> answered, answer, ts}
 
-* kind "repeat" (Sentinel #2): a problem seen 3+ times. The Gardener notes it and, when one of its vetted
+* kind "repeat" (Monitor #2): a problem seen 3+ times. The Upgrader notes it and, when one of its vetted
   remediations covers that system + fault class, starts its existing upgrade pipeline (files the upgrade
   request, or re-queues a rejected one); upgrader.main then runs plan -> sandbox test + replay -> approval ->
-  apply -> prove exactly as for the Sentinel's own 2-repeat request. Nothing about that trigger changes.
-* kind "help" (a Worker whose step failed verification twice): the Gardener answers from what it remembers
+  apply -> prove exactly as for the Monitor's own 2-repeat request. Nothing about that trigger changes.
+* kind "help" (an Operator whose step failed verification twice): the Upgrader answers from what it remembers
   (a verified playbook with different params for the same op, a failure lesson, its proven upgrades or a
-  vetted remediation) or says "none". The Worker uses the advice on its next attempt; the Guard still
+  vetted remediation) or says "none". The Operator uses the advice on its next attempt; the Verifier still
   verifies that attempt by read-back like any other.
 
-Requests are answered by a thread inside the Gardener process (serve), so an upgrade waiting for approval
-never blocks a Worker's question, and no extra process is started. With the switch off nothing here runs.
+Requests are answered by a thread inside the Upgrader process (serve), so an upgrade waiting for approval
+never blocks an Operator's question, and no extra process is started. With the switch off nothing here runs.
 """
 from __future__ import annotations
 
@@ -29,19 +29,19 @@ from common.events import think
 
 log = logging.getLogger("upgrader")
 
-AGENT, ROLE = "gardener-1", "gardener"
-REPEAT_AFTER = 3          # Sentinel #2 threshold (the Sentinel's own upgrade trigger stays at UPGRADE_AFTER=2)
+AGENT, ROLE = "upgrader-1", "upgrader"
+REPEAT_AFTER = 3          # Monitor #2 threshold (the Monitor's own upgrade trigger stays at UPGRADE_AFTER=2)
 POLL_S = 1.0
 
 
 def enabled() -> bool:
-    return os.environ.get("GARDENER_HELP", "").strip().lower() in ("1", "true", "yes", "on")
+    return os.environ.get("UPGRADER_HELP", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def wait_s() -> float:
-    """How long a Worker waits for the Gardener's answer before retrying as planned."""
+    """How long an Operator waits for the Upgrader's answer before retrying as planned."""
     try:
-        return float(os.environ.get("GARDENER_HELP_WAIT_S") or 5)
+        return float(os.environ.get("UPGRADER_HELP_WAIT_S") or 5)
     except ValueError:
         return 5.0
 
@@ -52,11 +52,11 @@ def _say(text: str, system: str | None = None, incident: str | None = None) -> N
 
 
 # ------------------------------------------------------------------ requesters (swarm side calls these)
-def hand_off_repeat(sentinel_id: str, sig: str, group: dict) -> dict | None:
-    """Sentinel #2: file a 'repeat' request once per problem signature. Returns the new doc, or None."""
+def hand_off_repeat(monitor_id: str, sig: str, group: dict) -> dict | None:
+    """Monitor #2: file a 'repeat' request once per problem signature. Returns the new doc, or None."""
     rid = f"GR-{sig}"
     res = col("gardener_requests").update_one({"_id": rid}, {
-        "$setOnInsert": {"kind": "repeat", "from": sentinel_id, "status": "open", "ts": now(), "answer": None,
+        "$setOnInsert": {"kind": "repeat", "from": monitor_id, "status": "open", "ts": now(), "answer": None,
                          "note": sig},
         "$set": {"system": group.get("system"), "problem": group.get("problem"),
                  "fault_class": group.get("fault_class"), "count": group.get("count"),
@@ -65,7 +65,7 @@ def hand_off_repeat(sentinel_id: str, sig: str, group: dict) -> dict | None:
 
 
 def ask(agent_id: str, incident: str, step: dict, evidence: list[str], fault_class: str | None) -> tuple[dict, bool]:
-    """Worker: post (idempotently) a help request for this step. Returns (request, newly_posted)."""
+    """Operator: post (idempotently) a help request for this step. Returns (request, newly_posted)."""
     rid = f"GH-{step['step_id']}"  # step ids already carry the incident (INC-0001-s1)
     res = col("gardener_requests").update_one({"_id": rid}, {"$setOnInsert": {
         "kind": "help", "from": agent_id, "status": "open", "ts": now(), "answer": None,
@@ -89,7 +89,7 @@ def await_answer(rid: str, timeout: float, nap=time.sleep, check=None) -> dict |
         nap(0.25)
 
 
-# ------------------------------------------------------------------ the Gardener's answers
+# ------------------------------------------------------------------ the Upgrader's answers
 def _version(system: str) -> int | None:
     d = col("systems").find_one({"_id": system}, {"version": 1}) or {}
     return d.get("version")
@@ -107,7 +107,7 @@ def answer_repeat(req: dict) -> dict:
     """Note the repeat; start (or re-queue) the vetted upgrade when a remediation covers it."""
     sys, fc, n = req.get("system"), req.get("fault_class"), req.get("count")
     col("gardener_notes").update_one({"_id": req.get("note")}, {"$set": {
-        "gardener_ack": {"request": req["_id"], "at": now()}}})
+        "upgrader_ack": {"request": req["_id"], "at": now()}}})
     rem = _remediation(sys, fc)
     if rem is None:
         return _tool_upgrade(req)
@@ -115,10 +115,10 @@ def answer_repeat(req: dict) -> dict:
     if existing is None:
         uid = next_id("UPG")
         col("upgrade_requests").update_one({"system": sys, "fault_class": fc}, {"$setOnInsert": {
-            "_id": uid, "system": sys, "weakness": f"{fc} on {sys} repeated {n}x (Sentinel #2)",
+            "_id": uid, "system": sys, "weakness": f"{fc} on {sys} repeated {n}x (Monitor #2)",
             "fault_class": fc, "evidence": req.get("evidence") or [], "status": "requested", "diff": None,
             "tests": None, "approval_id": None, "version_before": _version(sys), "version_after": None,
-            "prove": None, "requested_by": f"{AGENT} (from {req.get('from')})", "gardener_request": req["_id"],
+            "prove": None, "requested_by": f"{AGENT} (from {req.get('from')})", "upgrader_request": req["_id"],
             "ts": now()}}, upsert=True)
         existing = col("upgrade_requests").find_one({"system": sys, "fault_class": fc})
         if existing["_id"] == uid:
@@ -140,7 +140,7 @@ def answer_repeat(req: dict) -> dict:
 
 
 def _tool_upgrade(req: dict) -> dict:
-    """No code remediation covers the repeat: ship an accepted platform tool through the upgrade pipeline."""
+    """No code remediation covers the repeat: ship an accepted toolsmith tool through the upgrade pipeline."""
     from . import tools  # noqa: PLC0415
     sys, fc, n = req.get("system"), req.get("fault_class"), req.get("count")
     tool = tools.accepted(sys, fc)
@@ -153,11 +153,11 @@ def _tool_upgrade(req: dict) -> dict:
         uid = next_id("UPG")
         col("upgrade_requests").update_one({"system": sys, "fault_class": fc, "tool_id": tool["_id"]}, {
             "$setOnInsert": {
-                "_id": uid, "system": sys, "weakness": f"{fc} on {sys} repeated {n}x (Sentinel #2)",
+                "_id": uid, "system": sys, "weakness": f"{fc} on {sys} repeated {n}x (Monitor #2)",
                 "fault_class": fc, "remediation_kind": "tool", "tool_id": tool["_id"],
                 "evidence": req.get("evidence") or [], "status": "requested", "diff": None, "tests": None,
                 "approval_id": None, "version_before": _version(sys), "version_after": None, "prove": None,
-                "requested_by": f"{AGENT} (from {req.get('from')})", "gardener_request": req["_id"],
+                "requested_by": f"{AGENT} (from {req.get('from')})", "upgrader_request": req["_id"],
                 "ts": now()}}, upsert=True)
         existing = col("upgrade_requests").find_one({"system": sys, "fault_class": fc, "tool_id": tool["_id"]})
         if existing["_id"] == uid:
@@ -179,7 +179,7 @@ def _tool_upgrade(req: dict) -> dict:
 
 
 def answer_help(req: dict) -> dict:
-    """What the Gardener remembers for this system + op. advice: params (try these), fast (retry at once)."""
+    """What the Upgrader remembers for this system + op. advice: params (try these), fast (retry at once)."""
     sys, op, params = req["system"], req["op"], req.get("params") or {}
     ver = _version(sys)
     # 1. a verified, current playbook that ran the same op on the same system with different params
@@ -198,15 +198,15 @@ def answer_help(req: dict) -> dict:
         fast = ls.get("kind") == "lied"
         return {"kind": "lesson", "ref": ls["_id"], "advice": {"fast": fast},
                 "text": f"lesson {ls['_id']} (seen {ls.get('count', 1)}x): {(ls.get('why') or '')[:90]}"
-                        + ("; don't wait on its ACK, retry at once and let the Guard read back" if fast else "")}
+                        + ("; don't wait on its ACK, retry at once and let the Verifier read back" if fast else "")}
     # 3. the evidence itself matches a vetted runbook: a system that ACKs without applying
     ev = " ".join(req.get("evidence") or [])
     lies = ev.count("ACK ≠ APPLIED")
     if lies >= 2:
         return {"kind": "runbook", "ref": "lying-ack", "advice": {"fast": True},
                 "text": f"{sys} ACKed {op} {lies}x without applying it: a lying ACK, not a wrong fix. "
-                        f"Resend the same op at once under a new action id; only the Guard's read-back counts"}
-    # 4. an accepted platform tool that runs this op on this system (vetted params; the Guard still checks)
+                        f"Resend the same op at once under a new action id; only the Verifier's read-back counts"}
+    # 4. an accepted toolsmith tool that runs this op on this system (vetted params; the Verifier still checks)
     from . import tools  # noqa: PLC0415
     tool = tools.for_op(sys, op)
     if tool is not None:
@@ -215,7 +215,7 @@ def answer_help(req: dict) -> dict:
         return {"kind": "tool", "ref": tool["_id"], "advice": advice,
                 "text": f"tool {tool['name']} (vetted, {tool.get('successes', 0)} verified runs) does {op} on {sys}"
                         + (f" with {tparams}; use those params" if advice else "; same params as your step, "
-                           "retry as planned and let the Guard read back")}
+                           "retry as planned and let the Verifier read back")}
     # 5. a proven upgrade / vetted remediation for this system (context, nothing to change in the step)
     upg = col("upgrade_requests").find_one({"system": sys, "status": "proven", "reverted_at": {"$exists": False}})
     if upg:
@@ -243,18 +243,18 @@ def handle(req: dict) -> dict | None:
             ans = tools.receive(doc)
         else:
             ans = answer_repeat(doc) if doc["kind"] == "repeat" else answer_help(doc)
-    except Exception as e:  # never leave a Worker waiting on a crashed answer
-        log.exception("gardener request %s failed", doc["_id"])
-        ans = {"kind": "none", "advice": {}, "text": f"none (gardener error: {type(e).__name__})"}
+    except Exception as e:  # never leave an Operator waiting on a crashed answer
+        log.exception("upgrader request %s failed", doc["_id"])
+        ans = {"kind": "none", "advice": {}, "text": f"none (upgrader error: {type(e).__name__})"}
     col("gardener_requests").update_one({"_id": doc["_id"]}, {"$set": {
         "status": "answered", "answer": ans, "answered_at": now()}})
     if doc["kind"] == "tool":
-        _say(f"Gardener ← {doc.get('from')}: {ans['text']}.", doc.get("system"))
+        _say(f"Upgrader ← {doc.get('from')}: {ans['text']}.", doc.get("system"))
     elif doc["kind"] == "repeat":
-        _say(f"Gardener ← Sentinel #2: {doc.get('problem')} repeated {doc.get('count')}× — {ans['text']}.",
+        _say(f"Upgrader ← Monitor #2: {doc.get('problem')} repeated {doc.get('count')}× — {ans['text']}.",
              doc.get("system"))
     else:
-        _say(f"Gardener → {doc.get('from')}: {ans['text']}.", doc.get("system"), doc.get("incident"))
+        _say(f"Upgrader → {doc.get('from')}: {ans['text']}.", doc.get("system"), doc.get("incident"))
     return col("gardener_requests").find_one({"_id": doc["_id"]})
 
 
@@ -271,7 +271,7 @@ def serve(stop: threading.Event) -> None:
                     stream = None
             for req in list(col("gardener_requests").find({"status": "open"}).sort("ts", 1).limit(20)):
                 handle(req)
-            # stale claims (a Gardener killed mid-answer) go back to open
+            # stale claims (an Upgrader killed mid-answer) go back to open
             col("gardener_requests").update_many(
                 {"status": "answering", "claimed_at": {"$lt": now() - _td(30)}}, {"$set": {"status": "open"}})
             if stream is not None:

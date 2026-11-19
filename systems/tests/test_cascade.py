@@ -6,13 +6,13 @@ from fastapi.testclient import TestClient
 
 import systems.mainframe as mf
 from systems.base import CASCADE_TICKS, now_ms
-from systems.tests.helpers import adversary, op, status, tick
+from systems.tests.helpers import chaos, op, status, tick
 
 ALL = ("mainframe", "unix", "portal")
 
 
 def strict_validate(record: str) -> bool:
-    """Stand-in for the Gardener's patch (fixed width + numeric amount)."""
+    """Stand-in for the Upgrader's patch (fixed width + numeric amount)."""
     return len(record) == mf.RECORD_LEN and not mf.is_malformed(record)
 
 
@@ -133,7 +133,7 @@ def test_slow_apply_lands_later_and_survives_restart(app, c, legacy, wdb):
     assert op(c, "portal", "apply_patch", {"patch": "parameterize_search"}, action_id="slow-patch")["applied"]
 
 
-def test_gardener_patch_shrugs_off_batch_abort(c, monkeypatch):
+def test_upgrader_patch_shrugs_off_batch_abort(c, monkeypatch):
     monkeypatch.setattr(mf, "validate_record", strict_validate)
     assert c.get("/mainframe/state").json()["validation_enabled"] is True
     chaos(c, "mainframe", "batch_abort")

@@ -1,12 +1,12 @@
-"""Comms live roster (SWARM_COMMS=1): who every agent is, what it is doing and where, in agents.roster.
+"""Comms live roster (AGENTS_COMMS=1): who every agent is, what it is doing and where, in agents.roster.
 
-Derived, not reported: one thread inside the Waggle process reads the state the agents already write
+Derived, not reported: one thread inside the Reporter process reads the state the agents already write
 (swarm.agents heartbeat/status/phase, the task and incident LEASES, incident steps + handoffs,
 spawn_requests) and upserts one doc per agent, writing only docs that changed. No other role writes it.
 
     agents.roster {_id: agent id, role, specialty, state: "idle"|"working"|"standby"|"dead"|"retired",
                   incident, system, task, step, phase, doing: one line, parent (current orchestrator: the
-                  incident's lease holder for task holders, the assigning queen for scouts), spawned_by,
+                  incident's lease holder for task holders, the assigning coordinator for investigators), spawned_by,
                   took_over: {from, work, ts, takeover_s} | null, taken_over_by: {to, work, ts} | null,
                   pid, generation, last_seen, died_at, retired_at, updated_at}
 """
@@ -59,7 +59,7 @@ def build(agents: list[dict], tasks: list[dict], incidents: list[dict], spawns: 
             cur = next((s for s in mine if s.get("status") != "verified"), mine[-1] if mine else None)
             step = _step_text(cur) if cur else f"diagnose {task.get('specialty')}"
         elif inc:
-            parent = inc.get("assigned_by") or ("queen" if role == "scout" else None)
+            parent = inc.get("assigned_by") or ("coordinator" if role == "investigator" else None)
             cur = next((s for s in inc.get("steps") or [] if s.get("status") not in ("verified",)), None)
             step = _step_text(cur) if cur else inc.get("status")
         elif inc_id and inc_id in incs:
@@ -150,7 +150,7 @@ class Roster:
 
 
 def start(agent) -> threading.Thread:
-    """Run the roster sweep beside the Waggle's message loop (its own thread: Atlas round trips here
+    """Run the roster sweep beside the Reporter's message loop (its own thread: Atlas round trips here
     never delay message prioritisation)."""
     roster = Roster()
     live = [a["_id"] for a in col("agents").find({}, {"_id": 1})]

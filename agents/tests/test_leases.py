@@ -45,7 +45,7 @@ def test_takeover_of_expired_lease_has_one_winner(clean):
 
     col("tasks").insert_one({"_id": "T", "status": "claimed", "owner": "dead-bee", "lease_until": leases.EPOCH,
                              "generation": 4})
-    won = _race(8, lambda i: leases.takeover(col("tasks"), "T", "dead-bee", 4, f"nurse-{i}"))
+    won = _race(8, lambda i: leases.takeover(col("tasks"), "T", "dead-bee", 4, f"recovery-{i}"))
     assert len([w for w in won if w]) == 1
     assert col("tasks").find_one({"_id": "T"})["generation"] == 5
 
@@ -69,27 +69,27 @@ def test_fencing_rejects_stale_generation(clean):
                                                             "status": "planned", "attempts": []}]})
     col("tasks").insert_one({"_id": "INC-T-f1", "incident": "INC-T", "step_ids": ["INC-T-s1"], "status": "open",
                              "owner": None, "lease_until": None, "generation": 0})
-    a = leases.claim(col("tasks"), {"_id": "INC-T-f1"}, "worker-a")
+    a = leases.claim(col("tasks"), {"_id": "INC-T-f1"}, "operator-a")
     assert a["generation"] == 1
-    # worker-a stalls; its lease expires; a nurse takes over with generation 2
+    # operator-a stalls; its lease expires; a recovery takes over with generation 2
     col("tasks").update_one({"_id": "INC-T-f1"}, {"$set": {"lease_until": now() - timedelta(seconds=1)}})
-    b = leases.takeover(col("tasks"), "INC-T-f1", "worker-a", 1, "nurse-1")
+    b = leases.takeover(col("tasks"), "INC-T-f1", "operator-a", 1, "recovery-1")
     assert b["generation"] == 2
 
-    assert leases.renew(col("tasks"), "INC-T-f1", "worker-a", 1) is False
+    assert leases.renew(col("tasks"), "INC-T-f1", "operator-a", 1) is False
     step = steps.get_step("INC-T", "INC-T-s1")
     with pytest.raises(leases.Fenced):
-        steps.mark_sent(a, "worker-a", 1, step, "INC-T-s1-a1")
+        steps.mark_sent(a, "operator-a", 1, step, "INC-T-s1-a1")
     # the stale write left NO trace: step untouched, no ledger receipt (the transaction aborted)
     assert steps.get_step("INC-T", "INC-T-s1")["status"] == "planned"
     assert col("ledger").count_documents({}) == 0
 
-    steps.mark_sent(b, "nurse-1", 2, step, "INC-T-s1-a1")
+    steps.mark_sent(b, "recovery-1", 2, step, "INC-T-s1-a1")
     s = steps.get_step("INC-T", "INC-T-s1")
-    assert s["status"] == "sent" and s["agent"] == "nurse-1" and s["attempts"] == ["INC-T-s1-a1"]
+    assert s["status"] == "sent" and s["agent"] == "recovery-1" and s["attempts"] == ["INC-T-s1-a1"]
     assert col("ledger").find_one({"action_id": "INC-T-s1-a1"})["status"] == "sent"
-    assert leases.release(col("tasks"), "INC-T-f1", "worker-a", 1) is False
-    assert leases.release(col("tasks"), "INC-T-f1", "nurse-1", 2) is True
+    assert leases.release(col("tasks"), "INC-T-f1", "operator-a", 1) is False
+    assert leases.release(col("tasks"), "INC-T-f1", "recovery-1", 2) is True
 
 
 def test_only_matching_attempt_can_be_judged(clean):
@@ -106,9 +106,9 @@ def test_only_matching_attempt_can_be_judged(clean):
     step = steps.get_step("INC-J", "INC-J-s1")
     steps.mark_sent(t, "w", 1, step, "INC-J-s1-a1")
     step = steps.get_step("INC-J", "INC-J-s1")
-    assert steps.verify("INC-J", step, "INC-J-s1-a0", "x", "guard-1") is False   # wrong attempt
-    assert steps.reject("INC-J", step, "INC-J-s1-a1", "ACK ≠ APPLIED", "guard-1") is True
-    assert steps.verify("INC-J", step, "INC-J-s1-a1", "late", "guard-1") is False  # no longer 'sent'
+    assert steps.verify("INC-J", step, "INC-J-s1-a0", "x", "verifier-1") is False   # wrong attempt
+    assert steps.reject("INC-J", step, "INC-J-s1-a1", "ACK ≠ APPLIED", "verifier-1") is True
+    assert steps.verify("INC-J", step, "INC-J-s1-a1", "late", "verifier-1") is False  # no longer 'sent'
     # the $jsonSchema validator refuses a verified step without evidence
     from pymongo.errors import WriteError
     with pytest.raises(WriteError):

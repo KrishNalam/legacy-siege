@@ -79,9 +79,9 @@ def test_caps_budget_gap_quiet_incident_and_victims(systems, on, monkeypatch):
     swarm().incidents.insert_one({"_id": "INC-0009", "active": True, "status": "fixing", "opened_at": now()})
     held = _red_fire()
     assert held["status"] == "hold" and "mid-repair" in held["result"]["error"]       # R1 finding 3
-    swarm().agents.insert_one({"_id": "queen-1", "role": "queen", "status": "idle", "last_seen": now()})
-    q = _red_fire("agent_kill", "swarm", by="red-assassin", params={"selector": {"agent": "queen-1"}, "wait_s": 0})
-    assert q["status"] == "deny" and "queen" in q["result"]["error"]                   # R1 finding 1
+    swarm().agents.insert_one({"_id": "coordinator-1", "role": "coordinator", "status": "idle", "last_seen": now()})
+    q = _red_fire("agent_kill", "swarm", by="red-assassin", params={"selector": {"agent": "coordinator-1"}, "wait_s": 0})
+    assert q["status"] == "deny" and "coordinator" in q["result"]["error"]                   # R1 finding 1
 
     _night("bank-night-3")
     assert _red_fire()["status"] == "deny"
@@ -137,7 +137,7 @@ def test_loop_picks_planner_request_and_executes_it(systems, on):
 
 
 def test_loop_poisons_learned_memory(systems, on, monkeypatch):
-    monkeypatch.setenv("CHAOS_POISON_MEMORY", "1")
+    monkeypatch.setenv("ADVERSARY_POISON_MEMORY", "1")
     _night()
     swarm().playbooks.insert_one({"_id": "PB-0001", "fault_class": "disk_fill", "system": "unix", "stale": False,
                                   "created_at": now(), "fix": [{"op": "purge_spool", "system": "unix"}]})
@@ -163,11 +163,11 @@ def test_loop_spawns_striker_for_agent_victims_and_respects_spawn_budget(systems
     spawned = []
     monkeypatch.setattr(decider.RunnerLoop, "spawn", lambda self, p: (spawned.append(p),
                         world().red_agents.update_one({"_id": "runner"}, {"$inc": {"spawns": 1}})))
-    decider.propose("agent_kill", "swarm", {"selector": {"role": "worker", "phase": "step_sent"}}, by="red-planner")
+    decider.propose("agent_kill", "swarm", {"selector": {"role": "operator", "phase": "step_sent"}}, by="red-planner")
     d = decider.RunnerLoop().tick()
     assert d["decision"] == "spawn" and d["persona"] == "red-assassin" and spawned == ["red-assassin"]
     assert world().chaos_events.count_documents({"fault": "agent_kill"}) == 0   # the Striker fires, admitted later
-    decider.propose("agent_kill", "swarm", {"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 0},
+    decider.propose("agent_kill", "swarm", {"selector": {"role": "operator", "phase": "step_sent"}, "wait_s": 0},
                     by="red-planner")
     d2 = decider.RunnerLoop().tick()
     assert d2["decision"] == "execute" and "spawn budget spent" in d2["reason"] and spawned == ["red-assassin"]
@@ -187,7 +187,7 @@ def test_held_request_stays_queued_and_runs_when_clear(systems, on):
 def test_claude_pick_is_mocked_and_must_be_on_the_menu(systems, on, monkeypatch):
     from common import llm
     monkeypatch.setenv("RUNNER_LLM", "1")
-    monkeypatch.setenv("CHAOS_POISON_MEMORY", "1")
+    monkeypatch.setenv("ADVERSARY_POISON_MEMORY", "1")
     monkeypatch.setattr(llm, "llm_available", lambda: True)
     _night()
     swarm().playbooks.insert_one({"_id": "PB-0002", "fault_class": "disk_fill", "system": "unix", "stale": False,

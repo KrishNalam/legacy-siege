@@ -16,7 +16,7 @@ from common.db import now, swarm, world
 
 @pytest.fixture(autouse=True)
 def fleet_switch(monkeypatch):
-    monkeypatch.setenv("RED_FLEET", "1")
+    monkeypatch.setenv("ADVERSARY", "1")
 
 
 P = PERSONAS
@@ -30,11 +30,11 @@ def agent(id, role, status="working", phase=None, specialty=None, incident=None)
     return {"id": id, "role": role, "status": status, "phase": phase, "specialty": specialty, "incident": incident}
 
 
-HIVE = [agent("guard-1", "guard"), agent("gardener-1", "gardener"), agent("queen-1", "queen"),
-        agent("queen-2", "queen", "standby"), agent("scout-1", "scout", incident="INC-0001"),
-        agent("worker-mainframe-1", "worker", phase="step_sent", specialty="mainframe", incident="INC-0001"),
-        agent("worker-unix-1", "worker", "idle"), agent("nurse-1", "nurse", "standby"),
-        agent("waggle-1", "waggle"), agent("sentinel-1", "sentinel")]
+HIVE = [agent("verifier-1", "verifier"), agent("upgrader-1", "upgrader"), agent("coordinator-1", "coordinator"),
+        agent("coordinator-2", "coordinator", "standby"), agent("investigator-1", "investigator", incident="INC-0001"),
+        agent("operator-mainframe-1", "operator", phase="step_sent", specialty="mainframe", incident="INC-0001"),
+        agent("operator-unix-1", "operator", "idle"), agent("recovery-1", "recovery", "standby"),
+        agent("reporter-1", "reporter"), agent("monitor-1", "monitor")]
 
 
 def snap(**kw) -> dict:
@@ -51,7 +51,7 @@ INC = {"id": "INC-0001", "status": "fixing", "system": "portal", "root_cause_sys
 
 # ------------------------------------------------------------------ off by default, live DBs refused
 def test_off_by_default(monkeypatch, capsys):
-    monkeypatch.delenv("RED_FLEET", raising=False)
+    monkeypatch.delenv("ADVERSARY", raising=False)
     assert not core.enabled()
     import run
     assert "adversary" not in [n for n, _ in importlib.reload(run).PROCS]
@@ -62,22 +62,22 @@ def test_off_by_default(monkeypatch, capsys):
 
 
 def test_run_py_starts_the_fleet_when_switched_on(monkeypatch):
-    monkeypatch.setenv("RED_FLEET", "1")
+    monkeypatch.setenv("ADVERSARY", "1")
     import run
     try:
         assert "adversary" in [n for n, _ in importlib.reload(run).PROCS]
     finally:
-        monkeypatch.delenv("RED_FLEET")
+        monkeypatch.delenv("ADVERSARY")
         importlib.reload(run)
 
 
 def test_refuses_live_dbs(monkeypatch):
-    monkeypatch.delenv("RED_FLEET_ALLOW_LIVE", raising=False)
+    monkeypatch.delenv("ADVERSARY_ALLOW_LIVE", raising=False)
     monkeypatch.setattr(config, "WORLD_DB", "world")
     assert core.live_db_refusal()
-    monkeypatch.setenv("RED_FLEET_ALLOW_LIVE", "1")
+    monkeypatch.setenv("ADVERSARY_ALLOW_LIVE", "1")
     assert core.live_db_refusal() is None
-    monkeypatch.delenv("RED_FLEET_ALLOW_LIVE")
+    monkeypatch.delenv("ADVERSARY_ALLOW_LIVE")
     monkeypatch.setattr(config, "WORLD_DB", "world_w14")
     monkeypatch.setattr(config, "SWARM_DB", "swarm_w14")
     assert core.live_db_refusal() is None
@@ -112,25 +112,25 @@ def test_allowlist_narrows_menus():
     assert validate(P["red-liar"], {"fault": "slow_apply", "target": "unix"}, snap(), c)[0] is None
 
 
-def test_assassin_menu_spares_the_gardener_and_the_last_queen():
+def test_assassin_menu_spares_the_upgrader_and_the_last_coordinator():
     menu = P["red-assassin"].menu(snap(agents=HIVE), cfg())
     victims = {m["victim"] for m in menu}
-    assert {"gardener-1", "queen-2", "worker-unix-1", "nurse-1", "waggle-1"}.isdisjoint(victims)
-    assert {"guard-1", "queen-1", "scout-1", "worker-mainframe-1", "sentinel-1"} <= victims
-    lone = [a for a in HIVE if a["id"] != "queen-2"]
-    assert "queen-1" not in {m["victim"] for m in P["red-assassin"].menu(snap(agents=lone), cfg())}
-    assert validate(P["red-assassin"], {"fault": "agent_kill", "target": "swarm", "victim": "gardener-1"},
+    assert {"upgrader-1", "coordinator-2", "operator-unix-1", "recovery-1", "reporter-1"}.isdisjoint(victims)
+    assert {"verifier-1", "coordinator-1", "investigator-1", "operator-mainframe-1", "monitor-1"} <= victims
+    lone = [a for a in HIVE if a["id"] != "coordinator-2"]
+    assert "coordinator-1" not in {m["victim"] for m in P["red-assassin"].menu(snap(agents=lone), cfg())}
+    assert validate(P["red-assassin"], {"fault": "agent_kill", "target": "swarm", "victim": "upgrader-1"},
                     snap(agents=HIVE), cfg())[0] is None
 
 
 def test_kill_params_come_from_the_menu():
     s, c = snap(agents=HIVE), cfg(kill_wait_s=4)
-    ok, _ = validate(P["red-assassin"], {"fault": "agent_kill", "target": "swarm", "victim": "worker-mainframe-1",
-                                         "selector": {"role": "queen"}}, s, c)
-    assert ok["params"] == {"selector": {"role": "worker", "phase": "step_sent", "specialty": "mainframe"},
+    ok, _ = validate(P["red-assassin"], {"fault": "agent_kill", "target": "swarm", "victim": "operator-mainframe-1",
+                                         "selector": {"role": "coordinator"}}, s, c)
+    assert ok["params"] == {"selector": {"role": "operator", "phase": "step_sent", "specialty": "mainframe"},
                             "wait_s": 4}
-    ok, _ = validate(P["red-assassin"], {"fault": "agent_kill", "target": "swarm", "victim": "guard-1"}, s, c)
-    assert ok["params"]["selector"] == {"agent": "guard-1"}
+    ok, _ = validate(P["red-assassin"], {"fault": "agent_kill", "target": "swarm", "victim": "verifier-1"}, s, c)
+    assert ok["params"]["selector"] == {"agent": "verifier-1"}
 
 
 def test_hacker_skips_patched_vulns():
@@ -147,7 +147,7 @@ def test_gate():
     assert gate(snap(approvals_pending=2), c, 0, t) is None          # Krish waived the approval hold
     assert "no night" in gate(snap(night_running=False), c, 0, t)
     assert "off limits" in gate(snap(scenario="bank-night-3"), cfg(skip_scenarios=("bank-night-3",)), 0, t)
-    assert "Gardener" in gate(snap(upgrade_busy=1), c, 0, t)
+    assert "Upgrader" in gate(snap(upgrade_busy=1), c, 0, t)
     old, recent = t - timedelta(seconds=60), t - timedelta(seconds=5)
     assert "budget" in gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "ok"}] * 2), cfg(max_attacks=2), 0, t)
     assert "budget" in gate(snap(red_attacks=[{"fault": "a", "ts": old, "status": "ok"}] * 2), c, 0, t)  # default 2
@@ -176,8 +176,8 @@ def test_playbooks():
     calm = {**INC, "pending_steps": []}
     lie = pick("red-liar", snap(incidents=[calm]))
     assert lie["fault"] == "false_log" and lie["target"] == "mainframe" and lie["blame"] != "mainframe"
-    assert pick("red-assassin", snap(agents=HIVE))["victim"] == "worker-mainframe-1"
-    assert pick("red-assassin", snap(agents=[a for a in HIVE if a["phase"] != "step_sent"]))["victim"] == "scout-1"
+    assert pick("red-assassin", snap(agents=HIVE))["victim"] == "operator-mainframe-1"
+    assert pick("red-assassin", snap(agents=[a for a in HIVE if a["phase"] != "step_sent"]))["victim"] == "investigator-1"
     assert pick("red-hacker", snap())["fault"] == "credential_exploit"
     assert pick("red-drifter", snap())["fault"] == "schema_drift"
     assert pick("red-drifter", snap(systems={"unix": {"faults_active": ["schema_drift"]}})) is None
@@ -217,7 +217,7 @@ def _open_night(scenario="free-play"):
 
 
 def _no_llm(monkeypatch):
-    monkeypatch.setenv("RED_FLEET", "1")
+    monkeypatch.setenv("ADVERSARY", "1")
     from adversary.redfleet import agent as agent_mod
     monkeypatch.setattr(agent_mod.llm, "llm_available", lambda: False)
 
@@ -261,12 +261,12 @@ def test_assassin_arms_a_kill_for_the_next_send_and_victims_filter():
     calm = [a for a in HIVE if a["phase"] != "step_sent"]
     s, c = snap(agents=calm, incidents=[INC]), cfg(kill_wait_s=4)
     pick = P["red-assassin"].policy_fn(s, P["red-assassin"].menu(s, c))
-    assert pick["victim"] == "next-worker-mid-send"
+    assert pick["victim"] == "next-operator-mid-send"
     ok, _ = validate(P["red-assassin"], pick, s, c)
-    assert ok["params"] == {"selector": {"role": "worker", "phase": "step_sent"}, "wait_s": 25.0}
-    stage = cfg(victims=("worker:step_sent",))   # stage mode: only the Q2 beat, never a queen or the guard
-    assert {m["victim"] for m in P["red-assassin"].menu(snap(agents=HIVE), stage)} == {"worker-mainframe-1"}
-    assert {m["victim"] for m in P["red-assassin"].menu(s, stage)} == {"next-worker-mid-send"}
+    assert ok["params"] == {"selector": {"role": "operator", "phase": "step_sent"}, "wait_s": 25.0}
+    stage = cfg(victims=("operator:step_sent",))   # stage mode: only the Q2 beat, never a coordinator or the verifier
+    assert {m["victim"] for m in P["red-assassin"].menu(snap(agents=HIVE), stage)} == {"operator-mainframe-1"}
+    assert {m["victim"] for m in P["red-assassin"].menu(s, stage)} == {"next-operator-mid-send"}
     assert P["red-assassin"].menu(snap(agents=calm), stage) == []
 
 
@@ -278,7 +278,7 @@ def test_reasoning_reflects_real_readbacks_and_learns(systems, monkeypatch):
         prompts.append(prompt)
         if 'Reflect on' in system:
             return '{"reflection":"No resolved incident is visible.","lesson":"Try a delayed ACK during a pending step."}'
-        return '{"fault":"false_log","target":"mainframe","blame":"unix","reason":"Plant a misleading note because no worker is mid-send yet."}'
+        return '{"fault":"false_log","target":"mainframe","blame":"unix","reason":"Plant a misleading note because no operator is mid-send yet."}'
     monkeypatch.setattr(mod.llm, 'complete', answer)
     _open_night()
     a = Attacker(P['red-liar'], cfg())
@@ -293,30 +293,30 @@ def test_reasoning_reflects_real_readbacks_and_learns(systems, monkeypatch):
     assert swarm().thoughts.count_documents({'text': {'$regex': 'REFLECT.*LEARN'}}) == 2
 
 
-def test_outcome_reads_existing_victim_incident_and_guard_ledger(systems):
+def test_outcome_reads_existing_victim_incident_and_verifier_ledger(systems):
     from adversary.redfleet.learning import outcome
     event = {'_id': 'CHX-test', 'fault': 'agent_freeze', 'target': 'swarm', 'status': 'ok',
              'ts': now(), 'result': {'incident': 'INC-existing'}}
     swarm().incidents.insert_one({'_id':'INC-existing', 'opened_at':now()-timedelta(seconds=20),
         'closed_at':now()+timedelta(seconds=4), 'status':'resolved', 'steps':[],
-        'handoffs':[{'from':'worker-1','to':'nurse-1'}]})
+        'handoffs':[{'from':'operator-1','to':'recovery-1'}]})
     swarm().ledger.insert_one({'incident':'INC-existing','status':'failed',
         'action_id':'a1','updated_at':now(),'evidence':'ACK ≠ APPLIED: record still present'})
     observed = outcome(event)
-    assert observed['guard_caught'] is True and 3 <= observed['recovery_s'] <= 5
-    assert observed['incidents'][0]['handoffs'][0]['to'] == 'nurse-1'
+    assert observed['verifier_caught'] is True and 3 <= observed['recovery_s'] <= 5
+    assert observed['incidents'][0]['handoffs'][0]['to'] == 'recovery-1'
     world().chaos_events.insert_one(event)
     runner.refresh_outcomes()
-    assert world().chaos_events.find_one({'_id':event['_id']})['outcome']['guard_caught'] is True
+    assert world().chaos_events.find_one({'_id':event['_id']})['outcome']['verifier_caught'] is True
 
 
-def test_outcome_counts_a_rejected_recalled_repair_as_a_guard_catch(systems):
+def test_outcome_counts_a_rejected_recalled_repair_as_a_verifier_catch(systems):
     from adversary.redfleet.learning import outcome
     event = {'_id': 'CHX-poison', 'fault': 'poison_memory', 'target': 'swarm', 'status': 'ok', 'ts': now()}
     swarm().incidents.insert_one({'_id': 'INC-0002', 'opened_at': now(), 'status': 'fixing', 'steps': [],
                                   'recall': {'used': True, 'rejected': 'RED-POISON:PB-0001'}})
     observed = outcome(event)
-    assert observed['guard_caught'] is True and observed['incidents'][0]['memory_rejected'] == 'RED-POISON:PB-0001'
+    assert observed['verifier_caught'] is True and observed['incidents'][0]['memory_rejected'] == 'RED-POISON:PB-0001'
     # the plant is recalled a night later (RUN-0002): the outcome follows the planted playbook, not the run
     later = {**event, '_id': 'CHX-poison-2', 'run_id': 'RUN-0001', 'result': {'playbook': 'RED-POISON:PB-0009'}}
     swarm().incidents.insert_one({'_id': 'INC-0003', 'run_id': 'RUN-0002', 'opened_at': now(), 'status': 'resolved',
@@ -324,4 +324,4 @@ def test_outcome_counts_a_rejected_recalled_repair_as_a_guard_catch(systems):
                                   'recall': {'used': True, 'memory_rejected': ['RED-POISON:PB-0009'],
                                              'rejected': 'RED-POISON:PB-0009'}})
     observed = outcome(later)
-    assert observed['guard_caught'] is True and [r['incident'] for r in observed['incidents']] == ['INC-0003']
+    assert observed['verifier_caught'] is True and [r['incident'] for r in observed['incidents']] == ['INC-0003']

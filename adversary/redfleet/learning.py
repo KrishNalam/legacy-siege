@@ -22,7 +22,7 @@ def outcome(event: dict) -> dict:
         steps = inc.get('steps') or []
         resolved = inc.get('closed_at') if inc.get('status') == 'resolved' else None
         rows.append({'incident': inc['_id'], 'status': inc.get('status'),
-                     'guard_evidence': [{'op': s.get('op'), 'status': s.get('status'), 'evidence': s.get('evidence')}
+                     'verifier_evidence': [{'op': s.get('op'), 'status': s.get('status'), 'evidence': s.get('evidence')}
                                         for s in steps if s.get('evidence') or s.get('status') == 'failed'][:5],
                      'failed_attempts': list(swarm().ledger.find({'incident': inc['_id'], 'status': 'failed', 'updated_at': {'$gte': event['ts']}},
                           {'_id': 0, 'action_id': 1, 'evidence': 1}).limit(5)),
@@ -34,7 +34,7 @@ def outcome(event: dict) -> dict:
                       or any(r.get('memory_rejected') for r in rows)) else None   # read-back lie, or a recalled repair rejected
     recovered = [r['recovery_s'] for r in rows if r.get('recovery_s') is not None]
     return {'observed_at': now(), 'attack_status': event.get('status'), 'incidents': rows,
-            'guard_caught': caught, 'recovery_s': max(recovered) if recovered and all(r.get('status') == 'resolved' for r in rows) else None,
+            'verifier_caught': caught, 'recovery_s': max(recovered) if recovered and all(r.get('status') == 'resolved' for r in rows) else None,
             'caveat': 'Temporal association only; no incident means no observed defence, not successful recovery.'}
 
 

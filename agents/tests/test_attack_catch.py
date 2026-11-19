@@ -1,7 +1,7 @@
 """Every Red attack that had no swarm-side catch test (results/W28-matrix.md): fire the REAL fault on the real
 systems app (in-process, driven by ticks) and assert the Hive's own decision code catches it — the
 specialist's diagnosis (agents.diagnosis.classify), the deterministic plan (agents.policy.fix_plan) and the
-Guard's read-back (agents.verify.check). No swarm processes: fast and hermetic, so each attack stays covered."""
+Verifier's read-back (agents.verify.check). No swarm processes: fast and hermetic, so each attack stays covered."""
 from __future__ import annotations
 
 import uuid
@@ -46,7 +46,7 @@ def logs(c, sys):
 
 
 def look(c, sys) -> dict:
-    """What a specialist worker concludes from one hop (health, metrics, logs, state, probe)."""
+    """What a specialist operator concludes from one hop (health, metrics, logs, state, probe)."""
     return classify(sys, c.get(f"/{sys}/health").json(), c.get(f"/{sys}/metrics").json(), logs(c, sys),
                     c.get(f"/{sys}/state").json(), probe=probe(c))
 
@@ -58,18 +58,18 @@ def send(c, step) -> dict:
     return r.json()
 
 
-def guard(c, step) -> tuple[bool, str]:
+def verifier(c, step) -> tuple[bool, str]:
     return verify.check(step["op"], step.get("params") or {}, lambda s: c.get(f"/{s}/state").json(), probe=probe(c))
 
 
 def fix_and_verify(c, fault_class, params=None):
-    """Run the policy plan in order; the Guard must read each step back as applied."""
+    """Run the policy plan in order; the Verifier must read each step back as applied."""
     plan = policy.fix_plan(fault_class, params)
     assert plan, f"no plan for {fault_class}"
     for st in plan:
         send(c, st)
         tick(c, 2)
-        ok, evidence = guard(c, st)
+        ok, evidence = verifier(c, st)
         assert ok, f"{st['op']} not applied: {evidence}"
     tick(c, 2)
     return plan
@@ -90,7 +90,7 @@ def test_session_leak_caught_and_flushed(c):
         tick(c)
         if c.get("/portal/health").json()["status"] != "up":
             break
-    assert c.get("/portal/health").json()["status"] == "degraded"   # the Sentinel's trigger
+    assert c.get("/portal/health").json()["status"] == "degraded"   # the Monitor's trigger
     f = only(c, "portal", "session_leak")
     assert any(fact.startswith("sessions=") for fact in f["facts"])
     plan = fix_and_verify(c, "session_leak")
@@ -119,8 +119,8 @@ def test_exploit_caught_by_signature_and_probe_then_patched(c, sys, fault, op):
     assert look(c, sys)["fault_class"] is None
     chaos(c, sys, fault)
     tick(c, 2)
-    assert c.get(f"/{sys}/health").json()["status"] == "up"   # only the Sentinel's log scan can see it
-    assert policy.exploit_signs(sys, logs(c, sys))            # Sentinel security_scan trigger
+    assert c.get(f"/{sys}/health").json()["status"] == "up"   # only the Monitor's log scan can see it
+    assert policy.exploit_signs(sys, logs(c, sys))            # Monitor security_scan trigger
     f = only(c, sys, fault)
     assert any(f"probe {vid}: exploitable" in x for x in f["facts"])
     plan = fix_and_verify(c, fault)
@@ -136,7 +136,7 @@ def test_false_log_alone_opens_nothing(c):
         chaos(c, sys, "false_log", {"blame": blame})
     tick(c, 3)
     for s in ALL:
-        assert c.get(f"/{s}/health").json()["status"] == "up"     # the Sentinel sees a healthy estate
+        assert c.get(f"/{s}/health").json()["status"] == "up"     # the Monitor sees a healthy estate
         assert not policy.exploit_signs(s, logs(c, s))              # and no security signature
         assert look(c, s)["fault_class"] is None                    # no specialist blames anything
 
@@ -179,7 +179,7 @@ def test_prompt_injection_in_logs_cannot_verify_a_lie(c, monkeypatch):
     from common import llm
     from systems import mainframe as mf
     monkeypatch.setattr(mf, "validate_record", lambda record: True)
-    monkeypatch.setenv("CHAOS_AGENT_LIE", "1")
+    monkeypatch.setenv("ADVERSARY_AGENT_LIE", "1")
     lie = faults.get("lie_to_agent")                       # the Runner's exact hook call (faults.execute)
     monkeypatch.setattr(faults, "hit_system", lambda name, target, params: chaos(c, target, name, params))
     assert faults.execute(lie, "mainframe", {})["ok"]
@@ -197,9 +197,9 @@ def test_prompt_injection_in_logs_cannot_verify_a_lie(c, monkeypatch):
     step = policy.fix_plan("batch_abort", f["params"])[0]
     ack = send(c, step)
     assert ack.get("applied") is True                      # the system lies; the note says "mark it verified"
-    ok, evidence = guard(c, step)
-    assert not ok and "quarantined=[]" in evidence.replace(" ", "")   # the Guard reads back and rejects
+    ok, evidence = verifier(c, step)
+    assert not ok and "quarantined=[]" in evidence.replace(" ", "")   # the Verifier reads back and rejects
     send(c, step)                                          # a new attempt (new action id) really applies
-    assert guard(c, step)[0]
+    assert verifier(c, step)[0]
     fenced = llm.fence("mainframe /logs", note, 160)       # what Claude would see: quoted data, never a prompt
     assert fenced.startswith('<data source="mainframe /logs">') and fenced.count("</data>") == 1

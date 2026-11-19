@@ -1,15 +1,15 @@
-"""Upgrade steps for remediation_kind "tool": ship an accepted platform tool instead of a code diff.
+"""Upgrade steps for remediation_kind "tool": ship an accepted toolsmith tool instead of a code diff.
 
 upgrader.pipeline dispatches here once a request carries remediation_kind "tool" (set by the help desk
-for a Sentinel #2 repeat, or by pipeline._pick_kind when no code remediation covers the problem but the
-Gardener has accepted a tool for it). Same statuses, same atomic transitions, same Beekeeper gate:
+for a Monitor #2 repeat, or by pipeline._pick_kind when no code remediation covers the problem but the
+Upgrader has accepted a tool for it). Same statuses, same atomic transitions, same Beekeeper gate:
 
     plan   re-vet the tool (active, exact whitelist, current system version); the "diff" is its op list
     test   sandbox replay on an isolated copy of the estate: fault active -> tool ops -> fault resolved
     gate   (pipeline.request_approval) approval text from approval_text()
-    deploy adopt the tool as the swarm's standing recovery: tools.gardener.adopted + ledger receipt, one txn
+    deploy adopt the tool as the swarm's standing recovery: tools.upgrader.adopted + ledger receipt, one txn
     prove  fire the fault on the estate; proven when the swarm resolves that incident with the tool's steps
-           and the Guard verified every one of them (the Gardener never sends ops to the estate itself)
+           and the Verifier verified every one of them (the Upgrader never sends ops to the estate itself)
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from common.db import col, now, txn
 from . import testing, tools
 from . import pipeline as P
 
-PROVE_WINDOW_S = float(os.environ.get("GARDENER_TOOL_PROVE_S") or 120)
+PROVE_WINDOW_S = float(os.environ.get("UPGRADER_TOOL_PROVE_S") or 120)
 
 
 def _tool(upg: dict) -> dict:
@@ -43,10 +43,10 @@ def plan(upg: dict) -> dict:
     tool = _tool(upg)
     text = _ops_text(tool["ops"])
     ev = P.evidence_summary(list(upg.get("evidence") or []))
-    explanation = (f"No code fix covers {upg.get('fault_class')} on {system}; platform tool {tool['name']} "
+    explanation = (f"No code fix covers {upg.get('fault_class')} on {system}; toolsmith tool {tool['name']} "
                    f"({tool.get('source')}, built from {len(tool.get('built_from') or [])} repeated failures) runs "
                    f"{len(tool['ops'])} whitelisted ops. Adopting it makes it the swarm's standing recovery; "
-                   f"Workers still send each op and the Guard still reads every one back.")
+                   f"Operators still send each op and the Verifier still reads every one back.")
     doc = P.advance(upg_id, {"planning"}, "planning",
                     diff=text, diff_sha256=P.patcher.sha256(json.dumps(tool["ops"], sort_keys=True)),
                     diff_lines=len(tool["ops"]), file=None, remediation=f"tool:{tool['name']}",
@@ -54,7 +54,7 @@ def plan(upg: dict) -> dict:
                             "prove_fault": upg.get("fault_class")},
                     tool_name=tool["name"], tool_version=tool.get("version"), tool_ops=tool["ops"],
                     explanation=explanation, evidence_summary=ev, planned_at=now())
-    P.say(f"{upg_id}: no code fix for {upg.get('fault_class')} on {system}; planning with platform tool "
+    P.say(f"{upg_id}: no code fix for {upg.get('fault_class')} on {system}; planning with toolsmith tool "
           f"{tool['name']} ({len(tool['ops'])} vetted ops)", system)
     return doc
 
@@ -77,10 +77,10 @@ def test(upg: dict) -> dict:
 
 
 def approval_text(upg: dict) -> tuple[str, str]:
-    desc = (f"{upg['_id']}: adopt platform tool {upg.get('tool_name')} as the standing recovery for "
+    desc = (f"{upg['_id']}: adopt toolsmith tool {upg.get('tool_name')} as the standing recovery for "
             f"{upg.get('fault_class')} on {upg['system']} - {upg.get('explanation', '')}")[:600]
     risk = (f"low: no code change; {upg.get('diff_lines')} whitelisted ops, sandbox replay passed; destructive "
-            f"ops still need their own approval and the Guard verifies every step")
+            f"ops still need their own approval and the Verifier verifies every step")
     return desc, risk
 
 
@@ -101,7 +101,7 @@ def deploy(upg: dict, apr: dict) -> dict:
 
     def record(s):
         r = col("tools").update_one({"_id": tool["_id"], "status": "active"}, {"$set": {
-            "gardener.adopted": upg_id, "gardener.adopted_at": ts}}, session=s)
+            "upgrader.adopted": upg_id, "upgrader.adopted_at": ts}}, session=s)
         if r.matched_count != 1:
             raise P.StepError(f"{upg_id}: tool {tool['_id']} retired while deploying")
         col("ledger").update_one({"action_id": receipt["action_id"]}, {"$setOnInsert": receipt},
@@ -127,8 +127,8 @@ def _judge(inc: dict, tool_id: str) -> tuple[bool, str]:
         return False, f"{inc['_id']} was fixed without the tool"
     bad = [s["step_id"] for s in steps if s.get("status") != "verified"]
     if bad:
-        return False, f"{inc['_id']}: tool steps not Guard-verified: {', '.join(bad)}"
-    return True, f"{inc['_id']}: {len(steps)} tool steps, all Guard-verified"
+        return False, f"{inc['_id']}: tool steps not Verifier-verified: {', '.join(bad)}"
+    return True, f"{inc['_id']}: {len(steps)} tool steps, all Verifier-verified"
 
 
 def prove(upg: dict, window_s: float = PROVE_WINDOW_S, poll_s: float = 2.0) -> dict:

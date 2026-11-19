@@ -75,15 +75,15 @@ def _recv_until(ws, pred, limit=40):
 def test_ws_snapshot_then_change_stream(app_client, monkeypatch):
     monkeypatch.setattr(config, "VOYAGE_API_KEY", "test-only")
     monkeypatch.setattr(config, "VOYAGE_MODEL", "configured-model")
-    swarm().agents.insert_one({"_id": "scout-1", "role": "scout", "status": "idle", "last_seen": now()})
+    swarm().agents.insert_one({"_id": "investigator-1", "role": "investigator", "status": "idle", "last_seen": now()})
     with app_client.websocket_connect("/ws") as ws:
         snap = ws.receive_json()
         assert snap["type"] == "snapshot"
-        assert [a["_id"] for a in snap["agents"]] == ["scout-1"]
+        assert [a["_id"] for a in snap["agents"]] == ["investigator-1"]
         assert snap["meta"]["dbs"] == {"world": config.WORLD_DB, "swarm": config.SWARM_DB}
         assert snap["meta"]["embed_model"] == "configured-model"
-        swarm().agents.update_one({"_id": "scout-1"}, {"$set": {"last_seen": now()}})  # heartbeat: aggregated
-        swarm().thoughts.insert_one({"agent": "scout-1", "role": "scout", "text": "hello", "kind": "thought", "ts": now()})
+        swarm().agents.update_one({"_id": "investigator-1"}, {"$set": {"last_seen": now()}})  # heartbeat: aggregated
+        swarm().thoughts.insert_one({"agent": "investigator-1", "role": "investigator", "text": "hello", "kind": "thought", "ts": now()})
         seen = []
         m = _recv_until(ws, lambda m: seen.append(m) or (m["type"] == "change" and m["coll"] == "thoughts"))
         assert m["op"] == "insert" and m["doc"]["text"] == "hello"
@@ -248,16 +248,16 @@ def test_token_write_retries_and_preserves_newer_token():
 
 
 def test_views_diagram_is_default(app_client, monkeypatch):
-    """/ serves the diagram unless WARROOM_VIEW=flow; both views are always reachable. The classic view is gone."""
-    monkeypatch.delenv("WARROOM_VIEW", raising=False)
+    """/ serves the diagram unless CONSOLE_VIEW=flow; both views are always reachable. The classic view is gone."""
+    monkeypatch.delenv("CONSOLE_VIEW", raising=False)
     assert "diagram.js" in app_client.get("/").text
     for url, marker in (("/diagram", "diagram.js"), ("/?view=diagram", "diagram.js"), ("/flow", "flow.js"),
                         ("/?view=flow", "flow.js")):
         r = app_client.get(url)
         assert r.status_code == 200 and marker in r.text, url
-    monkeypatch.setenv("WARROOM_VIEW", "flow")
+    monkeypatch.setenv("CONSOLE_VIEW", "flow")
     assert "flow.js" in app_client.get("/").text
-    monkeypatch.setenv("WARROOM_VIEW", "classic")  # unknown value: falls back to the diagram
+    monkeypatch.setenv("CONSOLE_VIEW", "classic")  # unknown value: falls back to the diagram
     assert "diagram.js" in app_client.get("/").text
     assert app_client.get("/app.js").status_code == 404
     for asset in ("/diagram.js", "/diagram.css", "/flow.js", "/flow.css"):

@@ -3,28 +3,28 @@
 The Hive knows one feed today: the unix xfer manifest the portal unmarshals (``GET /unix/state`` ->
 ``feed.sample``, a few records like ``{acct, balance, as_of}``).
 
-* ``swarm.schema_samples``: the sentinel keeps one known-good sample per feed (``_id: "good:unix:xfer_manifest"``)
+* ``swarm.schema_samples``: the monitor keeps one known-good sample per feed (``_id: "good:unix:xfer_manifest"``)
   while the feed matches the expected schema; diagnosis inserts every observed sample (TTL 24 h).
 * Drift check = MongoDB, not Python: the observed sample is matched against the expected schema with a
   ``$jsonSchema`` query, then an aggregation (``$objectToArray`` + ``$setDifference`` + ``$type``) diffs its
   fields against the good sample. A missing field + a new field of a compatible type whose values line up
   account by account with the good sample = a proposed mapping.
 * ``swarm.schema_mappings``: one doc per logical field (``_id: "unix.xfer_manifest.balance"``) with ``source``
-  (the manifest field to read), ``version`` and ``history``. Written only after the Guard verified the
+  (the manifest field to read), ``version`` and ``history``. Written only after the Verifier verified the
   mapping by read-back. Every agent reads expectations from here, so the next drift is diffed against the
   learned schema (v2 -> v3), not the original one. A round reset (warroom ``/api/reset`` next_round) puts the live mapping back to v1
   (the estate is v1 again) but keeps ``history``, so the same vendor patch next night is "seen before" and the
   verified version is reused. Only a full reset deletes the collection.
 
 Who proposes the mapping (renaming is a meaning problem, so the AI gets a say):
-  memory  "seen before": schema_mappings.history already holds a Guard-verified mapping for this exact change
+  memory  "seen before": schema_mappings.history already holds a Verifier-verified mapping for this exact change
           (or a non-stale schema_drift playbook maps to one of the new fields) -> reuse it, no Claude call. It
           gets the same value check as Claude's answer; if its values no longer line up it is marked stale and
           Claude / the rules propose instead
   claude  with a key and AI_SECOND_OPINION=1: Claude names the new field that means the same thing; the rules
           pre-check it (field exists, numeric, values line up) and overrule it if it doesn't fit
   rules   otherwise (no key, flag off, timeout, error, overruled): best type + value line-up match
-Whatever proposes, only the Guard's read-back turns it into a stored mapping. With the flag on, the provenance
+Whatever proposes, only the Verifier's read-back turns it into a stored mapping. With the flag on, the provenance
 is written to ``incident.ai`` (``kind:"schema_mapping"``, the shared shape in CONTRACTS §8); no decision reads it.
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ TOLERANCE = 0.35
 
 
 AI_TIMEOUT_S = float(os.environ.get("SCHEMA_AI_TIMEOUT_S", 6))
-GUARD_RULE = "Guard read-back (portal reads the field, values line up)"
+VERIFIER_RULE = "Verifier read-back (portal reads the field, values line up)"
 PRECHECK_RULE = "R1 field exists + numeric + values line up"
 
 
@@ -97,7 +97,7 @@ def conforms(sample_id) -> bool:
 
 
 def capture_good(state: dict) -> bool:
-    """Sentinel: keep the latest sample that matches the expected schema as the feed's known-good sample."""
+    """Monitor: keep the latest sample that matches the expected schema as the feed's known-good sample."""
     recs = _sample(state)
     if not recs:
         return False
@@ -243,7 +243,7 @@ def detect(state: dict) -> dict | None:
 
 
 def remembered(old: str, added: list[str]) -> dict | None:
-    """Memory for this change: a Guard-verified history entry ``old -> one of added`` in schema_mappings (kept
+    """Memory for this change: a Verifier-verified history entry ``old -> one of added`` in schema_mappings (kept
     across round resets), else a non-stale schema_drift playbook whose fix maps to one of today's new fields."""
     doc = col("schema_mappings").find_one({"_id": _mid("balance")}, {"history": 1}) or {}
     for e in reversed(doc.get("history") or []):
@@ -294,7 +294,7 @@ def _ai_doc(model, hypothesis, cites, confidence, latency_ms, old, source, how, 
             "confidence": confidence, "latency_ms": latency_ms, "proposed_by": how, "proposed_ops": [op],
             "verdicts": [{"op": "map_field", "target": CONSUMER, "verdict": verdict, "rule": PRECHECK_RULE,
                           "reason": reason}],
-            "guard": {"verdict": "pending"}, "ts": now()}
+            "verifier": {"verdict": "pending"}, "ts": now()}
 
 
 SYSTEM_PROMPT = ("You map renamed fields in a legacy bank's data feed. A vendor patch renamed one field. "
@@ -342,21 +342,21 @@ def record_ai(incident: str, ai: dict) -> None:
     col("incidents").update_one({"_id": incident}, {"$set": {"ai": ai}})
 
 
-def guard_verdict(incident: str, source: str, evidence: str, version: int | None) -> dict | None:
-    """Stamp the Guard's read-back onto incident.ai (only our own kind) and return the updated doc."""
+def verifier_verdict(incident: str, source: str, evidence: str, version: int | None) -> dict | None:
+    """Stamp the Verifier's read-back onto incident.ai (only our own kind) and return the updated doc."""
     from pymongo import ReturnDocument  # noqa: PLC0415
     lined = re.search(r"(\d+)/(\d+) accounts", evidence or "")
     reason = (f"{lined.group(1)}/{lined.group(2)} values match the good sample" if lined else "read-back passed") + \
              (f"; mapping v{version} stored" if version else "")
     return col("incidents").find_one_and_update(
         {"_id": incident, "ai.kind": "schema_mapping"},
-        {"$set": {"ai.guard": {"verdict": "verified", "rule": GUARD_RULE, "reason": reason, "source": source,
+        {"$set": {"ai.verifier": {"verdict": "verified", "rule": VERIFIER_RULE, "reason": reason, "source": source,
                                "version": version, "ts": now()}}},
         return_document=ReturnDocument.AFTER, projection={"ai": 1})
 
 
 def verify_mapping(field: str, source: str, portal_state: dict, unix_state: dict) -> tuple[bool, str]:
-    """Guard read-back for map_field: the portal reads `source`, the manifest carries it, and its values line
+    """Verifier read-back for map_field: the portal reads `source`, the manifest carries it, and its values line
     up with the last good sample."""
     pm = ((portal_state.get("feed") or {}).get("map") or {}).get(field)
     recs = _sample(unix_state)
@@ -399,7 +399,7 @@ def learn(field: str, source: str, incident: str, step_id: str, evidence: str, a
 
 def learn_verified(field: str, source: str, incident: str, step_id: str, evidence: str, agent: str,
                    unix_state: dict | None) -> dict | None:
-    """Guard, after map_field is verified: store the mapping, then re-capture the known-good sample right away
+    """Verifier, after map_field is verified: store the mapping, then re-capture the known-good sample right away
     (the manifest already conforms to the new expectation). Without this the good sample keeps the old field
     name for up to SAMPLE_EVERY_S, and a second drift in that window can't be diffed or verified."""
     m = learn(field, source, incident, step_id, evidence, agent)
@@ -409,7 +409,7 @@ def learn_verified(field: str, source: str, incident: str, step_id: str, evidenc
 
 
 def feed_change(state: dict) -> tuple[list[str], list[str]] | None:
-    """Sentinel: (missing, added) fields of the current manifest vs. what the Hive expects; None if it conforms."""
+    """Monitor: (missing, added) fields of the current manifest vs. what the Hive expects; None if it conforms."""
     recs = _sample(state)
     if not recs:
         return None

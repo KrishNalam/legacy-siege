@@ -5,9 +5,9 @@ Nothing here touches the real `systems/` files or the live `world` DB:
     written into the copy;
   * pytest and the replay run as subprocesses with cwd = the sandbox, so
     `import systems.<sys>` resolves to the patched copy;
-  * the replay boots the app against WORLD_DB=world_test_gardener, dropped afterwards.
+  * the replay boots the app against WORLD_DB=world_test_upgrader, dropped afterwards.
 
-GARDENER_SANDBOX_URI (optional) points that throwaway CI database at a different MongoDB, e.g. a
+UPGRADER_SANDBOX_URI (optional) points that throwaway CI database at a different MongoDB, e.g. a
 local atlas-local container. Live state stays on MONGODB_URI either way; on Atlas, creating and
 dropping the sandbox's collections/indexes per test costs ~70 s versus ~4 s locally.
 """
@@ -23,14 +23,14 @@ from pathlib import Path
 from common import config
 from common.db import client
 
-REPLAY_WORLD_DB = os.environ.get("GARDENER_REPLAY_WORLD_DB", "world_test_gardener")
-REPLAY_SWARM_DB = os.environ.get("GARDENER_REPLAY_SWARM_DB", "swarm_test_gardener")
-_SANDBOX_URI_CFG = os.environ.get("GARDENER_SANDBOX_URI") or None
+REPLAY_WORLD_DB = os.environ.get("UPGRADER_REPLAY_WORLD_DB", "world_test_upgrader")
+REPLAY_SWARM_DB = os.environ.get("UPGRADER_REPLAY_SWARM_DB", "swarm_test_upgrader")
+_SANDBOX_URI_CFG = os.environ.get("UPGRADER_SANDBOX_URI") or None
 SANDBOX_URI: str | None = None  # resolved per run: None = same cluster as live state
 
 
 def _resolve_sandbox() -> str | None:
-    """Use GARDENER_SANDBOX_URI only if it answers a ping now; otherwise fall back to the live cluster
+    """Use UPGRADER_SANDBOX_URI only if it answers a ping now; otherwise fall back to the live cluster
     (the box may have stopped an idle local container — slower, never a failed upgrade)."""
     if not _SANDBOX_URI_CFG:
         return None
@@ -89,7 +89,7 @@ def _summary(out: str) -> str:
 
 def make_sandbox(systems_dir: Path, system: str, patched_source: str) -> tempfile.TemporaryDirectory:
     """Temp dir containing `systems/` (a copy of systems_dir) with the patched module written in."""
-    tmp = tempfile.TemporaryDirectory(prefix="gardener-sandbox-")
+    tmp = tempfile.TemporaryDirectory(prefix="upgrader-sandbox-")
     dst = Path(tmp.name) / "systems"
     shutil.copytree(systems_dir, dst, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", "*.pyc"))
     (dst / f"{system}.py").write_text(patched_source)

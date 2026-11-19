@@ -119,7 +119,7 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
         "ts": now(), "scenario": run and run.get("scenario"), "run_id": run and run["_id"],
         "round": run and run.get("round"), "seed": run and run.get("seed"), "manual": manual,
         "status": "firing", "result": None,
-        "outcome": {"guard_caught": None, "recovery_s": None, "state": "awaiting Hive evidence"}, "source": source, "who": who, "why": why,
+        "outcome": {"verifier_caught": None, "recovery_s": None, "state": "awaiting Hive evidence"}, "source": source, "who": who, "why": why,
     }
     event = {**{k: v for k, v in extra.items() if k not in event}, **event}
     _events().insert_one(event)
@@ -139,7 +139,7 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
         {"_id": event["_id"]},
         {"$set": {"result": result, "status": "ok" if result.get("ok") else "failed", "done_at": now()}},
         return_document=ReturnDocument.AFTER)
-    if os.environ.get("CHAOS_OUTCOMES", "").strip().lower() in ("1", "true", "yes", "on"):
+    if os.environ.get("ADVERSARY_OUTCOMES", "").strip().lower() in ("1", "true", "yes", "on"):
         threading.Thread(target=_observe_later, args=(event["_id"],), daemon=True,
                          name="chaos-outcome").start()
     return finished

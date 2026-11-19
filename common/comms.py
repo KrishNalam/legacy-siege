@@ -4,7 +4,7 @@ import re
 
 
 def enabled() -> bool:
-    return os.environ.get('SWARM_COMMS', '').strip().lower() in ('1', 'true', 'yes', 'on')
+    return os.environ.get('AGENTS_COMMS', '').strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 def metadata(source, kind, body, *, incident=None, system=None, severity=None):
@@ -77,7 +77,7 @@ def from_log(doc, incident=None):
                 source=system, system=system, severity=severity, incident=incident)
 
 
-# ---- consumer: the Queen claims the highest-priority unassigned incident first
+# ---- consumer: the Coordinator claims the highest-priority unassigned incident first
 CUSTOMER_FACING = frozenset({'portal'})
 
 

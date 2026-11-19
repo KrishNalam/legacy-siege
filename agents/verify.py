@@ -2,7 +2,7 @@
 
 check(op, params, read) -> (applied: bool, evidence: str)
 `read(sys)` returns that system's /state; `probe(sys, vuln)` runs a security probe.
-Used by the Guard (to verify) and by Nurses (to reconcile a step stuck in 'sent').
+Used by the Verifier (to verify) and by Recovery agents (to reconcile a step stuck in 'sent').
 """
 from __future__ import annotations
 

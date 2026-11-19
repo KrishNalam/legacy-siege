@@ -12,13 +12,13 @@ def test_deadline_switch_and_freeze_resume(monkeypatch):
     clock = [100.0]
     monkeypatch.setattr('agents.harness.time.monotonic', lambda: clock[0])
     monkeypatch.setattr(leases, 'renew', Mock(return_value=True))
-    a = Agent('worker', 'worker-test')
+    a = Agent('operator', 'operator-test')
     try:
         a.hold('tasks', 'T', 1)
         clock[0] += 100
-        monkeypatch.delenv('SWARM_LEASE_DEADLINE', raising=False)
+        monkeypatch.delenv('AGENTS_LEASE_DEADLINE', raising=False)
         a.check('tasks', 'T')
-        monkeypatch.setenv('SWARM_LEASE_DEADLINE', '1')
+        monkeypatch.setenv('AGENTS_LEASE_DEADLINE', '1')
         with pytest.raises(leases.LeaseLost):
             a.check('tasks', 'T')
         # A late heartbeat must not resurrect the expired authority.
@@ -30,12 +30,12 @@ def test_deadline_switch_and_freeze_resume(monkeypatch):
 
 
 def test_exception_in_renewal_cannot_extend_deadline(monkeypatch):
-    monkeypatch.setenv('SWARM_LEASE_DEADLINE', '1')
+    monkeypatch.setenv('AGENTS_LEASE_DEADLINE', '1')
     clock = [100.0]
     monkeypatch.setattr('agents.harness.time.monotonic', lambda: clock[0])
     monkeypatch.setattr('agents.harness.col', lambda _: Mock(find_one_and_update=Mock(return_value={})))
     monkeypatch.setattr(leases, 'renew', Mock(return_value=True))
-    a = Agent('worker', 'worker-test')
+    a = Agent('operator', 'operator-test')
     try:
         a.hold('tasks', 'T', 1)
         monkeypatch.setattr(leases, 'renew', Mock(side_effect=TimeoutError))
@@ -49,9 +49,9 @@ def test_exception_in_renewal_cannot_extend_deadline(monkeypatch):
 
 
 def test_http_retry_rechecks_permission(monkeypatch):
-    monkeypatch.setenv('SWARM_LEASE_DEADLINE', '1')
+    monkeypatch.setenv('AGENTS_LEASE_DEADLINE', '1')
     monkeypatch.setattr(leases, 'renew', Mock(return_value=True))
-    a = Agent('worker', 'worker-test')
+    a = Agent('operator', 'operator-test')
     a.hold('tasks', 'T', 1)
     calls = []
     def post(*args, **kwargs):
@@ -68,7 +68,7 @@ def test_http_retry_rechecks_permission(monkeypatch):
 
 
 def test_expired_lease_cannot_renew_or_fence(db, monkeypatch):
-    monkeypatch.setenv('SWARM_LEASE_DEADLINE', '1')
+    monkeypatch.setenv('AGENTS_LEASE_DEADLINE', '1')
     db.tasks.insert_one({'_id': 'expired', 'owner': 'old', 'generation': 1, 'lease_until': leases.EPOCH})
     try:
         assert not leases.renew(db.tasks, 'expired', 'old', 1)
@@ -80,9 +80,9 @@ def test_expired_lease_cannot_renew_or_fence(db, monkeypatch):
 
 
 def test_reaped_lease_blocks_retry_after_heartbeat_clears_held(monkeypatch):
-    monkeypatch.setenv('SWARM_LEASE_DEADLINE', '1')
+    monkeypatch.setenv('AGENTS_LEASE_DEADLINE', '1')
     monkeypatch.setattr(leases, 'renew', Mock(return_value=True))
-    a = Agent('worker', 'worker-test')
+    a = Agent('operator', 'operator-test')
     try:
         a.hold('tasks', 'T', 1)
         # The resumed heartbeat observes the Undertaker's dead stamp.

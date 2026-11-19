@@ -13,13 +13,13 @@ import sys
 
 from .harness import Agent, log
 
-ROLES = {"queen", "scout", "worker", "guard", "waggle", "sentinel", "nurse"}
+ROLES = {"coordinator", "investigator", "operator", "verifier", "reporter", "monitor", "recovery"}
 
 
 def specialty_of(agent_id: str) -> str | None:
-    # worker-mainframe-1 -> mainframe (a multi-word specialty keeps its dashes: worker-db-repl-2 -> db-repl)
+    # operator-mainframe-1 -> mainframe (a multi-word specialty keeps its dashes: operator-db-repl-2 -> db-repl)
     parts = agent_id.split("-")
-    return "-".join(parts[1:-1]) if parts[0] == "worker" and len(parts) >= 3 else None
+    return "-".join(parts[1:-1]) if parts[0] == "operator" and len(parts) >= 3 else None
 
 
 def warm() -> None:
@@ -47,7 +47,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--standby-for", default=None)
     ap.add_argument("--ephemeral", action="store_true", help="spawned on demand; retires when its work is over")
     a = ap.parse_args(argv)
-    standby = a.role == "nurse" or (a.role == "queen" and a.id != "queen-1")
+    standby = a.role == "recovery" or (a.role == "coordinator" and a.id != "coordinator-1")
     agent = Agent(a.role, a.id, specialty=specialty_of(a.id), standby=standby, standby_for=a.standby_for,
                   ephemeral=a.ephemeral)
     role = importlib.import_module(f"agents.roles.{a.role}")

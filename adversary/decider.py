@@ -147,10 +147,10 @@ def _victim_reason(fault: str, params: dict) -> str | None:
     sel = (params or {}).get("selector") or {}
     if sel.get("agent"):
         a = swarm().agents.find_one({"_id": sel["agent"]}, {"role": 1}) or {}
-        if a.get("role") != "worker":
-            return f"{sel['agent']} is a {a.get('role') or 'unknown'}: agent faults only hit workers on stage"
-    elif sel.get("role") not in (None, "worker"):
-        return f"agent faults only hit workers on stage, not {sel.get('role')}"
+        if a.get("role") != "operator":
+            return f"{sel['agent']} is a {a.get('role') or 'unknown'}: agent faults only hit operators on stage"
+    elif sel.get("role") not in (None, "operator"):
+        return f"agent faults only hit operators on stage, not {sel.get('role')}"
     return None
 
 
@@ -190,7 +190,7 @@ def _rules(fault: str, params: dict, st: dict, caps: Caps, campaign: bool = Fals
         if why:
             return "deny", why
     if st["upgrade_busy"]:
-        return "hold", "the Gardener is mid-upgrade"
+        return "hold", "the Upgrader is mid-upgrade"
     if not campaign and _age(st["last_red"]) < caps.gap_s:   # a Commander campaign keeps its own step gap
         return "hold", f"spacing strikes: last Red strike {_age(st['last_red']):.0f}s ago (< {caps.gap_s:g}s)"
     if f is not None and f.kind == "system" and st["open_incidents"]:
@@ -276,7 +276,7 @@ def candidates(st: dict, caps: Caps) -> list[dict]:
             out.append({"source": "poison", "fault": "poison_memory", "target": "swarm", "params": {},
                         "by": RUNNER_ID, "prefer": "auto",
                         "why": f"the Hive just learned {learned['_id']} ({learned.get('fault_class')}): poison that "
-                               "memory and see if the Guard's read-back rejects it"})
+                               "memory and see if the Verifier's read-back rejects it"})
     if st["scenario"] and st["scenario"] not in caps.protected and st["scenario"] not in caps.quiet:
         from . import scenarios
         try:
@@ -355,7 +355,7 @@ class RunnerLoop:
             self._night = night_key
 
     def spawn(self, persona: str) -> subprocess.Popen:
-        env = {**os.environ, "RED_FLEET_MAX_ATTACKS": "1", "RED_FLEET_FIRST_STRIKE_S": "0"}
+        env = {**os.environ, "ADVERSARY_MAX_ATTACKS": "1", "ADVERSARY_FIRST_STRIKE_S": "0"}
         p = subprocess.Popen([sys.executable, "-m", "adversary.redfleet", "--agent", persona], env=env)
         self.spawned[persona] = p
         world().red_agents.update_one({"_id": BOARD_ID}, {"$inc": {"spawns": 1}})

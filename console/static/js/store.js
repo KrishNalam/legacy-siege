@@ -4,7 +4,7 @@
 const MAP_COLLS = {
   systems: "systems", agents: "agents", incidents: "incidents", tasks: "tasks", chaos_events: "chaos",
   approvals: "approvals", upgrade_requests: "upgrades", ledger: "ledger", playbooks: "playbooks", runs: "runs",
-  roster: "roster",  // Comms live roster (SWARM_COMMS=1)
+  roster: "roster",  // Comms live roster (AGENTS_COMMS=1)
 };
 const LEDGER_KEY = (d) => d.action_id || d._id;
 

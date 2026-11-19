@@ -1,9 +1,9 @@
-"""GARDENER_HELP: the Gardener accepts platform tools (W20 envelope) and ships one as an upgrade.
+"""UPGRADER_HELP: the Upgrader accepts toolsmith tools (W20 envelope) and ships one as an upgrade.
 
 Switch off: an upgrade with no code remediation is not turned into a tool upgrade. Switch on: a
-Sentinel #2 repeat that no code fix covers starts a tool upgrade, which runs the real sandbox replay,
+Monitor #2 repeat that no code fix covers starts a tool upgrade, which runs the real sandbox replay,
 waits for the Beekeeper, adopts the tool and is proven only by a swarm fix whose tool steps were all
-Guard-verified. Tampered or retired tools are never used. Isolated DBs only.
+Verifier-verified. Tampered or retired tools are never used. Isolated DBs only.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def isolated_db():
 
 @pytest.fixture(autouse=True)
 def clean(monkeypatch):
-    monkeypatch.delenv("GARDENER_HELP", raising=False)
+    monkeypatch.delenv("UPGRADER_HELP", raising=False)
     for c in ("upgrade_requests", "approvals", "ledger", "incidents", "thoughts", "agents", "tools",
               "gardener_requests", "gardener_notes"):
         col(c).delete_many({})
@@ -50,7 +50,7 @@ def tool_request(tid=TOOL_ID, status="active"):
     tool = col("tools").find_one({"_id": tid})
     rid = f"GT-{tid}:{status}"
     col("gardener_requests").insert_one({
-        "_id": rid, "kind": "tool", "from": "platform-1", "system": "unix", "problem": "disk_fill",
+        "_id": rid, "kind": "tool", "from": "toolsmith-1", "system": "unix", "problem": "disk_fill",
         "fault_class": "disk_fill", "payload": {"tool_id": tid, "name": tool["name"], "status": status,
                                                 "ops": tool["ops"], "preconditions": tool["preconditions"]},
         "ts": now(), "status": "open", "answer": None})
@@ -61,7 +61,7 @@ def test_tool_requests_accept_refuse_drop():
     add_tool()
     doc = tool_request()
     assert doc["status"] == "answered" and doc["answer"]["kind"] == "tool"
-    assert col("tools").find_one({"_id": TOOL_ID})["gardener"]["accepted"] is True
+    assert col("tools").find_one({"_id": TOOL_ID})["upgrader"]["accepted"] is True
     assert tools.accepted("unix", "disk_fill")["_id"] == TOOL_ID
 
     bad = tools.whitelist("disk_fill")
@@ -84,11 +84,11 @@ def test_switch_off_never_turns_an_upgrade_into_a_tool_upgrade():
 
 
 def test_repeat_ships_tool_through_gated_proven_upgrade(monkeypatch):
-    monkeypatch.setenv("GARDENER_HELP", "1")
+    monkeypatch.setenv("UPGRADER_HELP", "1")
     add_tool()
     tool_request()
     col("gardener_requests").insert_one({
-        "_id": "GR-unix-disk_fill", "kind": "repeat", "from": "sentinel-1", "system": "unix", "problem": "disk_fill",
+        "_id": "GR-unix-disk_fill", "kind": "repeat", "from": "monitor-1", "system": "unix", "problem": "disk_fill",
         "fault_class": "disk_fill", "count": 3, "evidence": [], "note": "unix-disk_fill", "status": "open",
         "ts": now(), "answer": None})
     ans = help_desk.handle({"_id": "GR-unix-disk_fill"})["answer"]
@@ -109,19 +109,19 @@ def test_repeat_ships_tool_through_gated_proven_upgrade(monkeypatch):
     assert doc["status"] == "proven", (doc.get("reason"), doc.get("prove"))
     assert doc["tests"]["replay_passed"] is True  # real sandbox: disk_fill fired, tool ran, unix read back up
     assert doc["prove"]["incident"] == "INC-0100"
-    assert col("tools").find_one({"_id": TOOL_ID})["gardener"]["adopted"] == upg_id
+    assert col("tools").find_one({"_id": TOOL_ID})["upgrader"]["adopted"] == upg_id
     assert col("ledger").find_one({"action_id": f"{upg_id}-deploy"})["op"] == "adopt_tool"
 
-    # a Worker whose purge_spool failed twice is pointed at the accepted tool
+    # an Operator whose purge_spool failed twice is pointed at the accepted tool
     col("gardener_requests").insert_one({
-        "_id": "GH-INC-0101-s1", "kind": "help", "from": "worker-1", "incident": "INC-0101", "step_id": "s1",
+        "_id": "GH-INC-0101-s1", "kind": "help", "from": "operator-1", "incident": "INC-0101", "step_id": "s1",
         "system": "unix", "op": "purge_spool", "params": {"path": "/var/spool/xfer"}, "attempts": [],
         "evidence": [], "fault_class": "disk_fill", "status": "open", "ts": now(), "answer": None})
     assert help_desk.handle({"_id": "GH-INC-0101-s1"})["answer"]["kind"] == "tool"
 
 
 def test_tool_upgrade_not_proven_when_swarm_skips_the_tool(monkeypatch):
-    monkeypatch.setenv("GARDENER_HELP", "1")
+    monkeypatch.setenv("UPGRADER_HELP", "1")
     add_tool()
     tool_request()
     col("upgrade_requests").insert_one({"_id": "UPG-0010", "system": "unix", "fault_class": "disk_fill",

@@ -1,6 +1,6 @@
 """Step transitions. Each one is ONE multi-document transaction:
     (fence the task lease) + (update the incident's step) + (upsert that attempt's ledger receipt)
-so the incident timeline and the audit ledger can never disagree, and a replaced worker can't write.
+so the incident timeline and the audit ledger can never disagree, and a replaced operator can't write.
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def mark_sent(task: dict, agent: str, generation: int, step: dict, action_id: st
 
 
 def resubmit(task: dict, agent: str, generation: int, step: dict) -> bool:
-    """failed -> sent for the SAME attempt (its effect landed after the Guard rejected it), so the Guard
+    """failed -> sent for the SAME attempt (its effect landed after the Verifier rejected it), so the Verifier
     re-judges it by read-back. No new action_id, nothing re-sent to the system. False if the step moved."""
     def fn(s: ClientSession):
         leases.fence(col("tasks"), task["_id"], agent, generation, s)
@@ -75,7 +75,7 @@ def resubmit(task: dict, agent: str, generation: int, step: dict) -> bool:
 
 
 def take_over_sent(task: dict, agent: str, generation: int, step: dict) -> None:
-    """A nurse adopts a step stuck in 'sent' (same attempt, same action_id): record the new agent."""
+    """A recovery adopts a step stuck in 'sent' (same attempt, same action_id): record the new agent."""
     def fn(s: ClientSession):
         leases.fence(col("tasks"), task["_id"], agent, generation, s)
         col("incidents").update_one(
@@ -100,7 +100,7 @@ def record_response(task: dict, agent: str, generation: int, step: dict, action_
 
 
 def _judge(incident: str, step: dict, action_id: str, status: str, evidence: str, agent: str) -> bool:
-    """Guard-only: sent -> verified|failed for exactly this attempt. Returns False if the step moved."""
+    """Verifier-only: sent -> verified|failed for exactly this attempt. Returns False if the step moved."""
     def fn(s: ClientSession):
         r = col("incidents").update_one(
             {"_id": incident, "steps": {"$elemMatch": {"step_id": step["step_id"], "action_id": action_id,
@@ -127,10 +127,10 @@ def _judged(incident: str, step: dict, action_id: str, status: str, agent: str) 
         sent = cur.get("sent_at") or step.get("sent_at")
         took = (now() - sent).total_seconds() if sent else None
         if took is not None:
-            progress.record("swarm", f"step:{cur['op']}", cur["system"], "worker", took, status,
+            progress.record("swarm", f"step:{cur['op']}", cur["system"], "operator", took, status,
                             incident=incident, action_id=action_id)
         done = sum(1 for x in all_steps if x.get("status") == "verified")
-        progress.emit(agent, "guard", f"{incident}: {done}/{len(all_steps)} steps verified"
+        progress.emit(agent, "verifier", f"{incident}: {done}/{len(all_steps)} steps verified"
                       + (f" ({cur['op']} {status} in {took:.1f} s)" if took is not None else ""),
                       action_type=f"step:{cur['op']}", system=cur["system"], incident=incident, phase="done",
                       step=done, of=len(all_steps), elapsed_s=took, outcome=status)

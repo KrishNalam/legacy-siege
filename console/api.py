@@ -131,10 +131,10 @@ def fire_fault(fault: str, body: dict = Body(default_factory=dict)) -> dict:
 
 @router.post("/kill")
 def kill_agent(body: dict = Body(default_factory=dict)) -> dict:
-    """SIGKILL a bee. Default selector waits for the worker that just sent a step."""
+    """SIGKILL a bee. Default selector waits for the operator that just sent a step."""
     runner, faults = _chaos()
     try:
-        selector = faults.clean_selector(body.get("selector") or {"role": "worker", "phase": "step_sent"})
+        selector = faults.clean_selector(body.get("selector") or {"role": "operator", "phase": "step_sent"})
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     _background("fire-agent_kill", runner.fire, "agent_kill", "swarm", {"selector": selector}, manual=True)
@@ -172,18 +172,18 @@ def reset(body: dict = Body(default_factory=dict)) -> dict:
     except HTTPException:
         out["cancelled_runs"] = []
     if mode == "full":
-        # undo the Gardener's deployed upgrade first (systems/mainframe.py back to the legacy code + reload),
+        # undo the Upgrader's deployed upgrade first (systems/mainframe.py back to the legacy code + reload),
         # so the whole demo can be re-run from night 1
         try:
-            from upgrader import pipeline as gardener_pipeline  # noqa: PLC0415
-            out["gardener_revert"] = gardener_pipeline.revert("mainframe")
+            from upgrader import pipeline as upgrader_pipeline  # noqa: PLC0415
+            out["upgrader_revert"] = upgrader_pipeline.revert("mainframe")
         except Exception as e:  # never block a reset
-            log.exception("gardener revert failed")
-            out["gardener_revert"] = f"failed: {e}"
+            log.exception("upgrader revert failed")
+            out["upgrader_revert"] = f"failed: {e}"
         from scripts.setup_db import reset as wipe  # noqa: PLC0415
         wipe()
         world().counters.delete_many({})  # RUN-/CHX- ids restart at 0001
-        # ask the swarm supervisor to restore the original roster (killed workers come back in their role)
+        # ask the swarm supervisor to restore the original roster (killed operators come back in their role)
         swarm().stats.update_one({"_id": "roster_reset"}, {"$set": {"at": now()}}, upsert=True)
     else:
         w, s = world(), swarm()
@@ -198,7 +198,7 @@ def reset(body: dict = Body(default_factory=dict)) -> dict:
         for c in NEXT_ROUND_CLEAR:
             s[c].delete_many({})
         # learned field mappings are memory: the live mapping goes back to v1 (so the v1 feed doesn't look like
-        # drift), but every Guard-verified rename stays in `history`; only a full reset deletes them
+        # drift), but every Verifier-verified rename stays in `history`; only a full reset deletes them
         out["schema_rewound"] = s.schema_mappings.update_many(
             {"$expr": {"$ne": ["$source", "$field"]}},
             [{"$set": {"previous": "$source", "source": "$field", "version": 1, "reused": False,
@@ -327,8 +327,8 @@ def spine() -> dict:
 
 @router.get("/roster")
 def roster() -> dict:
-    """Comms live roster (SWARM_COMMS=1, agents/roster.py): one doc per agent with what it is doing and where,
-    its parent Scout, deaths and takeovers. Empty with the switch off. Also on the snapshot (`roster`) and the
+    """Comms live roster (AGENTS_COMMS=1, agents/roster.py): one doc per agent with what it is doing and where,
+    its parent Investigator, deaths and takeovers. Empty with the switch off. Also on the snapshot (`roster`) and the
     change stream (`coll:"roster"`)."""
     from common import comms  # noqa: PLC0415
     docs = list(swarm().roster.find({}).sort("_id", 1))
@@ -342,7 +342,7 @@ def roster() -> dict:
 def memory() -> dict:
     """The Hive's memory, read-only: playbooks (what worked), lessons (what failed verification; FAILURE_MEMORY=1)
     and schema mappings, each with the system version it was learned on, the current version, stale, uses and
-    last used. Everything is in MongoDB, so a Nurse that takes over reads exactly this."""
+    last used. Everything is in MongoDB, so a Recovery that takes over reads exactly this."""
     from agents import lessons  # noqa: PLC0415
     versions = {d["_id"]: d.get("version") for d in world().systems.find({}, {"version": 1})}
     rows = lessons.items(versions)

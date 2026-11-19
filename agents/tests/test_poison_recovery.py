@@ -1,4 +1,4 @@
-"""A poisoned recalled repair fails Guard read-back, is retired, and gets a fresh policy plan."""
+"""A poisoned recalled repair fails Verifier read-back, is retired, and gets a fresh policy plan."""
 import pytest
 from agents.tests.conftest import reset_runtime, run_until_resolved, start_swarm, wait_for
 
@@ -9,7 +9,7 @@ def test_poisoned_recalled_repair_is_rejected_and_replaced(db, fake):
     reset_runtime()
     col('lessons').delete_many({})
     fake.post('/_admin/reset')
-    hive = start_swarm({'SWARM_RECOVERY': '1', 'FAILURE_MEMORY': '1', 'RECOVERY_BACKOFF_S': '0.1'},
+    hive = start_swarm({'AGENTS_RECOVERY': '1', 'FAILURE_MEMORY': '1', 'RECOVERY_BACKOFF_S': '0.1'},
                        log_name='poison')
     try:
         fake.post('/unix/_chaos/disk_fill', json={'params': {}})
@@ -41,13 +41,13 @@ def test_poisoned_recalled_repair_is_rejected_and_replaced(db, fake):
 def test_poison_rejection_requires_both_switches(monkeypatch):
     from agents import recovery
     monkeypatch.setattr('common.db.col', lambda *a: (_ for _ in ()).throw(AssertionError('unexpected DB access')))
-    monkeypatch.delenv('RED_FLEET', raising=False)
-    monkeypatch.delenv('SWARM_RECOVERY', raising=False)
+    monkeypatch.delenv('ADVERSARY', raising=False)
+    monkeypatch.delenv('AGENTS_RECOVERY', raising=False)
     monkeypatch.setenv('FAILURE_MEMORY', '1')
-    assert recovery.reject_bad_memory('I', 'failure', 'guard-1') is None
-    monkeypatch.setenv('SWARM_RECOVERY', '1')
+    assert recovery.reject_bad_memory('I', 'failure', 'verifier-1') is None
+    monkeypatch.setenv('AGENTS_RECOVERY', '1')
     monkeypatch.setenv('FAILURE_MEMORY', '0')
-    assert recovery.reject_bad_memory('I', 'failure', 'guard-1') is None
+    assert recovery.reject_bad_memory('I', 'failure', 'verifier-1') is None
 
 
 def test_good_batch_abort_playbook_survives_a_lie(db, monkeypatch):
@@ -55,7 +55,7 @@ def test_good_batch_abort_playbook_survives_a_lie(db, monkeypatch):
     retire the good playbook; a remembered op of the wrong kind still does."""
     from common.db import col, now
     from agents import recovery
-    monkeypatch.setenv('SWARM_RECOVERY', '1')
+    monkeypatch.setenv('AGENTS_RECOVERY', '1')
     monkeypatch.setenv('FAILURE_MEMORY', '1')
     col('lessons').delete_many({})
     fix = [{'system': 'mainframe', 'op': 'quarantine_record', 'params': {'record_id': 'TX900001'}},
@@ -70,9 +70,9 @@ def test_good_batch_abort_playbook_survives_a_lie(db, monkeypatch):
         col('incidents').insert_one({'_id': f'INC-{pid}', 'fault_class': 'batch_abort', 'steps': today,
                                      'status': 'fixing', 'system': 'portal', 'opened_at': now(),
                                      'recall': {'used': True, 'query': 'q', 'hits': [{'playbook_id': pid, 'usable': True}]}})
-    assert recovery.reject_bad_memory('INC-PB-GOOD', 'ACK ≠ APPLIED: quarantined=[]', 'guard-1') is None
+    assert recovery.reject_bad_memory('INC-PB-GOOD', 'ACK ≠ APPLIED: quarantined=[]', 'verifier-1') is None
     assert not col('playbooks').find_one({'_id': 'PB-GOOD'})['stale']
-    assert recovery.reject_bad_memory('INC-PB-BAD', 'ACK ≠ APPLIED: quarantined=[]', 'guard-1') == 'PB-BAD'
+    assert recovery.reject_bad_memory('INC-PB-BAD', 'ACK ≠ APPLIED: quarantined=[]', 'verifier-1') == 'PB-BAD'
     assert col('playbooks').find_one({'_id': 'PB-BAD'})['stale']
     col('lessons').delete_many({})
 
@@ -89,13 +89,13 @@ def test_red_poison_each_shape_is_visibly_rejected(db, fake, monkeypatch, fault,
     reset_runtime()
     col('lessons').delete_many({})
     fake.post('/_admin/reset')
-    hive = start_swarm({'SWARM_RECOVERY': '1', 'FAILURE_MEMORY': '1', 'RECOVERY_BACKOFF_S': '0.1'},
+    hive = start_swarm({'AGENTS_RECOVERY': '1', 'FAILURE_MEMORY': '1', 'RECOVERY_BACKOFF_S': '0.1'},
                        log_name=f'poison-{shape}')
     try:
         system = 'mainframe' if fault == 'batch_abort' else 'unix'
         fake.post(f'/{system}/_chaos/{fault}', json={'params': first})
         pb = col('playbooks').find_one({'incident': run_until_resolved(1)['_id']})
-        monkeypatch.setenv('CHAOS_POISON_MEMORY', '1')
+        monkeypatch.setenv('ADVERSARY_POISON_MEMORY', '1')
         res = faults.poison_memory({'playbook': pb['_id']})
         assert res['ok'] and res['shape'] == shape
         planted = res['playbook']

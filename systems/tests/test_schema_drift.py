@@ -1,6 +1,6 @@
 """schema_drift: unix silently renames a manifest field; the portal breaks until its mapping is re-pointed."""
 from systems.base import CASCADE_TICKS
-from systems.tests.helpers import adversary, op, status, tick
+from systems.tests.helpers import chaos, op, status, tick
 
 
 def test_schema_drift_breaks_portal_until_mapped(c, wdb):

@@ -25,7 +25,7 @@ def script_beats(events: list[dict], t) -> list[dict]:
     ov = after("ai_overruled", 0)
     if ov:
         add("ai_overruled", t(ov, -1.5), t(ov, 4), op=ov.get("op"), rule=ov.get("rule"), incident=ov.get("incident"))
-    # schema drift: sentinel notices → mapping learned (Guard-verified); the repeat → mapping reused
+    # schema drift: monitor notices → mapping learned (Verifier-verified); the repeat → mapping reused
     learned = after("mapping_learned", 0)
     if learned:
         seen = next((e for e in reversed(events) if e["name"] == "drift_noticed" and e["t"] <= learned["t"]), None)
@@ -35,7 +35,7 @@ def script_beats(events: list[dict], t) -> list[dict]:
     reused = after("mapping_reused", 0)
     if reused:
         add("drift_reused", t(reused, -2), t(reused, 3), version=reused.get("version"))
-    # Red fleet: a striker FREEZEs a bee (SIGSTOP), its lease expires, a Nurse takes over
+    # Red fleet: a striker FREEZEs a bee (SIGSTOP), its lease expires, a Recovery takes over
     frz = next((e for e in events if e["name"] == "red_freeze" and str(e.get("by") or "").startswith("red-")),
                after("red_freeze", 0))
     if frz:

@@ -4,17 +4,17 @@ Statement 3, question 3 ("adapt when a system's ... workflow changes underneath 
 field; this module adapts to a changed procedure, e.g. after JES2 maintenance the mainframe refuses
 ``restart_batch`` with ``JCL HOLD: issue release_hold before restart_batch`` and lists a new op ``release_hold``.
 
-  NOTICE   a worker's step comes back refused (accepted:false) with a telling error.
-  WORK OUT the worker reads the system's live self-description (``GET /{sys}/ops``). Deterministic rules decide:
+  NOTICE   an operator's step comes back refused (accepted:false) with a telling error.
+  WORK OUT the operator reads the system's live self-description (``GET /{sys}/ops``). Deterministic rules decide:
            R1 the refusal names the op, R2 the live catalog lists it as a prerequisite of the refused op
            (``requires`` on the op, or ``before`` on the new op), R3 it is not destructive, R4 its params are fully
            given by the catalog. Claude may propose (key + AI_SECOND_OPINION) but the same rules accept or overrule it.
            The new step is inserted before the refused one, in the same fenced task (one transaction).
-  VERIFY   the Guard verifies the new step and the retried op by read-back, like every step.
-  REMEMBER only after the Guard verified the retried op: ``swarm.schema_mappings`` gets
+  VERIFY   the Verifier verifies the new step and the retried op by read-back, like every step.
+  REMEMBER only after the Verifier verified the retried op: ``swarm.schema_mappings`` gets
            ``{_id: "<sys>.workflow.<op>", kind: "workflow", requires, version, history[]}`` next to the field
            mappings (v1 = the original workflow). A change verified before keeps its version (``reused``).
-  REPEAT   next time the Scout plans that op, the learned prerequisite goes in up front (after checking the live
+  REPEAT   next time the Investigator plans that op, the learned prerequisite goes in up front (after checking the live
            catalog still lists it): no refusal, no extra round trip.
 Off (default): no hook does anything; a refused op is rejected and retried exactly as before.
 """
@@ -127,7 +127,7 @@ def ask_claude(op: str, message: str, catalog: list[dict]) -> dict:
     return {**out, "op": str(data.get("op") or "").strip() or None, "why": str(data.get("why") or "")[:200]}
 
 
-# ---------------------------------------------------------------- NOTICE + WORK OUT (worker, fenced on its task)
+# ---------------------------------------------------------------- NOTICE + WORK OUT (operator, fenced on its task)
 def adapt(agent, task: dict, generation: int, step: dict) -> bool:
     """A step of this task was refused. Work out the new workflow and insert the prerequisite step before it.
     Runs once per refused attempt; True if a step was inserted (the caller re-selects)."""
@@ -177,10 +177,10 @@ def adapt(agent, task: dict, generation: int, step: dict) -> bool:
     return inserted
 
 
-# ---------------------------------------------------------------- VERIFY -> REMEMBER (guard)
+# ---------------------------------------------------------------- VERIFY -> REMEMBER (verifier)
 def learn(system: str, op: str, requires: list[str], params: dict, incident: str, step_id: str, evidence: str,
           agent: str, proposed_by: str) -> dict | None:
-    """Store a Guard-verified workflow. Same change verified before -> its version (reused); else max+1 (v1 is the
+    """Store a Verifier-verified workflow. Same change verified before -> its version (reused); else max+1 (v1 is the
     original workflow). Idempotent per incident."""
     _id = mid(system, op)
     doc = col("schema_mappings").find_one({"_id": _id}) or {}
@@ -201,7 +201,7 @@ def learn(system: str, op: str, requires: list[str], params: dict, incident: str
 
 
 def on_verified(agent, incident: str, st: dict, facts: str) -> None:
-    """Guard hook after a step is verified: (a) the retried op of a workflow change -> store the workflow;
+    """Verifier hook after a step is verified: (a) the retried op of a workflow change -> store the workflow;
     (b) a prerequisite planned from memory -> say the memory held."""
     if not enabled():
         return
@@ -223,12 +223,12 @@ def on_verified(agent, incident: str, st: dict, facts: str) -> None:
     if not m:
         return
     stored = f"v{m['version']} {'reused' if m['reused'] else 'stored'}"
-    agent.think(f"workflow changed: {st['op']} now needs {' → '.join(wd['requires'])} first → Guard verified "
+    agent.think(f"workflow changed: {st['op']} now needs {' → '.join(wd['requires'])} first → Verifier verified "
                 f"({wd['requires'][0]} then {st['op']} took effect) → learned: swarm.schema_mappings {m['_id']} {stored}.",
                 kind="learn", incident=incident, system=st["system"], pause=False)
 
 
-# ---------------------------------------------------------------- REPEAT (scout plan)
+# ---------------------------------------------------------------- REPEAT (investigator plan)
 def with_memory(raw: list[dict], read_ops) -> tuple[list[dict], list[str]]:
     """Insert learned prerequisites before the ops that need them, if the live catalog still lists them.
     Returns (plan, narration lines). Unchanged plan when off or nothing is learned."""

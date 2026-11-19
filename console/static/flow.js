@@ -36,27 +36,27 @@ const FAULT = {
   credential_exploit: "an attacker is using a default password", slow_apply: "its changes apply late",
 };
 const ROLE = {
-  queen: { c: "#ffc94d", tag: "coordinator" }, scout: { c: "#5cc8ff", tag: "investigator" },
-  worker: { c: "#8fb0ff", tag: "fixer" }, guard: { c: "#34e39a", tag: "the checker" },
-  nurse: { c: "#ff9ccf", tag: "takes over dead bees’ jobs" }, sentinel: { c: "#7fd8ff", tag: "watches system health" },
-  gardener: { c: "#a6f0a0", tag: "writes permanent code fixes" }, waggle: { c: "#6ee7d8", tag: "shares what was learned" },
+  coordinator: { c: "#ffc94d", tag: "coordinator" }, investigator: { c: "#5cc8ff", tag: "investigator" },
+  operator: { c: "#8fb0ff", tag: "fixer" }, verifier: { c: "#34e39a", tag: "the checker" },
+  recovery: { c: "#ff9ccf", tag: "takes over dead bees’ jobs" }, monitor: { c: "#7fd8ff", tag: "watches system health" },
+  upgrader: { c: "#a6f0a0", tag: "writes permanent code fixes" }, reporter: { c: "#6ee7d8", tag: "shares what was learned" },
 };
-const NAMES = { "worker-web-1": `Portal ${BEE_NAME.worker.toLowerCase()}`, "worker-unix-1": `Unix ${BEE_NAME.worker.toLowerCase()}`,
-  "worker-mainframe-1": `Mainframe ${BEE_NAME.worker.toLowerCase()}`, "queen-1": BEE_NAME.queen, "queen-2": `Backup ${BEE_NAME.queen.toLowerCase()}`,
-  "guard-1": BEE_NAME.guard, "sentinel-1": BEE_NAME.sentinel, "gardener-1": BEE_NAME.gardener, "scout-1": BEE_NAME.scout, "nurse-1": BEE_NAME.nurse,
-  "waggle-1": BEE_NAME.waggle, "platform-1": BEE_NAME.platform };
+const NAMES = { "operator-web-1": `Portal ${BEE_NAME.operator.toLowerCase()}`, "operator-unix-1": `Unix ${BEE_NAME.operator.toLowerCase()}`,
+  "operator-mainframe-1": `Mainframe ${BEE_NAME.operator.toLowerCase()}`, "coordinator-1": BEE_NAME.coordinator, "coordinator-2": `Backup ${BEE_NAME.coordinator.toLowerCase()}`,
+  "verifier-1": BEE_NAME.verifier, "monitor-1": BEE_NAME.monitor, "upgrader-1": BEE_NAME.upgrader, "investigator-1": BEE_NAME.investigator, "recovery-1": BEE_NAME.recovery,
+  "reporter-1": BEE_NAME.reporter, "toolsmith-1": BEE_NAME.toolsmith };
 function agentName(id) {
   if (!id) return "a bee";
   const a = state.agents.get(id);
-  if (a?.role === "queen") {
+  if (a?.role === "coordinator") {
     if (a.status === "dead" || a.status === "standby") return a.status === "dead" ? "Queen" : "Backup queen";
-    return [...state.agents.values()].some((q) => q.role === "queen" && q.status === "dead") ? "New queen" : "Queen";
+    return [...state.agents.values()].some((q) => q.role === "coordinator" && q.status === "dead") ? "New queen" : "Queen";
   }
   if (NAMES[id]) return NAMES[id];
   const m = id.match(/^(\w+?)-(?:(\w+)-)?(\d+)$/);
   if (!m) return id;
   const base = BEE_NAME[m[1]] || m[1][0].toUpperCase() + m[1].slice(1);
-  return m[2] ? `${sn(m[2] === "web" ? "portal" : m[2])} ${BEE_NAME.worker.toLowerCase()} ${m[3]}` : `${base} ${m[3]}`;
+  return m[2] ? `${sn(m[2] === "web" ? "portal" : m[2])} ${BEE_NAME.operator.toLowerCase()} ${m[3]}` : `${base} ${m[3]}`;
 }
 const roleOf = (id) => state.agents.get(id)?.role || String(id || "").split("-")[0];
 
@@ -94,7 +94,7 @@ function translate(t) {
   if (/^Loaded .*checkpoint/.test(x)) return { text: "Loaded the dead bee’s saved progress from MongoDB. Finished steps are not repeated.", story: false };
   if (/already took effect/.test(x)) return { text: "The dead bee’s last action had already worked, so it is not sent twice.", story: true };
   if (/resending the SAME action id/.test(x)) return { text: "Re-sending the same action safely (the system ignores duplicates).", story: false };
-  if ((m = x.match(/^(\S+) went silent — (\S+) takes the queen lease/))) return { text: `${esc(agentName(m[1]))} went silent. <span class="g">I’m queen now</span> and carry on.`, story: true };
+  if ((m = x.match(/^(\S+) went silent — (\S+) takes the coordinator lease/))) return { text: `${esc(agentName(m[1]))} went silent. <span class="g">I’m queen now</span> and carry on.`, story: true };
   if ((m = x.match(/^Resolved (INC-\d+) in (\d+)s/))) return { text: `<span class="g">All green.</span> Fixed in ${m[2]} s. Lesson saved for next time.`, story: true };
   if ((m = x.match(/resolved (\d+) times .*filed/))) return { text: `Same failure ${m[1]} times → asked the Beekeeper for a permanent code fix.`, story: true };
   if ((m = x.match(/proposed a (\d+)-line diff/))) return { text: `Wrote a ${m[1]}-line code fix.`, story: true };
@@ -112,7 +112,7 @@ function translate(t) {
   if ((m = x.match(/^(\w+) \/health says up:/))) return { text: `${S(m[1])} claims it’s fine, but its logs show the crash.` };
   if ((m = x.match(/^Sending (\w+)(?:\(.*?\))? to (\w+)/))) return { text: `Doing it: ${esc(op(m[1]))} on the ${S(m[2])}.` };
   if ((m = x.match(/^(\w+) answered accepted=True applied=True/))) return { text: `${S(m[1])} replied “done”. Waiting for the checker…` };
-  if (/^Guard rejected/.test(x)) return { text: "The checker rejected it. Trying again." };
+  if (/^Verifier rejected/.test(x)) return { text: "The checker rejected it. Trying again." };
   if ((m = x.match(/^Reading back (\w+) to check (\w+)/))) return { text: `Re-checking the ${S(m[1])}: did “${esc(op(m[2]))}” really happen?` };
   if ((m = x.match(/^Hop (\d+): sending .* to examine (\w+)/))) return { text: `Check ${m[1]}: sending a worker to the ${S(m[2])}.` };
   if ((m = x.match(/^Dispatching (\w+) to/))) return { text: `Assigned the next step: ${esc(op(m[1]))}.` };
@@ -121,7 +121,7 @@ function translate(t) {
   if (/Checking the hive's memory/.test(x)) return { text: "Asking the shared memory: have we seen this before?" };
   if (/^Claimed INC/.test(x)) return { text: "Took the case." };
   if ((m = x.match(/^Assigning INC-\d+ to ([\w-]+)/))) return { text: `Gave the case to the ${esc(agentName(m[1]))}.` };
-  if (/^Holding the queen lease/.test(x)) return { text: "In charge. Goal: every system green." };
+  if (/^Holding the coordinator lease/.test(x)) return { text: "In charge. Goal: every system green." };
   if ((m = x.match(/^INC-\d+ opened \((.*?)\)/))) return { text: `New problem (${esc(m[1].split(/,\s*/).map(sn).join(", "))}). Goal stands: all green.` };
   if ((m = x.match(/^(\w+) also unhealthy/))) return { text: `${S(m[1])} is hurt too: same case.` };
   if (/needs your approval/.test(x)) return { text: "Asked the human for an OK." };
@@ -188,10 +188,10 @@ function nowLine() {
   const rid = runId();
   const recentReject = [...state.thoughts].reverse().find((t) => isLie(t) && serverNow() - ts(t.ts) < 7000);
   if (recentReject) return `The checker caught the ${esc(sn(recentReject.system || "mainframe"))} <b>lying</b>: it said “done”, nothing changed.`;
-  const deadNow = [...state.agents.values()].find((a) => a.status === "dead" && a.role !== "nurse" && (a.task || a.incident));
+  const deadNow = [...state.agents.values()].find((a) => a.status === "dead" && a.role !== "recovery" && (a.task || a.incident));
   const lastHo = inc && (inc.handoffs || [])[inc.handoffs.length - 1];
   if (lastHo && serverNow() - ts(lastHo.ts || lastHo.at) < 9000) return `The ${esc(agentName(lastHo.to))} <span class="g">took over</span> the dead ${esc(agentName(lastHo.from))}’s job from its saved progress.`;
-  if (deadNow && inc?.active) return `The ${esc(agentName(deadNow._id))} was <b>killed</b> mid-job. A nurse bee will take over…`;
+  if (deadNow && inc?.active) return `The ${esc(agentName(deadNow._id))} was <b>killed</b> mid-job. A reserve bee will take over…`;
   if (inc?.active) {
     const path = inc.diagnosis_path || [];
     if (inc.recall?.used && inc.root_cause_system) return `Seen this before → straight to the <b>${esc(sn(inc.root_cause_system))}</b>, no search needed.`;
@@ -227,8 +227,8 @@ async function act(btn, fn) {
 let toastT = null;
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), 5000); }
 function liveQueen() {
-  const qs = [...state.agents.values()].filter((a) => a.role === "queen" && a.status !== "dead");
-  return (qs.find((a) => a.status !== "standby") || qs[0])?._id || "queen-1";
+  const qs = [...state.agents.values()].filter((a) => a.role === "coordinator" && a.status !== "dead");
+  return (qs.find((a) => a.status !== "standby") || qs[0])?._id || "coordinator-1";
 }
 let shownApproval = null;
 function renderApproval() {
@@ -378,7 +378,7 @@ function model() {
       : recalled ? `<div class="h">Seen it before</div><div class="b">Recalled from MongoDB → straight to the ${esc(sn(inc.root_cause_system || "mainframe"))}.</div>`
       : inc.root_cause_system ? `<div class="h">Found it</div><div class="b">${nChecks} check${nChecks === 1 ? "" : "s"}: ${path.map((s) => esc(sn(s))).join(" → ")}</div>`
       : `<div class="h">Tracing…</div><div class="b">${path.map((s) => esc(sn(s))).join(" → ") || "Starting at the website"}${path.length ? " → …" : ""}</div>`,
-    who: `${BEE(C.blue)}<span>Scout bee</span>`, act: live && !inc.root_cause_system ? actLine(["scout", "worker"], since) : null });
+    who: `${BEE(C.blue)}<span>Scout bee</span>`, act: live && !inc.root_cause_system ? actLine(["investigator", "operator"], since) : null });
   // 4 · AI suggests (or the plan when there is no AI on this incident)
   const ai = inc?.ai, steps = inc?.steps || [];
   if (ai) {
@@ -446,19 +446,19 @@ function model() {
   const k = kills[kills.length - 1];
   if (k) {
     const victim = k.result?.agent, vrole = victim ? roleOf(victim) : null;
-    const qho = victim && vrole === "queen" ? [...state.thoughts].reverse().find((t) => /takes the queen lease/.test(t.text || "") && ts(t.ts) >= ts(k.ts)) : null;
-    const ho = victim && vrole !== "queen" ? nightIncidents().flatMap((i) => i.handoffs || []).find((h) => h.from === victim) : null;
+    const qho = victim && vrole === "coordinator" ? [...state.thoughts].reverse().find((t) => /takes the coordinator lease/.test(t.text || "") && ts(t.ts) >= ts(k.ts)) : null;
+    const ho = victim && vrole !== "coordinator" ? nightIncidents().flatMap((i) => i.handoffs || []).find((h) => h.from === victim) : null;
     const hunting = !victim && !["failed", "error"].includes(k.status);
     node("killed", { k: "Bee killed", c: C.red, state: victim ? "dead" : hunting ? "active" : "ghost",
       flag: victim ? '<div class="flag">KILLED</div>' : "",
-      html: victim ? `<div class="h" style="font-size:24px">${esc(vrole === "queen" ? "The Queen" : agentName(victim))}</div><div class="b dim" style="font-size:17px">Real process killed mid-job.</div>`
+      html: victim ? `<div class="h" style="font-size:24px">${esc(vrole === "coordinator" ? "The Queen" : agentName(victim))}</div><div class="b dim" style="font-size:17px">Real process killed mid-job.</div>`
         : hunting ? `<div class="h" style="font-size:24px">Hunting…</div><div class="b dim" style="font-size:17px">Waiting for a bee in the middle of a job.</div>`
         : `<div class="h" style="font-size:24px">Missed</div><div class="b dim" style="font-size:17px">No busy bee to kill.</div>` });
     node("takeover", { k: "Takes over", c: C.pink, state: ho || qho ? "done" : victim ? "active" : "ghost",
       html: qho ? `<div class="h" style="font-size:24px">Backup queen</div><div class="b" style="font-size:17px">took over and carries on.</div>`
         : ho ? `<div class="h" style="font-size:24px">${esc(agentName(ho.to))}</div><div class="b" style="font-size:17px">took over the job from its saved progress${ho.takeover_s != null ? ` (${Math.round(ho.takeover_s)} s)` : ""}. No step repeated.</div>`
-        : victim ? `<div class="h" style="font-size:24px">Coming…</div><div class="b dim" style="font-size:17px">${vrole === "queen" ? "The backup queen notices the silence." : "A nurse picks up the job when its lease runs out."}</div>` : `<div class="b dim">—</div>`,
-      who: `${BEE(C.pink)}<span>${vrole === "queen" ? "Backup queen" : "Reserve bee"}</span>`, toCheck: vrole !== "queen" });
+        : victim ? `<div class="h" style="font-size:24px">Coming…</div><div class="b dim" style="font-size:17px">${vrole === "coordinator" ? "The backup queen notices the silence." : "A reserve bee picks up the job when its lease runs out."}</div>` : `<div class="b dim">—</div>`,
+      who: `${BEE(C.pink)}<span>${vrole === "coordinator" ? "Backup queen" : "Reserve bee"}</span>`, toCheck: vrole !== "coordinator" });
   }
   // schema drift branch: only when it fires
   const incs = [...state.incidents.values()];
@@ -585,12 +585,12 @@ function renderTop() {
     if (mr === 1) { await api("POST", "/api/reset", { mode: "next_round" }); return api("POST", "/api/scenario/bank-night-2"); }
     return api("POST", "/api/scenario/bank-night-3");
   });
-  const armed = [...state.agents.values()].some((a) => a.role === "worker" && a.status !== "dead" && a.phase === "step_sent");
+  const armed = [...state.agents.values()].some((a) => a.role === "operator" && a.status !== "dead" && a.phase === "step_sent");
   $("#btn-kill").classList.toggle("armed", armed);
 }
 
 function bind() {
-  $("#btn-kill").addEventListener("click", (e) => act(e.currentTarget, () => api("POST", "/api/kill", { selector: { role: "worker", phase: "step_sent" } })));
+  $("#btn-kill").addEventListener("click", (e) => act(e.currentTarget, () => api("POST", "/api/kill", { selector: { role: "operator", phase: "step_sent" } })));
   $("#btn-queen").addEventListener("click", (e) => act(e.currentTarget, () => api("POST", "/api/kill", { selector: { agent: liveQueen() } })));
   const pop = $("#more-pop");
   $("#btn-more").addEventListener("click", (e) => { e.stopPropagation(); pop.hidden = !pop.hidden; });

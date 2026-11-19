@@ -136,7 +136,7 @@ class Agent:
             os._exit(3)
         if doc.get("status") == "dead":
             # The Undertaker declared us dead (we stalled). Our leases were released and may already be
-            # fenced by a nurse: drop them all and rejoin as a fresh idle bee.
+            # fenced by a recovery: drop them all and rejoin as a fresh idle bee.
             with self._lock:
                 self._lost.update(self._held)
                 self._held.clear()
@@ -216,17 +216,17 @@ class Agent:
             col("agents").update_one({"_id": self.id}, {"$set": {**fields, "last_seen": now()}})
 
     def pause_point(self) -> None:
-        """GARDENER_PAUSE=1: hold here while the Gardener (a separate system outside the
+        """UPGRADER_PAUSE=1: hold here while the Upgrader (a separate system outside the
         swarm) upgrades a system. Heartbeats and work-lease
         renewals keep running on their own thread, so nobody is declared dead and nothing is taken over.
-        The pause is a lease (common/pause.py): if the Gardener dies, it lapses and we carry on."""
+        The pause is a lease (common/pause.py): if the Upgrader dies, it lapses and we carry on."""
         if not pause.enabled():
             return
         before: dict = {}
 
         def on_pause(doc):
             before.update(col("agents").find_one({"_id": self.id}, {"phase": 1}) or {})
-            log(self.id, f"paused: Gardener upgrading {doc.get('system')}")
+            log(self.id, f"paused: Upgrader upgrading {doc.get('system')}")
             self.set(phase="paused")
 
         def on_resume():

@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    WARROOM_PORT=8700 \
+    CONSOLE_PORT=8700 \
     SYSTEMS_PORT=8701
 
 # tini = PID 1 that reaps zombies. Chaos SIGKILLs bees and run.py starts children
@@ -36,7 +36,7 @@ USER app
 EXPOSE 8700 8701
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=40s --retries=3 \
-  CMD python -c "import os,urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:%s/' % os.environ.get('WARROOM_PORT','8700'), timeout=4); sys.exit(0)" || exit 1
+  CMD python -c "import os,urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:%s/' % os.environ.get('CONSOLE_PORT','8700'), timeout=4); sys.exit(0)" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["python", "run.py"]

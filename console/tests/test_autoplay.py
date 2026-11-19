@@ -37,7 +37,7 @@ def test_later_approvals_auto_approve_after_delay_with_a_visible_line(clean):
     _apr("APR-0002", age=1)  # too fresh: stays on screen
     assert ap.approve_pending() == []
     swarm().approvals.update_one({"_id": "APR-0002"}, {"$set": {"ts": now() - timedelta(seconds=4)}})
-    _apr("APR-0003", desc="Gardener upgrade UPG-0001", kind="upgrade")
+    _apr("APR-0003", desc="Upgrader upgrade UPG-0001", kind="upgrade")
     assert sorted(ap.approve_pending()) == ["APR-0002", "APR-0003"]
     d = swarm().approvals.find_one({"_id": "APR-0002"})
     assert d["status"] == "approved" and d["decided_by"] == "autoplay" and d["decided_at"]

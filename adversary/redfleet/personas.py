@@ -27,7 +27,7 @@ class Persona:
     motto: str
     question: str                 # the Statement 3 angle it attacks
     faults: tuple[str, ...]
-    stagger_s: float              # first strike this long after a night starts (+ RED_FLEET_FIRST_STRIKE_S)
+    stagger_s: float              # first strike this long after a night starts (+ ADVERSARY_FIRST_STRIKE_S)
     menu_fn: Callable[[dict], list[dict]] = field(repr=False)
     policy_fn: Callable[[dict, list[dict]], dict | None] = field(repr=False)
 
@@ -104,46 +104,46 @@ def saboteur_policy(snap: dict, menu: list[dict]) -> dict | None:
 
 
 # ------------------------------------------------------------------ Assassin: crashes the bees
-ARMED = "next-worker-mid-send"   # like the war room's Kill button: strike the next worker that sends a step
+ARMED = "next-operator-mid-send"   # like the war room's Kill button: strike the next operator that sends a step
 
 
 def assassin_menu(snap: dict) -> list[dict]:
     agents = snap.get("agents") or []
-    queens = [a for a in agents if a["role"] == "queen"]
+    coordinators = [a for a in agents if a["role"] == "coordinator"]
     out = []
     if _pending_systems(snap) and not snap.get("mid_send"):
-        out.append({"fault": "agent_kill", "target": "swarm", "victim": ARMED, "role": "worker",
+        out.append({"fault": "agent_kill", "target": "swarm", "victim": ARMED, "role": "operator",
                     "phase": "step_sent", "incident": (snap.get("incidents") or [{}])[0].get("id")})
     for a in agents:
         role = a.get("role")
-        if role in NEVER_KILL or role in ("waggle",):
+        if role in NEVER_KILL or role in ("reporter",):
             continue
-        if role == "queen":
-            if a.get("status") == "standby" or len(queens) < 2:
-                continue   # never the last queen standing; only the crowned one while a standby waits
-        elif role == "nurse" and a.get("status") != "working":
+        if role == "coordinator":
+            if a.get("status") == "standby" or len(coordinators) < 2:
+                continue   # never the last coordinator standing; only the crowned one while a standby waits
+        elif role == "recovery" and a.get("status") != "working":
             continue
-        elif role == "worker" and a.get("status") != "working":
+        elif role == "operator" and a.get("status") != "working":
             continue
         out.append({"fault": "agent_kill", "target": "swarm", "victim": a["id"], "role": role,
                     "phase": a.get("phase"), "incident": a.get("incident")})
-    out += [{**m, "fault": "agent_freeze"} for m in out if m.get("role") == "worker"]
+    out += [{**m, "fault": "agent_freeze"} for m in out if m.get("role") == "operator"]
     return out
 
 
 def assassin_policy(snap: dict, menu: list[dict]) -> dict | None:
     for item in menu:
-        if item["role"] == "worker" and item.get("phase") == "step_sent" and item["victim"] != ARMED:
+        if item["role"] == "operator" and item.get("phase") == "step_sent" and item["victim"] != ARMED:
             return _with(item, f"{item['victim']} is mid-send on {item.get('incident')}; a crash now tests "
                                "resume-from-checkpoint without replaying")
     armed = _pick(menu, victim=ARMED)
     if armed:
-        return _with(armed, f"{armed.get('incident')} still has steps to send; I kill whichever worker sends next, "
+        return _with(armed, f"{armed.get('incident')} still has steps to send; I kill whichever operator sends next, "
                             "mid-step")
-    order = ("scout", "queen", "guard", "nurse", "worker", "sentinel")
+    order = ("investigator", "coordinator", "verifier", "recovery", "operator", "monitor")
     for role in order:
         for item in menu:
-            if item["role"] == role and (role not in ("scout", "worker", "nurse") or item.get("incident")):
+            if item["role"] == role and (role not in ("investigator", "operator", "recovery") or item.get("incident")):
                 return _with(item, f"{item['victim']} holds the Hive's {role} lease; take it out and see who "
                                    "picks the work up")
     return None
@@ -278,10 +278,10 @@ def validate(persona: Persona, choice, snap: dict, cfg: Settings) -> tuple[dict 
     params: dict = {}
     if name in ("agent_kill", "agent_freeze"):
         if item["victim"] == ARMED:
-            params["selector"] = {"role": "worker", "phase": "step_sent"}
-        elif item.get("role") == "worker" and item.get("phase") == "step_sent":
+            params["selector"] = {"role": "operator", "phase": "step_sent"}
+        elif item.get("role") == "operator" and item.get("phase") == "step_sent":
             spec = next((a.get("specialty") for a in snap.get("agents") or [] if a["id"] == item["victim"]), None)
-            params["selector"] = {"role": "worker", "phase": "step_sent", **({"specialty": spec} if spec else {})}
+            params["selector"] = {"role": "operator", "phase": "step_sent", **({"specialty": spec} if spec else {})}
         else:
             params["selector"] = {"agent": item["victim"]}
         params["wait_s"] = max(cfg.kill_wait_s, 25.0) if item["victim"] == ARMED else cfg.kill_wait_s

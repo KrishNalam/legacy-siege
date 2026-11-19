@@ -9,19 +9,19 @@ import sys
 import time
 from pathlib import Path
 
-FAKE_PORT = int(os.environ.get("SWARM_TEST_PORT", 18731))
+FAKE_PORT = int(os.environ.get("AGENTS_TEST_PORT", 18731))
 _SFX = os.environ.get("SWARM_TEST_DB_SUFFIX", "")  # e.g. "_w2" when several checkouts test on one MongoDB at once
 TEST_ENV = {
     "WORLD_DB": f"world_test_swarm{_SFX}", "SWARM_DB": f"swarm_test_swarm{_SFX}",
-    "PACE": os.environ.get("SWARM_TEST_PACE", "0"),  # SWARM_TEST_PACE=1 for a demo-paced dry run
-    "HEARTBEAT_S": "0.5", "LEASE_S": "3", "DEAD_AFTER_S": "2.5", "NURSE_RESPAWN_S": "2",
-    "SENTINEL_POLL_S": "0.2", "SENTINEL_CONFIRM_POLLS": "2", "SWARM_POLL_S": "0.1", "NURSE_POLL_S": "0.2",
-    "NURSE_PICKUP_S": "1.5", "SCOUT_SETTLE_S": "0.8", "GUARD_GRACE_S": "0.6", "SLOW_APPLY_S": "3",
+    "PACE": os.environ.get("AGENTS_TEST_PACE", "0"),  # AGENTS_TEST_PACE=1 for a demo-paced dry run
+    "HEARTBEAT_S": "0.5", "LEASE_S": "3", "DEAD_AFTER_S": "2.5", "RECOVERY_RESPAWN_S": "2",
+    "MONITOR_POLL_S": "0.2", "MONITOR_CONFIRM_POLLS": "2", "AGENTS_POLL_S": "0.1", "RECOVERY_POLL_S": "0.2",
+    "RECOVERY_PICKUP_S": "1.5", "INVESTIGATOR_SETTLE_S": "0.8", "VERIFIER_GRACE_S": "0.6", "SLOW_APPLY_S": "3",
     "FAKE_TICK_S": "0.2", "STEP_HOLD_S": "0", "SYSTEMS_URL": f"http://127.0.0.1:{FAKE_PORT}",
     "ANTHROPIC_API_KEY": "", "VOYAGE_API_KEY": "",
 }
 # parallel runs on one MongoDB: SWARM_TEST_DB_SUFFIX (or the shared TEST_DB_SUFFIX) suffixes both DB names,
-# SWARM_TEST_PORT=0 puts the fake systems server on a free port. Unset: the names/port above, unchanged.
+# AGENTS_TEST_PORT=0 puts the fake systems server on a free port. Unset: the names/port above, unchanged.
 _SFX_ANY = os.environ.get("SWARM_TEST_DB_SUFFIX") or os.environ.get("TEST_DB_SUFFIX", "")
 TEST_ENV["WORLD_DB"], TEST_ENV["SWARM_DB"] = f"world_test_swarm{_SFX_ANY}", f"swarm_test_swarm{_SFX_ANY}"
 if FAKE_PORT == 0:
@@ -123,8 +123,8 @@ def start_swarm(env_extra=None, log_name="swarm", agents: int = 12) -> Swarm:
     try:
         wait_for(lambda: col("agents").count_documents({"status": {"$in": ["idle", "standby"]}}) >= agents, 60, 0.2,
                  f"{agents} agents to register")
-        wait_for(lambda: col("stats").find_one({"_id": "queen_lease", "owner": "queen-1"}), 30, 0.2,
-                 "queen-1 to take the queen lease")
+        wait_for(lambda: col("stats").find_one({"_id": "coordinator_lease", "owner": "coordinator-1"}), 30, 0.2,
+                 "coordinator-1 to take the coordinator lease")
     except BaseException:
         s.stop()  # never leak a process tree when setup fails
         raise
@@ -136,7 +136,7 @@ def approve_pending(decided_by: str = "test-beekeeper") -> list[str]:
     from common.db import col, now
 
     ids = []
-    # the Beekeeper answers once the queen has relayed the request (keeps the relay path observable)
+    # the Beekeeper answers once the coordinator has relayed the request (keeps the relay path observable)
     for a in col("approvals").find({"status": "pending", "relayed_by": {"$ne": None}}):
         r = col("approvals").update_one({"_id": a["_id"], "status": "pending"},
                                         {"$set": {"status": "approved", "decided_by": decided_by, "decided_at": now()}})

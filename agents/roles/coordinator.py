@@ -1,12 +1,12 @@
-"""Queen — owns the goal (all systems green, zero open vulns) and talks to the Beekeeper.
+"""Coordinator — owns the goal (all systems green, zero open vulns) and talks to the Beekeeper.
 
-Exactly one queen acts at a time: the queen lease lives in swarm.stats {_id: "queen_lease"} and is taken
-with the same atomic claim as any other lease. queen-2 sits on the bench and takes the lease (and the
-goal) when queen-1 stops heartbeating.
+Exactly one coordinator acts at a time: the coordinator lease lives in swarm.stats {_id: "coordinator_lease"} and is taken
+with the same atomic claim as any other lease. coordinator-2 sits on the bench and takes the lease (and the
+goal) when coordinator-1 stops heartbeating.
 
-Active queen, each tick:
-  * new open incident -> per-incident graph (thread "<incident>:queen"): triage -> assign an idle scout
-  * pending approvals  -> relays them to the Beekeeper (narration + waggle message)
+Active coordinator, each tick:
+  * new open incident -> per-incident graph (thread "<incident>:coordinator"): triage -> assign an idle investigator
+  * pending approvals  -> relays them to the Beekeeper (narration + reporter message)
   * status line        -> posts to the Beekeeper when the picture changes
 """
 from __future__ import annotations
@@ -24,12 +24,12 @@ from common.events import say
 from .. import leases, policy, scale, settings
 from ..harness import Agent, checkpointer, main_loop
 
-LEASE_ID = "queen_lease"
+LEASE_ID = "coordinator_lease"
 
 
 class QueenState(TypedDict, total=False):
     incident: str
-    scout: str | None
+    investigator: str | None
 
 
 def build_graph(agent: Agent):
@@ -43,29 +43,29 @@ def build_graph(agent: Agent):
     def assign(state: QueenState, config) -> dict:
         cutoff = now() - timedelta(seconds=settings.DEAD_AFTER_S)
         busy = {i["owner"] for i in col("incidents").find({"active": True, "owner": {"$ne": None}}, {"owner": 1})}
-        if comms.enabled():  # a scout handed an incident it has not claimed yet is not free for the next one
+        if comms.enabled():  # an investigator handed an incident it has not claimed yet is not free for the next one
             busy |= {i["assigned_to"] for i in col("incidents").find(
                 {"active": True, "status": "open", "assigned_to": {"$ne": None}}, {"assigned_to": 1})}
-        idle = [a["_id"] for a in col("agents").find({"role": "scout", "status": "idle", "last_seen": {"$gte": cutoff},
+        idle = [a["_id"] for a in col("agents").find({"role": "investigator", "status": "idle", "last_seen": {"$gte": cutoff},
                                                       "phase": {"$ne": "retiring"}},
                                                      {"_id": 1}).sort("_id", 1) if a["_id"] not in busy]
-        if not idle and scale.enabled():  # dynamic scaling: a scout is spawned for this incident
-            rid = scale.ensure_scout(agent.id, state["incident"])
+        if not idle and scale.enabled():  # dynamic scaling: an investigator is spawned for this incident
+            rid = scale.ensure_investigator(agent.id, state["incident"])
             if rid:
-                agent.think(f"No free scout for {state['incident']} — spawning one ({rid}).", kind="spawn",
+                agent.think(f"No free investigator for {state['incident']} — spawning one ({rid}).", kind="spawn",
                             incident=state["incident"], pause=False)
-                return {"scout": None}
+                return {"investigator": None}
         if not idle:
-            agent.think(f"No idle scout for {state['incident']}; the first free scout will self-claim it.",
+            agent.think(f"No idle investigator for {state['incident']}; the first free investigator will self-claim it.",
                         incident=state["incident"], pause=False)
-            return {"scout": None}
+            return {"investigator": None}
         r = col("incidents").update_one({"_id": state["incident"], "status": "open", "assigned_to": None},
                                         {"$set": {"assigned_to": idle[0], "assigned_by": agent.id}})
         if r.modified_count:
             agent.think(f"Assigning {state['incident']} to {idle[0]}.", kind="action", incident=state["incident"],
                         pause=False)
             say(agent.id, idle[0], "assign", {"incident": state["incident"]})
-        return {"scout": idle[0]}
+        return {"investigator": idle[0]}
 
     g = StateGraph(QueenState)
     g.add_node("triage", triage)
@@ -99,30 +99,30 @@ def run(agent: Agent) -> None:
             except leases.LeaseLost:
                 holding["gen"] = None
         if agent.standby and time.monotonic() - started < config.LEASE_S:
-            return False  # let the primary queen take the crown at boot
+            return False  # let the primary coordinator take the crown at boot
         ensure_lease_doc()  # (re)created if a reset wiped swarm.stats
         prev = col("stats").find_one({"_id": LEASE_ID}) or {}
         won = leases.claim(col("stats"), {"_id": LEASE_ID}, agent.id)
         if not won:
             if not holding.get("benched"):
                 holding["benched"] = True
-                agent.set(status="standby", target="bench")  # another queen holds the crown
+                agent.set(status="standby", target="bench")  # another coordinator holds the crown
             return False
         holding["benched"] = False
         holding["gen"] = won["generation"]
         agent.hold("stats", LEASE_ID, won["generation"])
         agent.set(status="idle", target="hive", phase=None)
         if prev.get("owner") and prev["owner"] != agent.id:
-            agent.think(f"{prev['owner']} went silent — {agent.id} takes the queen lease and the goal.",
+            agent.think(f"{prev['owner']} went silent — {agent.id} takes the coordinator lease and the goal.",
                         kind="handoff")
-            say(agent.id, "beekeeper", "handoff", f"{prev['owner']} down; {agent.id} is now queen.")
+            say(agent.id, "beekeeper", "handoff", f"{prev['owner']} down; {agent.id} is now coordinator.")
         else:
-            agent.think("Holding the queen lease. Goal: every system green, zero open vulns.", pause=False)
+            agent.think("Holding the coordinator lease. Goal: every system green, zero open vulns.", pause=False)
         return True
 
     def repair_assignments():
-        """Dynamic scaling: an incident handed to a scout that never came up (or retired at that very moment)
-        goes back to the queue, so it is re-assigned or a new scout is spawned for it."""
+        """Dynamic scaling: an incident handed to an investigator that never came up (or retired at that very moment)
+        goes back to the queue, so it is re-assigned or a new investigator is spawned for it."""
         grace = now() - timedelta(seconds=scale.SPAWN_GRACE_S)
         for inc in col("incidents").find({"active": True, "status": "open", "assigned_to": {"$ne": None}},
                                          {"assigned_to": 1, "assigned_at": 1, "opened_at": 1}):
@@ -147,7 +147,7 @@ def run(agent: Agent) -> None:
                                                                               "assigned_to": None})
                                            if key(i) not in handled]):
             handled.add(key(inc))
-            graph.invoke({"incident": inc["_id"]}, {"configurable": {"thread_id": f"{inc['_id']}:queen"}},
+            graph.invoke({"incident": inc["_id"]}, {"configurable": {"thread_id": f"{inc['_id']}:coordinator"}},
                          durability="exit")
         for apr in col("approvals").find({"status": "pending", "relayed_by": None}):
             r = col("approvals").update_one({"_id": apr["_id"], "relayed_by": None},
@@ -166,7 +166,7 @@ def run(agent: Agent) -> None:
             say(agent.id, "beekeeper", "status", text)
 
     def unassigned_by_priority(incs: list[dict]) -> list[dict]:
-        """SWARM_COMMS=1 and several waiting: highest priority first (customer-facing, then the prioritised
+        """AGENTS_COMMS=1 and several waiting: highest priority first (customer-facing, then the prioritised
         feed's top priority for each, then oldest). Otherwise the natural order, unchanged."""
         if not comms.enabled() or len(incs) < 2:
             return incs

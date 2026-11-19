@@ -37,7 +37,7 @@ flowchart TD
 
 ## How it works
 
-- `supervisor.py` starts one OS process per agent (`python -m agents.agent <role> <id>`). A SIGKILL is a real crash. After `NURSE_RESPAWN_S` the supervisor starts a fresh nurse in a dead bee's place; guard, sentinel, waggle, queen and nurse come back in their own role.
+- `supervisor.py` starts one OS process per agent (`python -m agents.agent <role> <id>`). A SIGKILL is a real crash. After `RECOVERY_RESPAWN_S` the supervisor starts a fresh nurse in a dead bee's place; guard, sentinel, waggle, queen and nurse come back in their own role.
 - Every agent runs on `harness.Agent`: it heartbeats `last_seen` in `swarm.agents` and renews its leases conditionally on `{owner, generation}`. A failed renew marks the lease lost and the code stops at its next `check()`.
 - `leases.claim` is one `findOneAndUpdate` that bumps `generation` (the fencing token). `steps.py` writes each step change in one transaction: fence the task lease, update the incident step, upsert the ledger receipt. A replaced holder's write aborts.
 - The Sentinel opens or coalesces an incident per unhealthy segment of the chain. The Queen hands it to a Scout. The Scout runs observe, recall (`$vectorSearch` playbooks), diagnose (one hop per run), classify, plan, dispatch.
@@ -76,18 +76,18 @@ MONGODB_URI='mongodb://localhost:27027/?directConnection=true' PACE=0 .venv/bin/
 
 | name | default | effect |
 |---|---|---|
-| `SWARM_ROSTER` | unset | `role:id,...` overrides the roster (tests) |
-| `SWARM_DYNAMIC` | off | Scouts and workers spawned on request (`scale.py`) |
-| `SWARM_LEASE_DEADLINE` | off | Stop acting when a renewal is no longer locally fresh |
+| `AGENTS_ROSTER` | unset | `role:id,...` overrides the roster (tests) |
+| `AGENTS_AUTOSCALE` | off | Scouts and workers spawned on request (`scale.py`) |
+| `AGENTS_LEASE_DEADLINE` | off | Stop acting when a renewal is no longer locally fresh |
 | `STEP_HOLD_S` | `pace(1.2)` | Pause between marking a step sent and POSTing it |
-| `SWARM_RECOVERY` | off | Re-diagnose and replan when an attack outlasts the attempt budget |
+| `AGENTS_RECOVERY` | off | Re-diagnose and replan when an attack outlasts the attempt budget |
 | `FAILURE_MEMORY` | off | Remember failed attempts as lessons |
 | `WORKFLOW_DRIFT` | off | Adapt to a refused op that needs a new prerequisite step |
 | `AI_SECOND_OPINION` | off | Claude proposes a plan; verification decides |
-| `PLATFORM_ENGINEERS` | off | Adds `platform-1`, which builds vetted tools |
-| `GARDENER_HELP` | off | Adds `sentinel-2`; workers may ask the Gardener for advice |
-| `HEARTBEAT_S` / `LEASE_S` / `NURSE_RESPAWN_S` | `3` / `10` / `15` | Timing from `common.config` |
+| `TOOLSMITH_ENGINEERS` | off | Adds `platform-1`, which builds vetted tools |
+| `UPGRADER_HELP` | off | Adds `sentinel-2`; workers may ask the Gardener for advice |
+| `HEARTBEAT_S` / `LEASE_S` / `RECOVERY_RESPAWN_S` | `3` / `10` / `15` | Timing from `common.config` |
 
-More timing knobs (`SENTINEL_POLL_S`, `GUARD_GRACE_S`, `MAX_ATTEMPTS`, ...) are in `settings.py`.
+More timing knobs (`MONITOR_POLL_S`, `VERIFIER_GRACE_S`, `MAX_ATTEMPTS`, ...) are in `settings.py`.
 
 Back to the [main README](../README.md) · interfaces in [CONTRACTS.md](../CONTRACTS.md)

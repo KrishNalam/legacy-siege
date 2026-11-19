@@ -30,7 +30,7 @@ bee names. Every bee name maps to exactly one plain concept, and the plain name 
 | The human who approves risky steps | **You** | `approver` | the Beekeeper |
 | The live dashboard | **Hive view** | `console/` | war room, `console/` |
 | Decoy add-on that lures and traps attackers | **Honeypot** | `honeypot/` | (new) |
-| Scaling out agents | **Swarm** | `autoscale` | `SWARM_DYNAMIC` |
+| Scaling out agents | **Swarm** | `autoscale` | `AGENTS_AUTOSCALE` |
 
 ## Colony roles
 
@@ -82,13 +82,13 @@ The group gets a bee-world name. The roles inside stay plain, because security t
 
 | Old | New |
 |---|---|
-| `SWARM_*` | `AGENTS_*` (`SWARM_DYNAMIC` → `AGENTS_AUTOSCALE`) |
+| `SWARM_*` | `AGENTS_*` (`AGENTS_AUTOSCALE` → `AGENTS_AUTOSCALE`) |
 | `NURSE_*` | `RECOVERY_*` |
 | `SCOUT_*` | `INVESTIGATOR_*` |
 | `GUARD_*` | `VERIFIER_*` |
 | `SENTINEL_*` | `MONITOR_*` |
 | `GARDENER_*` | `UPGRADER_*` |
-| `RED_FLEET_*`, `RED_COMMANDER_*`, `RED_PLANNER`, `CHAOS_*` | `ADVERSARY_*` |
+| `ADVERSARY_*`, `ADVERSARY_COMMANDER_*`, `ADVERSARY_PLANNER`, `CHAOS_*` | `ADVERSARY_*` |
 | `WARROOM_*` | `CONSOLE_*` |
 
 Old names stay accepted as aliases for one release, so existing `.env` files keep working.

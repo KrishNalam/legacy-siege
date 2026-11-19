@@ -31,7 +31,7 @@ SYSTEM = "mainframe"
 FUNCTION = "validate_record"
 FAULT_CLASSES = {"batch_abort", "poison_record", "abend_s0c7", "s0c7", "batch"}
 PROVE_FAULT = "batch_abort"  # replayed on the estate after deploy
-MARKER = "Gardener remediation batch_validation"  # in the new docstring; marks a file as already upgraded
+MARKER = "Upgrader remediation batch_validation"  # in the new docstring; marks a file as already upgraded
 
 RECORD_LEN_DEFAULT = 80
 # Fallback layout (0-based, end-exclusive) when the mainframe module exposes no constants.

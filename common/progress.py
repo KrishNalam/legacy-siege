@@ -1,9 +1,9 @@
 """Duration history, ETA estimates and progress events (switch ``PROGRESS_ETA``, default off).
 
-* **History.** Every attack (chaos runner / Red fleet), repair step (swarm) and Gardener stage writes one
+* **History.** Every attack (chaos runner / Red fleet), repair step (swarm) and Upgrader stage writes one
   record to the MongoDB **time-series** collection ``action_durations`` (``timeField: ts``,
   ``metaField: meta {action_type, system, actor_role}``, fields ``duration_s``, ``outcome``). Red writes
-  ``world.action_durations``, Blue and the Gardener write ``swarm.action_durations`` (Red and Blue never share
+  ``world.action_durations``, Blue and the Upgrader write ``swarm.action_durations`` (Red and Blue never share
   writes). A full reset wipes it; ``next_round`` keeps it, so round 2 estimates from round 1.
 * **ETA.** ``estimate()`` runs one aggregation (``$match`` on the meta field, newest 50, ``$group`` with
   ``$percentile``) → median / p90 / K, per action_type+system, falling back to the action_type alone.
@@ -111,11 +111,11 @@ def eta_text(est: dict) -> str:
     return f"ETA ~{med:.0f} s{spread} (based on {k} past run{'s' if k != 1 else ''})"
 
 
-AREAS = {"red": "chaos", "chaos": "chaos", "gardener": "gardener"}   # everything else = the Hive ("bees")
+AREAS = {"red": "chaos", "chaos": "chaos", "upgrader": "upgrader"}   # everything else = the Hive ("bees")
 
 
 def area_of(role: str) -> str:
-    """War-room box this event belongs to: ``gardener`` | ``chaos`` | ``bees``."""
+    """War-room box this event belongs to: ``upgrader`` | ``chaos`` | ``bees``."""
     return AREAS.get(role, "bees")
 
 
