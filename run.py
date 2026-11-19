@@ -22,14 +22,14 @@ LOGS.mkdir(exist_ok=True)
 PROCS = [
     ("systems", [PY, "-m", "uvicorn", "systems.app:app", "--host", "0.0.0.0", "--port",
                  os.environ.get("SYSTEMS_PORT", "8701"), "--log-level", "warning"]),
-    ("warroom", [PY, "-m", "uvicorn", "warroom.server:app", "--host", "0.0.0.0", "--port",
+    ("console", [PY, "-m", "uvicorn", "console.server:app", "--host", "0.0.0.0", "--port",
                  str(config.WARROOM_PORT), "--log-level", "warning"]),
-    ("swarm", [PY, "-m", "swarm.supervisor"]),
-    ("gardener", [PY, "-m", "gardener.main"]),
+    ("agents", [PY, "-m", "agents.supervisor"]),
+    ("upgrader", [PY, "-m", "upgrader.main"]),
 ]
 # Red fleet (AI attacker on top of the seeded chaos): opt-in, off by default.
 if os.environ.get("RED_FLEET", "").strip().lower() in ("1", "true", "yes", "on"):
-    PROCS.append(("redfleet", [PY, "-m", "chaos.redfleet"]))
+    PROCS.append(("adversary", [PY, "-m", "adversary.redfleet"]))
 
 
 def group_alive(pgid: int) -> bool:

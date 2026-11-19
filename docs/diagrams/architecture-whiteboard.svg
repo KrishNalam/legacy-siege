@@ -166,7 +166,7 @@
 <text x="1300" y="406" class="tr xs it">vetted menu item</text>
 <rect x="1180" y="428" width="220" height="60" rx="10" class="r"/>
 <text x="1290" y="453" class="tr h" text-anchor="middle">Runner</text>
-<text x="1290" y="474" class="tr xs" text-anchor="middle">fires only via chaos.runner.fire</text>
+<text x="1290" y="474" class="tr xs" text-anchor="middle">fires only via adversary.runner.fire</text>
 
 <!-- Seeded attacks -->
 <rect x="1444" y="420" width="126" height="84" rx="10" class="r"/>
@@ -186,7 +186,7 @@
 <text x="1300" y="720" class="tr xs it">logs every strike</text>
 <text x="1300" y="735" class="tr xs it">→ chaos_events</text>
 
-<!-- swarm/Gardener -> spine -->
+<!-- agents/Gardener -> spine -->
 <path class="g" d="M500,800 L500,826" marker-end="url(#ag)"/>
 <path class="g" d="M907,794 L907,826" marker-end="url(#ag)"/>
 <path class="r" d="M1260,142 L1260,142"/>

@@ -1,7 +1,7 @@
 # Configuration reference
 
 All settings are environment variables. They are read from the shell or from a `.env` file at the repo root ([`.env.example`](../.env.example) is a starting point).
-Defaults are the values in the code (`common/config.py`, `swarm/settings.py` and the module named in each table).
+Defaults are the values in the code (`common/config.py`, `agents/settings.py` and the module named in each table).
 Switches are off unless set to `1`, `true`, `yes` or `on`. The one exception is `RED_FLEET_ALLOW_LIVE`, which must be exactly `1`.
 
 Restart `run.py` after changing anything.
@@ -52,7 +52,7 @@ Restart `run.py` after changing anything.
 | `SYSTEMS_TICK_FIXED` | off | Tick on a fixed cadence (helps against a remote cluster). |
 | `BATCH_EVERY_TICKS` / `CASCADE_TICKS` | `2` / `3` | Mainframe batch cadence / how long downstream tolerates stale data. |
 
-More swarm knobs live in `swarm/settings.py` (`SENTINEL_POLL_S`, `GUARD_GRACE_S`, `TASK_TIMEOUT_S`, `MAX_ATTEMPTS`, …).
+More swarm knobs live in `agents/settings.py` (`SENTINEL_POLL_S`, `GUARD_GRACE_S`, `TASK_TIMEOUT_S`, `MAX_ATTEMPTS`, …).
 
 ## Demo
 
@@ -91,7 +91,7 @@ More swarm knobs live in `swarm/settings.py` (`SENTINEL_POLL_S`, `GUARD_GRACE_S`
 
 | Switch | What it adds |
 |---|---|
-| `RED_FLEET` | `python -m chaos.redfleet`: five AI attacker processes. Refuses `WORLD_DB=world` / `SWARM_DB=swarm` unless `RED_FLEET_ALLOW_LIVE=1`. |
+| `RED_FLEET` | `python -m adversary.redfleet`: five AI attacker processes. Refuses `WORLD_DB=world` / `SWARM_DB=swarm` unless `RED_FLEET_ALLOW_LIVE=1`. |
 | `RED_FLEET_AGENTS` | Comma list of attackers to run (default: all). |
 | `RED_FLEET_MAX_ATTACKS` | Strikes per attacker per night (default `2`, `0` = unlimited). |
 | `RED_FLEET_COOLDOWN_S` | Seconds between one attacker's strikes (default `30`). |

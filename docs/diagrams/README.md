@@ -18,7 +18,7 @@ The whole stack wired up: swarm, legacy estate, Red, Gardener and the MongoDB At
 
 ![Legacy Siege whiteboard view](architecture-whiteboard.png)
 
-The team's whiteboard sketch made accurate: swarm tree with Guard, Nurses and Sentinels on the left, System L1/L2/L3 centre, Red Strikers (six personas, each a scout → plan → strike → observe loop, firing only via `chaos.runner.fire`) on the right, the Gardener outside the swarm pausing it during upgrades ([SVG](architecture-whiteboard.svg)).
+The team's whiteboard sketch made accurate: swarm tree with Guard, Nurses and Sentinels on the left, System L1/L2/L3 centre, Red Strikers (six personas, each a scout → plan → strike → observe loop, firing only via `adversary.runner.fire`) on the right, the Gardener outside the swarm pausing it during upgrades ([SVG](architecture-whiteboard.svg)).
 
 ## Gardener outside the swarm
 

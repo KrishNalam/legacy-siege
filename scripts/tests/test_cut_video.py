@@ -170,7 +170,7 @@ def test_script_beats_from_recorded_events():
 
 def test_code_cards_use_real_code():
     keys = {c["key"] for c in code_cards.usable()}
-    assert {"lease", "guard"} <= keys  # schema needs swarm/schema.py (tree or the drift branch)
+    assert {"lease", "guard"} <= keys  # schema needs agents/schema.py (tree or the drift branch)
     src, _ = code_cards.source(next(c for c in code_cards.CARDS if c["key"] == "lease"))
     rows = code_cards.excerpt(src, next(c for c in code_cards.CARDS if c["key"] == "lease")["ranges"])
     assert any("find_one_and_update" in t for _, t in rows)

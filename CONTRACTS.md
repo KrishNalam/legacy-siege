@@ -8,7 +8,7 @@ MongoDB; processes are disposable.** The war-room visualization only *watches* M
 (change streams) — it never holds state.
 
 Repo root: the clone of `github.com/KrishNalam/legacy-siege`. Python 3.12 venv at `.venv` (`.venv/bin/python`).
-Run anything as a module from repo root: `.venv/bin/python -m swarm.supervisor`.
+Run anything as a module from repo root: `.venv/bin/python -m agents.supervisor`.
 Design doc (source of intent): `docs/design-doc.txt` (PDF text; letters 'a'/'g' were dropped by the font).
 
 **Scope (original cuts; §8 later re-added schema drift, AI/LLM chaos and more, all behind switches that default off):** 3 systems only (no IE console), no network partition, no schema drift,
@@ -141,14 +141,14 @@ Approval is requested and granted **before** the op is sent. Decisions update on
 Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) → `rerun_transfer` → `refresh_cache`; then all three `/health` up.
 
 ## 3. Chaos (C)
-- `chaos/faults.py` fault library (code only): `batch_abort`, `disk_fill`, `cron_stop`, `session_leak`, `lying_success` (params `{count:1}`), `slow_apply`, `sqli_exploit`, `config_exploit`, `agent_kill`.  Additive: `schema_drift` (W3), `false_log`, `credential_exploit` (Red fleet only, §8), and behind their own switches `workflow_drift` (`WORKFLOW_DRIFT`), `lie_to_agent` (`CHAOS_AGENT_LIE`; sent as `false_log` with `prompt_injection: true`), `agent_freeze` (`CHAOS_AGENT_FREEZE`), `poison_memory` (`CHAOS_POISON_MEMORY`).
-- `chaos/runner.py`: `start_run(scenario, round) -> run_id`, `run_scenario(name, round=None)` (background-thread friendly), `fire(fault, target, params, manual=True, run_id=None)`. Every fault writes `world.chaos_events`.
-- `chaos/scenarios.py: seed()` writes: `bank-night-1` (t=0 lying_success{count:1} on mainframe, t=1 batch_abort mainframe), `bank-night-2` (batch_abort mainframe — same class, no lying, for fair round-2 timing), `bank-night-3` (replay batch_abort after Gardener upgrade → no incident), `free-play` (empty; manual buttons).
+- `adversary/faults.py` fault library (code only): `batch_abort`, `disk_fill`, `cron_stop`, `session_leak`, `lying_success` (params `{count:1}`), `slow_apply`, `sqli_exploit`, `config_exploit`, `agent_kill`.  Additive: `schema_drift` (W3), `false_log`, `credential_exploit` (Red fleet only, §8), and behind their own switches `workflow_drift` (`WORKFLOW_DRIFT`), `lie_to_agent` (`CHAOS_AGENT_LIE`; sent as `false_log` with `prompt_injection: true`), `agent_freeze` (`CHAOS_AGENT_FREEZE`), `poison_memory` (`CHAOS_POISON_MEMORY`).
+- `adversary/runner.py`: `start_run(scenario, round) -> run_id`, `run_scenario(name, round=None)` (background-thread friendly), `fire(fault, target, params, manual=True, run_id=None)`. Every fault writes `world.chaos_events`.
+- `adversary/scenarios.py: seed()` writes: `bank-night-1` (t=0 lying_success{count:1} on mainframe, t=1 batch_abort mainframe), `bank-night-2` (batch_abort mainframe — same class, no lying, for fair round-2 timing), `bank-night-3` (replay batch_abort after Gardener upgrade → no incident), `free-play` (empty; manual buttons).
 - Agent kill: selector `{"agent": id}` or `{"role":"worker", "phase":"step_sent"}` (waits up to 30 s for a matching agent, then gives up: nobody is killed and the event records `result.how:"gave_up"`, `selector`, `waited_s`, error "kill skipped: …"; no fallback to another worker). Reads `swarm.agents.pid`, `os.kill(pid, SIGKILL)`. No warning to the swarm.
-- CLI: `python -m chaos.cli run bank-night-1 | fire batch_abort mainframe | kill worker`.
+- CLI: `python -m adversary.cli run bank-night-1 | fire batch_abort mainframe | kill worker`.
 
 ## 4. Swarm (B) — processes, not threads
-- `swarm/supervisor.py` spawns one OS process per agent (`python -m swarm.agent <role> <id>`), and after `NURSE_RESPAWN_S` re-spawns a dead process: guard, sentinel, waggle, queen and nurse come back in their own role; a dead scout or worker is replaced by a fresh **nurse** standby (generation+1).
+- `agents/supervisor.py` spawns one OS process per agent (`python -m agents.agent <role> <id>`), and after `NURSE_RESPAWN_S` re-spawns a dead process: guard, sentinel, waggle, queen and nurse come back in their own role; a dead scout or worker is replaced by a fresh **nurse** standby (generation+1).
 - Roster: `queen-1` (+`queen-2` standby), `scout-1`, `scout-2`, `worker-mainframe-1`, `worker-unix-1`, `worker-web-1`, `guard-1`, `waggle-1`, `sentinel-1` (also the Undertaker reaper), `nurse-1`, `nurse-2`. This is the default; `SWARM_DYNAMIC=1` uses a smaller roster (scouts/workers on demand), `GARDENER_HELP=1` adds `sentinel-2`, `PLATFORM_ENGINEERS=1` adds `platform-1`, and `SWARM_ROSTER` overrides the list.
 - Heartbeat `last_seen` every `HEARTBEAT_S`; leases renewed with heartbeats; lose your lease → stop acting.
 - Undertaker (in sentinel): stale `last_seen` → `status:"dead"`, release its task/incident leases (set `lease_until` to past), waggle posts a handoff message. Nurse claims the expired **task** lease (generation+1), loads the LangGraph checkpoint (thread = task id), **reconciles any `sent` step against `/state` before retrying** (it may already be applied → hand to Guard; never re-send blindly), continues from last verified step. Record `handoffs[]` with `checkpoint_id` and skipped steps.
@@ -157,14 +157,14 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
 - Each role is a LangGraph graph compiled with `MongoDBSaver`. Deterministic policy decides *which* op runs; LLM (if key) only phrases thoughts.
 
 ## 5. Gardener (D)
-- `python -m gardener.main` (heartbeats as role `gardener`, target `workshop`). Watches `upgrade_requests` with status `requested`.
-- Plan: read `systems/mainframe.py` + incidents; diff from `gardener/remediations/batch_validation.py` (predetermined, honest; LLM may only write the explanation). < 50 lines, only inside `systems/`.
+- `python -m upgrader.main` (heartbeats as role `gardener`, target `workshop`). Watches `upgrade_requests` with status `requested`.
+- Plan: read `systems/mainframe.py` + incidents; diff from `upgrader/remediations/batch_validation.py` (predetermined, honest; LLM may only write the explanation). < 50 lines, only inside `systems/`.
 - Test: `pytest systems/tests/test_mainframe.py` + regression replay in an isolated DB (`WORLD_DB=world_test_gardener`).
 - Gate: `approvals` doc `kind:"upgrade"` (Beekeeper approves in war room).
 - Deploy: write file, `POST /_admin/reload/mainframe` (A bumps version). B's Sentinel stales old playbooks.
-- Prove: `chaos.runner.fire("batch_abort","mainframe", manual=False)`; watch `PROVE_WINDOW_S` (30 s); no new incident touching mainframe, unix or portal → `proven`. If one opens, the upgrade stays `deployed` (no automatic rollback; `revert` runs on a full reset and in `setup_db --reset`, and only when the file is exactly the Gardener's patch). A Gardener restart re-proves a `deployed` upgrade that has no verdict yet.
+- Prove: `adversary.runner.fire("batch_abort","mainframe", manual=False)`; watch `PROVE_WINDOW_S` (30 s); no new incident touching mainframe, unix or portal → `proven`. If one opens, the upgrade stays `deployed` (no automatic rollback; `revert` runs on a full reset and in `setup_db --reset`, and only when the file is exactly the Gardener's patch). A Gardener restart re-proves a `deployed` upgrade that has no verdict yet.
 
-## 6. War room (viz) — `warroom.server:app` on :8700 (serves `warroom/static/`)
+## 6. War room (viz) — `console.server:app` on :8700 (serves `console/static/`)
 - Pages, no build step, no CDN (vendor any lib into `static/vendor/`): `GET /` = `/diagram` (the live diagram; `WARROOM_VIEW=flow` makes `/` the flowchart), `/flow`, `/why` (static explainer). The classic page was removed. Also `GET /healthz`, `/api/spine`, `/api/memory`, `/api/roster`.
 - `WS /ws`: open change streams **first** (`full_document="updateLookup"`), then send `{"type":"snapshot", ...}` (systems, agents, active+last 10 incidents, tasks, last 50 thoughts, last 20 chaos_events, pending approvals, upgrades, last 30 ledger, counts per collection, current run), then stream `{"type":"change", db, coll, op, key, doc, ts}` (deletes carry `key` only). JSON-encode BSON (datetimes → ISO, ObjectId → str). Persist resume tokens in `swarm.stats{_id:"stream_tokens"}`; resume after restart.
 - Control: `POST /api/scenario/{name}` (starts run, sets `swarm.stats.current`) · `POST /api/chaos/{fault}` `{target, params}` · `POST /api/kill` `{selector}` · `POST /api/approvals/{id}` `{decision}` (pending-only) · `POST /api/reset` `{mode:"full"|"next_round"}` (`next_round` keeps playbooks + incident history) · `GET /api/scorecard` (aggregation pipeline: per round TTR, diagnosis_s, hops, attempts; chaos_events vs incidents) · `GET /api/atlas` (collection stats, indexes, sample docs) · `GET /api/doc/{db}/{coll}/{id}` (click-to-inspect).
@@ -176,9 +176,9 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
 |---|---|
 | MongoDB (docker `legacy-siege-mongo`) | `localhost:27027` |
 | systems | `.venv/bin/python -m uvicorn systems.app:app --host 0.0.0.0 --port 8701` |
-| war room | `.venv/bin/python -m uvicorn warroom.server:app --host 0.0.0.0 --port 8700` |
-| swarm | `.venv/bin/python -m swarm.supervisor` |
-| gardener | `.venv/bin/python -m gardener.main` |
+| war room | `.venv/bin/python -m uvicorn console.server:app --host 0.0.0.0 --port 8700` |
+| swarm | `.venv/bin/python -m agents.supervisor` |
+| gardener | `.venv/bin/python -m upgrader.main` |
 | everything | `.venv/bin/python run.py [--reset]` |
 
 ## 8. Integrator notes (merged after the parallel build)
@@ -188,7 +188,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   `upgrade_requests{system,fault_class}` **unique** (`one_upgrade_per_weakness`), `playbooks{system,stale,system_version}`.
 - `swarm.stats{_id:"roster_reset", at}`: written by the war room on every reset (`full` and `next_round`). The supervisor
   restores the original roster (killed workers come back in their own role, extra respawned nurses retire) so each night
-  starts fully staffed. A `full` reset also calls `gardener.pipeline.revert("mainframe")` before wiping.
+  starts fully staffed. A `full` reset also calls `upgrader.pipeline.revert("mainframe")` before wiping.
 - Agents re-register if a reset wiped `swarm.agents` (heartbeat and `Agent.set`); the Gardener too (it registers there only for liveness; it is a separate system outside the swarm, not a bee).
 - Recall confirm hop (round 2) narrates without the deliberate pause; `diagnosis_s` is measured before the final sentence in both paths.
 - Nurses pick up a task whose specialty has no live worker after `NURSE_PICKUP_S` (default 2.0 s).
@@ -221,7 +221,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   `reason` is one plain sentence. Kind-specific extras are allowed next to these fields (second_opinion adds
   `request_id, started_at, done_at, error, root_system, fault_class, root_agrees, policy{root_system, fault_class},
   missed_ops[{op, target, params}], tally{proposed, accepted, overruled}`). **No decision path reads `ai`.**
-- **Second opinion details (W2, `swarm/second_opinion.py`).** Behind `AI_SECOND_OPINION=1` (default off) and a key.
+- **Second opinion details (W2, `agents/second_opinion.py`).** Behind `AI_SECOND_OPINION=1` (default off) and a key.
   The Scout starts one background thread right after writing the plan (≤1 call per incident, ≤2 in flight per
   process, 20 s end-to-end budget, never awaited). Claude (`LLM_MODEL`, structured JSON) gets numbered evidence
   (symptoms, each hop's status/blames/facts, the last few `/logs` lines per system; never the policy's fault_class,
@@ -250,7 +250,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   (`guard_stats()`, `swarm.stats{_id:"llm_guard"}` `{<task>.<outcome>, all.calls}`). Wrap untrusted system or log
   text with `fence(source, text)` (control/bidi chars stripped, truncated, no tags). Provider seam
   `PROVIDERS[LLM_PROVIDER]` (only `anthropic` today; add e.g. `openrouter` with the same signature).
-- **Schema drift — the adaptation (additive, W3, `swarm/schema.py`).**
+- **Schema drift — the adaptation (additive, W3, `agents/schema.py`).**
   - New collections `swarm.schema_samples` (TTL 24h on `ts`; `_id:"good:unix:xfer_manifest"` = known-good sample the
     sentinel rewrites every 10 s while unix+portal are up and the sample matches the expected schema) and
     `swarm.schema_mappings` (`_id:"unix.xfer_manifest.balance"`, `{source, previous, version, history[], learned_from,
@@ -281,7 +281,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   - War room watches `swarm.schema_mappings` (caption + "MAPPING LEARNED" / "MAPPING REUSED" stamp on unix).
     Rehearsal: `python -m scripts.drift_check` (14 checks incl. the repeat-from-memory round; separate from demo_check).
 - **Red fleet — AI attackers (additive, W14; opt-in `RED_FLEET=1`, default off).** Seeded scenarios are unchanged.
-  - Chaos: `python -m chaos.redfleet` (started by `run.py` only when `RED_FLEET=1`) supervises the attacker processes (five, plus `red-memory` when `CHAOS_POISON_MEMORY=1`)
+  - Chaos: `python -m adversary.redfleet` (started by `run.py` only when `RED_FLEET=1`) supervises the attacker processes (five, plus `red-memory` when `CHAOS_POISON_MEMORY=1`)
     (`--agent red-saboteur|red-assassin|red-liar|red-hacker|red-drifter`), each a LangGraph loop scout → plan → strike → observe.
     Claude picks one item from the persona's menu (library faults × the Hive's state); off-menu picks are rejected and a
     deterministic playbook decides. Every strike goes through `runner.fire(..., extra={"by": <persona id>, "red": {persona,
@@ -303,7 +303,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     status:"pending"|"spawned"|"cancelled", agent_id, pid, warm, note, ts, spawned_at, spawn_ms}` (TTL 24 h). The Queen
     writes one per new incident when no idle scout is free; a Scout writes one per task when no idle worker of the task's
     `specialty` is free (any specialty string works: new incident types get `worker-<specialty>-<n>`). The supervisor
-    polls pending requests, starts the agent from a pre-imported warm spare (`python -m swarm.agent --warm`, `SWARM_WARM`
+    polls pending requests, starts the agent from a pre-imported warm spare (`python -m agents.agent --warm`, `SWARM_WARM`
     kept ready), assigns a spawned scout its incident (`assigned_to`), and cancels requests whose work was already taken.
     Hard ceiling `SWARM_MAX_AGENTS` (default 24 live agent processes; over it, requests wait and nurses cover the work).
   - Spawned agents carry `swarm.agents.spawned: true` and run with `--ephemeral`: once their incident is closed
@@ -343,7 +343,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
 
 - **Gardener help (additive W19, `GARDENER_HELP=1`, default off).** One collection, `gardener_requests
   {_id, kind: repeat|help (W20 adds tool), from, system, status: open→answering→answered, answer, ts}`, index
-  `open_requests {status, ts}`, wiped on full reset. Answered by a thread inside `gardener.main` (`gardener/help.py`).
+  `open_requests {status, ts}`, wiped on full reset. Answered by a thread inside `upgrader.main` (`upgrader/help.py`).
   *repeat* (`_id GR-<signature>`, Sentinel #2, 3+ occurrences, once per signature): the Gardener acks the
   `gardener_notes` row and, when a vetted remediation covers that system + fault class, files the upgrade request
   (or re-queues a rejected one); the unchanged pipeline (plan → sandbox tests + replay → approval → deploy → prove)
@@ -358,7 +358,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   search (recall.used semantics unchanged); on a miss it uses the pushed playbook via the normal confirm hop.
   All three narrate as thoughts (kinds upgrade / handoff / action / recall).
 - **Red Commander + 2 Scouts (W18; additive, `RED_COMMANDER=1`, default off, only with `RED_FLEET=1`).** Runs as a
-  thread in `python -m chaos.redfleet` (or `--agent red-commander`). New `world.red_agents` entries: `red-commander`
+  thread in `python -m adversary.redfleet` (or `--agent red-commander`). New `world.red_agents` entries: `red-commander`
   `{kind:"commander", status, planner, campaign?, lessons[≤8], last_reflection, llm_calls, fallback_count}` and
   `red-scout-hive` / `red-scout-systems` `{kind:"scout", findings, summary, run_id}`. Striker entries gain
   `order {campaign, run_id, combo, step, of, fault, target, victim?, blame?, to?, status:"queued"|"assigned"|"taken"|
@@ -380,8 +380,8 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   `SWARM_RECOVERY=1` + `FAILURE_MEMORY=1` (W16): Guard read-back rejects the recalled repair, retires it, re-plans.
   Red `outcome.incidents[].memory_rejected` = incident `recall.rejected`; a rejection counts as `guard_caught:true`.
   Commander combo `poison-then-break`: poison a learned repair, then the Saboteur/Hacker causes that fault again.
-- **Comms live roster (additive W22, same switch `SWARM_COMMS=1`, default off; `swarm/roster.py`).** A thread in the
-  Waggle process sweeps every `ROSTER_SWEEP_S` (1 s) and derives `swarm.roster` from state agents already write
+- **Comms live roster (additive W22, same switch `SWARM_COMMS=1`, default off; `agents/roster.py`).** A thread in the
+  Waggle process sweeps every `ROSTER_SWEEP_S` (1 s) and derives `agents.roster` from state agents already write
   (`agents`, claimed `tasks` and active `incidents` leases, incident steps + `handoffs`, `spawn_requests`); no other
   role writes it and no role reads it. One doc per agent `{_id, role, specialty, state: idle|working|standby|dead|retired,
   incident, system, task, step: "<step_id> <op> (<status>)", phase, doing (one line), parent (task holder → the
@@ -390,9 +390,9 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
   written (heartbeat refresh at most every `HEARTBEAT_S`). Killed agents stay `dead` with who took their work;
   a deleted agent doc (dynamic retire) becomes `retired` for 60 s, then is removed. Full reset clears it.
   War room: snapshot `roster`, change stream `coll:"roster"`, `GET /api/roster` → `{enabled, counts, agents}`;
-  compact card `warroom/static/js/roster.js` (`installRoster(cardEl)`, `rosterRows()`), hidden while empty.
+  compact card `console/static/js/roster.js` (`installRoster(cardEl)`, `rosterRows()`), hidden while empty.
 - **Red Planner (W34; additive, `RED_PLANNER=1`, default off, only with `RED_COMMANDER=1` + `RED_FLEET=1`).** Off = the
-  Commander is unchanged. On, before each Commander THINK the Planner (`chaos.redfleet.planner`, same thread):
+  Commander is unchanged. On, before each Commander THINK the Planner (`adversary.redfleet.planner`, same thread):
   - spawns 2 one-shot scouts and waits for their reports: `world.red_agents` `red-scout-swarm` (studies the Blue Hive)
     and `red-scout-legacy` (studies the legacy estate) `{kind:"scout", status:"reported", spawned_by:"red-planner",
     planning_id, findings, run_id, spawns}`;
@@ -400,16 +400,16 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     priority:high|normal, prefer[combo ids], reason, planner:claude|rule, scouts}}`. Claude may only pick a feasible
     focus (else rules). The Commander gets the brief in its prompt and prefers those combos;
   - campaigns, Striker `order`s and `chaos_events.red.campaign` gain `planning_id, priority, focus`;
-  - with `RUNNER_DECIDES=1` the campaign is handed to the Runner: one `chaos.decider.propose(fault, target, params,
+  - with `RUNNER_DECIDES=1` the campaign is handed to the Runner: one `adversary.decider.propose(fault, target, params,
     by="red-planner", campaign={id, step, of, combo, ordered_by, planning_id, priority, focus}, prefer=spawn|execute)`
     per step, no Striker orders; the Commander follows the requests (event = CHX with `red.request`). Runner off =
     Striker orders as before;
-  - decision log (`chaos.decisions`): `{kind:"decision", by:"red-planner", decision:spawn|campaign_brief|propose|handoff,
+  - decision log (`adversary.decisions`): `{kind:"decision", by:"red-planner", decision:spawn|campaign_brief|propose|handoff,
     planning_id, ...}`. Thoughts from agent `red-planner`, role `red`.
 - **Runner decisions (W35; additive, `RUNNER_DECIDES=1`, default off).** Off = `runner.fire` unchanged.
-  - **Admission.** On, a fire with `extra.by` = `red-*` goes through `chaos.decider.admit`. A held or denied fire returns
+  - **Admission.** On, a fire with `extra.by` = `red-*` goes through `adversary.decider.admit`. A held or denied fire returns
     `{status:"hold"|"deny", result:{ok:false,error}}`, and no CHX event is written.
-  - **Decision log.** Each decision is a `world.chaos_events` doc in W34's shared log (`chaos.decisions`):
+  - **Decision log.** Each decision is a `world.chaos_events` doc in W34's shared log (`adversary.decisions`):
     `{kind:"decision", by:"runner", decision:pick|execute|hold|deny|spawn, origin:striker|commander|planner|poison|seeded,
     choice:{fault,target,by,request}, caps, reason, event}`. Executed CHX events carry `runner_decision`.
   - **Board state** lives on `world.red_agents {_id:"runner", night, strikes, spawns, last_strike_at, requests[]}`.
@@ -424,7 +424,7 @@ Full fix for batch_abort: `quarantine_record` → `restart_batch` (approval) →
     only once drifted. Baseline catalog/state unchanged. `/_admin/reset` restores workflow v1.
   - Chaos: `workflow_drift` (target mainframe, switch-gated). With the switch on, `bank-night-1/2` get it at t=0 and
     scenario `bank-workflow` (seed 1005: drift + batch_abort) exists; off = seeded nights unchanged.
-  - Swarm (`swarm/workflow.py`): the worker notices a refused step, reads the live `/ops`, rules R1-R4 decide
+  - Swarm (`agents/workflow.py`): the worker notices a refused step, reads the live `/ops`, rules R1-R4 decide
     (refusal names the op, catalog lists it as a prerequisite, non-destructive, params given; Claude may propose with
     key + `AI_SECOND_OPINION=1`, same rules accept/overrule) and inserts step `<step_id>p` (n = refused n - 0.5) into
     the same fenced task; `incident.workflow_drift {system, op, requires, params, message, refused, proposed_by, ...}`.

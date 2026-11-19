@@ -6,7 +6,7 @@ They check the API surface, receipts and honesty rules — not "a malformed reco
 from datetime import datetime
 
 import systems.mainframe as mf
-from systems.tests.helpers import chaos, op, status, tick
+from systems.tests.helpers import adversary, op, status, tick
 
 GOOD = mf.format_record("TX000042", "20261114", "4211000101", "4211000102", 12345, memo="ACH TRANSFER")
 

@@ -359,7 +359,7 @@ def main() -> int:
                     help="no recording? narrate docs/video-script.md with an offline TTS engine (ignored with --voiceover)")
     ap.add_argument("--tts-engine", choices=narration.ENGINES, help="default: piper, else espeak, else flite")
     ap.add_argument("--code", action=argparse.BooleanOptionalAction, default=True,
-                    help="8 s (old layouts 9 s) of code cards (swarm/leases.py, verify.py, schema.py) after the kill")
+                    help="8 s (old layouts 9 s) of code cards (agents/leases.py, verify.py, schema.py) after the kill")
     ap.add_argument("--vo-gain", type=float, default=1.0)
     ap.add_argument("--length", type=float, default=60.0)
     ap.add_argument("--layout", choices=LAYOUTS, default="script",

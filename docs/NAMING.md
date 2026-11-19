@@ -4,7 +4,7 @@ The product has two vocabularies. The **brand** tells a story: hornets attack th
 beekeeper strengthens it. The **plain names** say exactly what each part does. This file maps one to the other and
 says where each is used.
 
-Status: **names final.** Step 2 is done: UI labels come from `warroom/static/js/glossary.js`. Code, DB and env vars still use the old names (last column).
+Status: **names final.** Step 2 is done: UI labels come from `console/static/js/glossary.js`. Code, DB and env vars still use the old names (last column).
 
 ## Where each name is used
 
@@ -24,11 +24,11 @@ bee names. Every bee name maps to exactly one plain concept, and the plain name 
 | Concept | Brand / UI | Code / DB | Old name |
 |---|---|---|---|
 | The customer's legacy systems | **The Hive** | `systems/`, DB `estate` | legacy systems, the estate, DB `world` |
-| The agent team | **The Colony** | `agents/`, DB `agents` | the Hive, the Bees, Blue, `swarm/`, DB `swarm` |
-| Attack and resilience testing | **Hornets** | `adversary/` | Red, the Fleet, Chaos Monkey, `chaos/` |
-| Code upgrades, from outside the colony | **The Beekeeper** | `upgrader/` | the Gardener, `gardener/` |
+| The agent team | **The Colony** | `agents/`, DB `agents` | the Hive, the Bees, Blue, `agents/`, DB `swarm` |
+| Attack and resilience testing | **Hornets** | `adversary/` | Red, the Fleet, Chaos Monkey, `adversary/` |
+| Code upgrades, from outside the colony | **The Beekeeper** | `upgrader/` | the Gardener, `upgrader/` |
 | The human who approves risky steps | **You** | `approver` | the Beekeeper |
-| The live dashboard | **Hive view** | `console/` | war room, `warroom/` |
+| The live dashboard | **Hive view** | `console/` | war room, `console/` |
 | Decoy add-on that lures and traps attackers | **Honeypot** | `honeypot/` | (new) |
 | Scaling out agents | **Swarm** | `autoscale` | `SWARM_DYNAMIC` |
 
@@ -70,7 +70,7 @@ The group gets a bee-world name. The roles inside stay plain, because security t
 | Recon | `recon` | `red-scout-hive`, `red-scout-systems` |
 | Saboteur, Liar, Assassin, Hacker, Drifter, Poisoner | `saboteur`, `liar`, `assassin`, `hacker`, `drifter`, `poisoner` | `red-saboteur` … `red-memory` |
 | Seeded nights | `scenarios` | `bank-night-1/2/3` |
-| The one door every attack goes through | `adversary.gate.fire()` | `chaos.runner.fire()` |
+| The one door every attack goes through | `adversary.gate.fire()` | `adversary.runner.fire()` |
 
 ## Agent ids
 

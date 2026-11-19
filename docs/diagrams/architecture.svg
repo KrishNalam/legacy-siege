@@ -21,17 +21,17 @@
 <text x="45" y="112" class="h" fill="#c0392b">Attackers (Red)</text>
 <rect x="50" y="125" width="290" height="62" class="box" fill="#fff" stroke="#c0392b"/>
 <text x="62" y="148" class="t">Chaos Monkey (seeded)</text>
-<text x="62" y="167" class="s">chaos/faults + scenarios: cascade, lying</text>
+<text x="62" y="167" class="s">adversary/faults + scenarios: cascade, lying</text>
 <text x="62" y="181" class="s">system, slow ops · SIGKILLs agents</text>
 <rect x="50" y="197" width="290" height="162" class="box" fill="#fff" stroke="#c0392b"/>
-<text x="62" y="220" class="t">AI Red fleet (chaos/redfleet)</text>
+<text x="62" y="220" class="t">AI Red fleet (adversary/redfleet)</text>
 <text x="62" y="240" class="s">Red Commander / Planner (optional)</text>
 <text x="62" y="256" class="s">  picks targets, learns between nights</text>
 <text x="62" y="278" class="s">Strikers (personas) propose attacks,</text>
 <text x="62" y="294" class="s">  incl. Memory Striker (playbook poison)</text>
 <text x="62" y="316" class="s">Runner: executes ONLY listed, allowed</text>
-<text x="62" y="332" class="s">  attacks (chaos/runner) → chaos_events</text>
-<text x="62" y="350" class="s">  scored in chaos/score</text>
+<text x="62" y="332" class="s">  attacks (adversary/runner) → chaos_events</text>
+<text x="62" y="350" class="s">  scored in adversary/score</text>
 
 <!-- ESTATE -->
 <rect x="30" y="420" width="330" height="300" rx="12" fill="#eef2f7" stroke="#34495e" stroke-width="2"/>
@@ -108,7 +108,7 @@
 
 <rect x="465" y="500" width="680" height="100" rx="8" fill="#fdf2d0" stroke="#d68910" stroke-dasharray="5 4"/>
 <text x="480" y="524" class="t">Supervisor + harness</text>
-<text x="480" y="545" class="s">swarm.supervisor launches every role as its own process; each role is a LangGraph StateGraph whose thread id</text>
+<text x="480" y="545" class="s">agents.supervisor launches every role as its own process; each role is a LangGraph StateGraph whose thread id</text>
 <text x="480" y="562" class="s">is the task id, so the checkpoint follows the work, not the process. Task/incident leases use generation fencing:</text>
 <text x="480" y="579" class="s">a killed-and-replaced agent can never write. Destructive steps need Beekeeper approval first.</text>
 
@@ -136,10 +136,10 @@
 <text x="1260" y="244" class="s">  fault against the patched code</text>
 <text x="1260" y="262" class="s">· Beekeeper approval before deploy</text>
 <text x="1260" y="280" class="s">· tool upgrades for the swarm</text>
-<text x="1260" y="302" class="s">gardener/pipeline, replay, tool_upgrade</text>
+<text x="1260" y="302" class="s">upgrader/pipeline, replay, tool_upgrade</text>
 <rect x="1245" y="335" width="310" height="130" class="box" fill="#fff" stroke="#1e8449"/>
 <text x="1260" y="358" class="t">Help desk + pause</text>
-<text x="1260" y="380" class="s">gardener/help: the swarm can ask for help;</text>
+<text x="1260" y="380" class="s">upgrader/help: the swarm can ask for help;</text>
 <text x="1260" y="398" class="s">pauses while new incidents land during</text>
 <text x="1260" y="416" class="s">prove, so it never fights the swarm</text>
 <text x="1260" y="440" class="s">queue = upgrade_requests (change stream)</text>
@@ -164,7 +164,7 @@
 <!-- WAR ROOM -->
 <rect x="1225" y="530" width="350" height="190" rx="12" fill="#f4ecf7" stroke="#7d3c98" stroke-width="2.5"/>
 <text x="1240" y="557" class="h" fill="#7d3c98">War room (live map)</text>
-<text x="1240" y="580" class="s">warroom.server (FastAPI + Canvas2D page)</text>
+<text x="1240" y="580" class="s">console.server (FastAPI + Canvas2D page)</text>
 <text x="1240" y="600" class="s">· one cluster-level change stream,</text>
 <text x="1240" y="617" class="s">  persisted resume token → /ws live updates</text>
 <text x="1240" y="637" class="s">· scenario / kill / judge buttons</text>

@@ -160,7 +160,7 @@ Some optional switches add agents (see [docs/configuration.md](docs/configuratio
 | Unix | A file-transfer host | Goes `degraded` and blames the mainframe when no batch file arrives. |
 | Portal | Online banking | Goes `degraded` and blames unix, but keeps serving stale balances with HTTP 200. |
 
-Each part has its own page with a detailed diagram: [systems](systems/README.md) · [swarm](swarm/README.md) · [chaos](chaos/README.md) · [gardener](gardener/README.md) · [warroom](warroom/README.md).
+Each part has its own page with a detailed diagram: [systems](systems/README.md) · [swarm](agents/README.md) · [chaos](adversary/README.md) · [gardener](upgrader/README.md) · [warroom](console/README.md).
 
 ## Configuration
 
@@ -200,7 +200,7 @@ The full list, with timing knobs, is in [docs/configuration.md](docs/configurati
 
 - War room views: `/` and `/diagram` (the live diagram), `/flow` (a flowchart), `/why` (explainer page).
 - Health check: `GET http://localhost:8700/healthz`.
-- Chaos from the command line: `.venv/bin/python -m chaos.cli list` (faults and scenarios), `.venv/bin/python -m chaos.cli run bank-night-1`, `.venv/bin/python -m chaos.cli kill worker`.
+- Chaos from the command line: `.venv/bin/python -m adversary.cli list` (faults and scenarios), `.venv/bin/python -m adversary.cli run bank-night-1`, `.venv/bin/python -m adversary.cli kill worker`.
 - Full rehearsal against a running stack: `.venv/bin/python -m scripts.demo_check`. Exit code 0 means every beat passed. It does a full reset at the start and the end.
 - Check that a MongoDB cluster supports everything: `.venv/bin/python -m scripts.atlas_check`.
 - Unit tests (local MongoDB only, never Atlas):
@@ -217,10 +217,10 @@ The full list, with timing knobs, is in [docs/configuration.md](docs/configurati
 |---|---|
 | `run.py` | Starts and restarts the whole stack. |
 | [`systems/`](systems/README.md) | The three mock legacy systems (FastAPI, port 8701). |
-| [`swarm/`](swarm/README.md) | The agents (LangGraph graphs, leases, recall, policy). |
-| [`chaos/`](chaos/README.md) | Fault library, seeded scenarios, optional Red fleet. |
-| [`gardener/`](gardener/README.md) | The patch pipeline and its one vetted remediation. |
-| [`warroom/`](warroom/README.md) | The live web UI (FastAPI + plain JavaScript, port 8700). |
+| [`agents/`](agents/README.md) | The agents (LangGraph graphs, leases, recall, policy). |
+| [`adversary/`](adversary/README.md) | Fault library, seeded scenarios, optional Red fleet. |
+| [`upgrader/`](upgrader/README.md) | The patch pipeline and its one vetted remediation. |
+| [`console/`](console/README.md) | The live web UI (FastAPI + plain JavaScript, port 8700). |
 | `common/` | Config, MongoDB access, embeddings, optional LLM. |
 | `scripts/` | Database setup, rehearsal and recording tools. |
 | `deploy/` | Dockerfile, Compose files, Fly.io config, pinned requirements. |

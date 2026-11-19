@@ -5,7 +5,7 @@
 
 Each card = file path + ~10-15 real lines taken from the repo at render time (never a copy that can go stale)
 + a one-line plain caption (cut_video burns the caption into the lower third, so the card leaves it free).
-A card's file is read from the working tree; if it isn't there yet (e.g. swarm/schema.py lives on the
+A card's file is read from the working tree; if it isn't there yet (e.g. agents/schema.py lives on the
 schema-drift branch until that is merged) from `ref` via `git show`. A card whose source can't be found is
 skipped, and cut_video hands its seconds to the other cards.
 
@@ -29,14 +29,14 @@ FONT_PX, MAXCOL = 30, 88  # code font size; soft-wrap column
 # Each card: ranges = [(anchor, n_lines)] -> n lines starting at the first line containing `anchor`
 # (a "..." gap is drawn between ranges); hl = substrings of the lines to light up; ref = fallback git ref.
 CARDS = [
-    {"key": "lease", "path": "swarm/leases.py", "ref": None,
+    {"key": "lease", "path": "agents/leases.py", "ref": None,
      "ranges": [("def claim(", 10)], "hl": ["$or", "find_one_and_update", '"$inc"'],
      "caption": "One atomic findOneAndUpdate: only one agent can claim the work"},
-    {"key": "guard", "path": "swarm/verify.py", "ref": None,
+    {"key": "guard", "path": "agents/verify.py", "ref": None,
      "ranges": [("def check(", 2), ('if op == "purge_spool"', 3), ('if op == "restart_cron"', 3)],
      "hl": ["read("],
      "caption": "The Guard reads the state back. It never trusts the ACK."},
-    {"key": "schema", "path": "swarm/schema.py", "ref": "origin/t3/add-schema-drift-adaptation",
+    {"key": "schema", "path": "agents/schema.py", "ref": "origin/t3/add-schema-drift-adaptation",
      "ranges": [("def remembered(", 10)], "hl": ["$elemMatch", "find_one("],
      "caption": "Next rename? MongoDB already remembers the mapping: no AI call"},
 ]

@@ -79,7 +79,7 @@ AGENT_SCHEMA = {
 
 # ---- MONGO_SPINE=1 (W25): validators on the lease/approval/upgrade/memory collections. validationLevel
 # "moderate": inserts and updates of valid docs are checked; pre-existing docs are left alone. Enums come from
-# a grep of every writer (swarm/, gardener/, warroom/, chaos/); upgrade_requests statuses stay open (W19/W23).
+# a grep of every writer (agents/, upgrader/, console/, adversary/); upgrade_requests statuses stay open (W19/W23).
 TASK_SCHEMA = {
     "$jsonSchema": {
         "bsonType": "object",
@@ -130,7 +130,7 @@ PLAYBOOK_SCHEMA = {
 }
 SPINE_VALIDATORS = {"tasks": TASK_SCHEMA, "approvals": APPROVAL_SCHEMA, "upgrade_requests": UPGRADE_SCHEMA,
                     "playbooks": PLAYBOOK_SCHEMA}
-# change-stream pre-images: every update keeps the document as it was, so the custody watcher (swarm/custody.py)
+# change-stream pre-images: every update keeps the document as it was, so the custody watcher (agents/custody.py)
 # can show "before -> after" for each lease change. Not on agents (heartbeats every few seconds = churn).
 PRE_IMAGE_COLLECTIONS = ["tasks", "incidents", "approvals"]
 
@@ -210,7 +210,7 @@ def ensure() -> None:
         _ensure(s, "gardener_notes")
         s.messages.create_index([("priority", DESCENDING), ("incident", ASCENDING), ("ts", ASCENDING)],
                                 name="comms_priority_incident")
-    from gardener import help as gardener_help
+    from upgrader import help as gardener_help
     if gardener_help.enabled():  # GARDENER_HELP=1: Sentinel #2 / Worker requests answered by the Gardener
         _ensure(s, "gardener_notes")
         _ensure(s, "gardener_requests")
@@ -229,14 +229,14 @@ def ensure() -> None:
     s.upgrade_requests.create_index([("system", ASCENDING), ("fault_class", ASCENDING)], unique=True,
                                     name="one_upgrade_per_weakness")
     s.playbooks.create_index([("system", ASCENDING), ("stale", ASCENDING), ("system_version", ASCENDING)])
-    # failure memory (swarm/lessons.py, FAILURE_MEMORY=1): attempts that failed verification, version-tagged
-    from swarm.lessons import INDEXES as LESSON_INDEXES, LESSON_SCHEMA  # noqa: PLC0415
+    # failure memory (agents/lessons.py, FAILURE_MEMORY=1): attempts that failed verification, version-tagged
+    from agents.lessons import INDEXES as LESSON_INDEXES, LESSON_SCHEMA  # noqa: PLC0415
     _ensure(s, "lessons", LESSON_SCHEMA)
     s.lessons.create_indexes([IndexModel(keys, **opts) for keys, opts in LESSON_INDEXES])
     if config.MONGO_SPINE:
         ensure_spine(s)
 
-    from swarm.platform import enabled as platform_enabled
+    from agents.platform import enabled as platform_enabled
     if platform_enabled():
         _ensure(s, "tools")
         _ensure(s, "tool_runs")
@@ -277,9 +277,9 @@ def ensure() -> None:
 
 
 def reset() -> None:
-    from chaos import faults
+    from adversary import faults
     try:  # a Gardener patch left on disk would make Night 1 open no incident at "version 1"
-        from gardener import pipeline as gardener_pipeline
+        from upgrader import pipeline as gardener_pipeline
         gardener_pipeline.revert("mainframe")
     except Exception as e:
         print(f"WARNING: gardener revert skipped ({e})")

@@ -1,7 +1,7 @@
 """Red fleet faults on the systems side: false_log (misleading lines, nothing else) and credential_exploit."""
 
-from swarm.policy import EXPLOIT_SIGNS
-from systems.tests.helpers import chaos, op, status, tick
+from agents.policy import EXPLOIT_SIGNS
+from systems.tests.helpers import adversary, op, status, tick
 
 ALL = ("mainframe", "unix", "portal")
 

@@ -31,13 +31,13 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 ## 3. Architecture in 30 seconds
 - `systems/` — FastAPI app (:8701): three mock legacy systems with personalities, planted vulns, a
   1 s tick loop, honesty faults (an op that *lies* about success; an op that applies *late*). State in `world`.
-- `swarm/` — one OS process per agent (queen ×2, scout ×2, workers ×3, guard, waggle, sentinel, nurses).
+- `agents/` — one OS process per agent (queen ×2, scout ×2, workers ×3, guard, waggle, sentinel, nurses).
   LangGraph graphs checkpointed in MongoDB (`MongoDBSaver`). Leases with fencing generations,
   step + ledger writes in one transaction, only the Guard may mark a step verified (by read-back).
-- `chaos/` — fault library + seeded scenarios (`bank-night-1/2/3`) + real SIGKILL of agents.
-- `gardener/` — upgrade pipeline: plan (27-line diff) → pytest + fault replay → Beekeeper approval →
+- `adversary/` — fault library + seeded scenarios (`bank-night-1/2/3`) + real SIGKILL of agents.
+- `upgrader/` — upgrade pipeline: plan (27-line diff) → pytest + fault replay → Beekeeper approval →
   hot reload (version 1→2) → prove (replay the fault, no incident).
-- `warroom/` — FastAPI (:8700) + vanilla Canvas2D page; one change stream fanned out over WebSocket;
+- `console/` — FastAPI (:8700) + vanilla Canvas2D page; one change stream fanned out over WebSocket;
   judge buttons; MongoDB "spine" honeycomb at the bottom.
 - `common/` — config, MongoDB access (`txn()` retrying transactions, `next_id`), embeddings, optional LLM.
 
@@ -82,8 +82,8 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 1. **LLM is in, but barely visible.** `ANTHROPIC_API_KEY` works (`claude-haiku-5-5`, ~1–3 s/call). Fixed
    `common/llm.py`: current Claude models reject `temperature`, which had made every call silently return
    None; it now sends `thinking:{type:"disabled"}` + `output_config:{effort:"low"}`. LLM time is subtracted
-   from the think pause (`swarm/harness.py` `think()`), so a key never slows the demo. Yet the LLM still only
-   writes ONE scout sentence (`swarm/roles/scout.py:225`, `polish=True`) and the Gardener explanation.
+   from the think pause (`agents/harness.py` `think()`), so a key never slows the demo. Yet the LLM still only
+   writes ONE scout sentence (`agents/roles/scout.py:225`, `polish=True`) and the Gardener explanation.
    Biggest pitch risk remains "where's the AI?". Idea (not built, not reviewed): **"LLM proposes,
    verification disposes"**: after diagnosis, a background thread asks Claude (structured JSON) for a
    root-cause hypothesis and an op plan from the evidence gathered. Store it on the incident as
@@ -121,7 +121,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
    snapshot/stream ordering can briefly resurrect a deleted doc right after a reset (#11);
    a reset takes several seconds on Atlas (systems API answers 503 "resetting" in the gap — expected); two
    independent incidents that later join are not merged (#12); Gardener duplicates the agent
-   heartbeat code instead of using `swarm.harness.Agent`; Guard checkpoints every pending poll.
+   heartbeat code instead of using `agents.harness.Agent`; Guard checkpoints every pending poll.
 6. `Reset ▸ Next round` after a Gardener deploy keeps the patched code; use **Full** reset to restart the demo.
 7. WebSocket through the treehouse `/p/8700/` proxy is unverified (direct tailnet URL works).
 8. Vercel and other integrations: no Vercel MCP connected as of this handoff. Check available tools first.
@@ -139,7 +139,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 
 ## 8. Feature switches (all default OFF; set to 1 in `.env`, restart)
 The 15:00 stage pick and its evidence live in `/srv/shared/legacy-siege-mail/results/STAGE-SWITCHES.md`. On main:
-- Hive: `SWARM_DYNAMIC` (agents scale), `SWARM_COMMS` (agents talk; also the live roster `swarm.roster`, `GET /api/roster`), `SWARM_RECOVERY` (re-plan failed fixes; its own
+- Hive: `SWARM_DYNAMIC` (agents scale), `SWARM_COMMS` (agents talk; also the live roster `agents.roster`, `GET /api/roster`), `SWARM_RECOVERY` (re-plan failed fixes; its own
   switch, RED_FLEET no longer turns it on), `FAILURE_MEMORY` (learn from failures), `SWARM_LEASE_DEADLINE` (local lease
   deadline; keep off on stage).
 - Stage: `WARROOM_VIEW` (`diagram|flow`, what `/` serves; not a 0/1 switch), `DEMO_AUTOPLAY` (nights run on their own), `SCHEMA_DRIFT_DEMO` (night-3 field rename; off for demo_check).

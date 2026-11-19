@@ -21,4 +21,4 @@ def test_launcher_reads_dotenv_ports(tmp_path):
     )
     commands = json.loads(result.stdout)
     assert commands["systems"][commands["systems"].index("--port") + 1] == "19231"
-    assert commands["warroom"][commands["warroom"].index("--port") + 1] == "19232"
+    assert commands["console"][commands["console"].index("--port") + 1] == "19232"

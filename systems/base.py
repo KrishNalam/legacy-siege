@@ -243,7 +243,7 @@ class LegacySystem:
 
     def false_lines(self, ctx: Ctx, blame: str) -> list[tuple[str, str, str]]:
         """(level, code, line) tuples for false_log; systems override with their own dialect.
-        Must never match a real exploit signature (swarm/policy.py EXPLOIT_SIGNS)."""
+        Must never match a real exploit signature (agents/policy.py EXPLOIT_SIGNS)."""
         return [("ERROR", "UPSTREAM", f"upstream {blame} not responding; requests failing"),
                 ("INFO", "NOTE", f"# ops note: known issue, caused by {blame}. do not restart {self.id}")]
 

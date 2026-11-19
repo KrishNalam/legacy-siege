@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 import systems.mainframe as mf
 from systems.base import CASCADE_TICKS, now_ms
-from systems.tests.helpers import chaos, op, status, tick
+from systems.tests.helpers import adversary, op, status, tick
 
 ALL = ("mainframe", "unix", "portal")
 

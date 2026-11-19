@@ -58,12 +58,12 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")  # see common.llm.PRO
 LLM_TIMEOUT_S = _f("LLM_TIMEOUT_S", 8)
 EMBED_TIMEOUT_S = _f("EMBED_TIMEOUT_S", 4)  # per Voyage call; on timeout/error we fall back to local-hash
 EMBED_COOLDOWN_S = _f("EMBED_COOLDOWN_S", 30)  # after a Voyage failure, skip Voyage this long (no repeated stalls)
-# Claude second opinion per incident (swarm/second_opinion.py). Off by default; needs ANTHROPIC_API_KEY too.
+# Claude second opinion per incident (agents/second_opinion.py). Off by default; needs ANTHROPIC_API_KEY too.
 AI_SECOND_OPINION = os.environ.get("AI_SECOND_OPINION", "").strip().lower() in ("1", "true", "yes", "on")
 # Claude reasons at plan time and its plan RUNS when it passes every guardrail (else the rules plan runs). Off by default.
 AI_DRIVES = os.environ.get("AI_DRIVES", "").strip().lower() in ("1", "true", "yes", "on")
 AI_DRIVE_TIMEOUT_S = _f("AI_DRIVE_TIMEOUT_S", 6.0)  # Haiku answers in ~3-4.5 s under load
-# MongoDB spine extras (W25): change-stream pre-images + lease chain-of-custody trail (swarm/custody.py),
+# MongoDB spine extras (W25): change-stream pre-images + lease chain-of-custody trail (agents/custody.py),
 # $jsonSchema validators on tasks/approvals/upgrade_requests/playbooks, war-room spine analytics. Off by default.
 MONGO_SPINE = os.environ.get("MONGO_SPINE", "").strip().lower() in ("1", "true", "yes", "on")
 

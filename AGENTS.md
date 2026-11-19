@@ -5,8 +5,8 @@ between workstreams), `docs/HANDOFF.md` (status, open items, gotchas). Design do
 https://claude.ai/artifact/TYfnA6aTSG99oMb9t1nzpr
 
 ## Layout
-`systems/` mock legacy estate (FastAPI) · `swarm/` agent processes (LangGraph) · `chaos/` seeded faults +
-SIGKILL · `gardener/` code-upgrade pipeline · `warroom/` live map (change streams) · `common/` config, DB, LLM ·
+`systems/` mock legacy estate (FastAPI) · `agents/` agent processes (LangGraph) · `adversary/` seeded faults +
+SIGKILL · `upgrader/` code-upgrade pipeline · `console/` live map (change streams) · `common/` config, DB, LLM ·
 `scripts/` setup_db, atlas_check, demo_check · `run.py` starts the whole stack.
 
 ## Never break

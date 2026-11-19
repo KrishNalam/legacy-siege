@@ -1,5 +1,5 @@
 """workflow_drift (mainframe): the catalog changes, restart_batch is refused until release_hold runs."""
-from systems.tests.helpers import chaos, op, tick
+from systems.tests.helpers import adversary, op, tick
 
 
 def _abend(c):
