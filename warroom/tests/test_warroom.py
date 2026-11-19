@@ -211,8 +211,8 @@ def test_chaos_controls(app_client):
 def test_static_page_served(app_client):
     r = app_client.get("/")
     assert r.status_code == 200 and "LEGACY SIEGE" in r.text
-    assert app_client.get("/app.js").status_code == 200
-    assert app_client.get("/js/stage.js").status_code == 200
+    assert app_client.get("/diagram.js").status_code == 200
+    assert app_client.get("/js/store.js").status_code == 200
 
 
 def test_token_write_retries_and_preserves_newer_token():
@@ -247,18 +247,19 @@ def test_token_write_retries_and_preserves_newer_token():
     asyncio.run(exercise())
 
 
-def test_views_switch_classic_stays_default(app_client, monkeypatch):
-    """WARROOM_VIEW off (default) keeps the classic war room on /; the diagram and flow views are always
-    reachable, and ?classic=1 always wins."""
+def test_views_diagram_is_default(app_client, monkeypatch):
+    """/ serves the diagram unless WARROOM_VIEW=flow; both views are always reachable. The classic view is gone."""
     monkeypatch.delenv("WARROOM_VIEW", raising=False)
-    assert 'src="app.js"' in app_client.get("/").text
+    assert "diagram.js" in app_client.get("/").text
     for url, marker in (("/diagram", "diagram.js"), ("/?view=diagram", "diagram.js"), ("/flow", "flow.js"),
-                        ("/?view=flow", "flow.js"), ("/classic", 'src="app.js"'), ("/?classic=1", 'src="app.js"')):
+                        ("/?view=flow", "flow.js")):
         r = app_client.get(url)
         assert r.status_code == 200 and marker in r.text, url
-    monkeypatch.setenv("WARROOM_VIEW", "diagram")
+    monkeypatch.setenv("WARROOM_VIEW", "flow")
+    assert "flow.js" in app_client.get("/").text
+    monkeypatch.setenv("WARROOM_VIEW", "classic")  # unknown value: falls back to the diagram
     assert "diagram.js" in app_client.get("/").text
-    assert 'src="app.js"' in app_client.get("/?classic=1").text
+    assert app_client.get("/app.js").status_code == 404
     for asset in ("/diagram.js", "/diagram.css", "/flow.js", "/flow.css"):
         assert app_client.get(asset).status_code == 200, asset
 
@@ -269,4 +270,4 @@ def test_why_page_served_and_linked(app_client):
     assert r.status_code == 200 and "why.css" in r.text and "Statement 3" in r.text
     assert app_client.get("/why.css").status_code == 200
     assert 'href="./why"' in app_client.get("/diagram").text
-    assert 'src="app.js"' in app_client.get("/?view=why").text
+    assert "diagram.js" in app_client.get("/?view=why").text

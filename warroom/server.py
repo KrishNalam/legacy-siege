@@ -77,7 +77,7 @@ async def ws(websocket: WebSocket) -> None:
         hub.unsubscribe(queue)
 
 
-VIEWS = {"diagram": "diagram.html", "flow": "flow.html", "classic": "index.html"}
+VIEWS = {"diagram": "diagram.html", "flow": "flow.html"}
 PAGES = {**VIEWS, "why": "why.html"}  # /why is a static explainer page, never the / view
 
 
@@ -86,20 +86,13 @@ def _page(name: str) -> FileResponse:
 
 
 @app.get("/")
-async def index(classic: str | None = None, view: str | None = None) -> FileResponse:
-    """The war room page. ``WARROOM_VIEW`` (diagram | flow | classic, default classic) picks what ``/`` serves.
-    ``?classic=1`` always gives the classic war room, ``?view=diagram|flow|classic`` any view."""
-    if classic is not None and classic.lower() not in ("0", "false", "no"):
-        return _page("classic")
+async def index(view: str | None = None) -> FileResponse:
+    """The war room page. ``WARROOM_VIEW`` (diagram | flow, default diagram) picks what ``/`` serves;
+    ``?view=diagram|flow`` overrides it."""
     if view in VIEWS:
         return _page(view)
-    default = os.environ.get("WARROOM_VIEW", "classic").strip().lower()
-    return _page(default if default in VIEWS else "classic")
-
-
-@app.get("/classic")
-async def classic_view() -> FileResponse:
-    return _page("classic")
+    default = os.environ.get("WARROOM_VIEW", "diagram").strip().lower()
+    return _page(default if default in VIEWS else "diagram")
 
 
 @app.get("/diagram")

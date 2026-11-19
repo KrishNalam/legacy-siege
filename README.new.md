@@ -72,19 +72,69 @@ The demo is three "nights" of the same attack. In the `/diagram` view:
 
 | | |
 |---|---|
-| ![The guard catches a lie: quarantine_record said applied but the read-back shows nothing changed](docs/screenshots/05-ack-not-applied.png) *The guard catches a system that lied about a fix.* | ![A nurse takes over a killed worker's ticket from its MongoDB checkpoint](docs/screenshots/08-nurse-takeover.png) *A worker is killed mid-fix; a nurse resumes it from its checkpoint.* |
-| ![Night 2: vector search recalls last night's playbook and skips the chain walk](docs/screenshots/10-recall-golden-path.png) *Night 2: the playbook is recalled, so 1 hop instead of 3.* | ![The Gardener asks for approval to deploy a 27-line patch, with tests and replay passed](docs/screenshots/12-gardener-approval.png) *The Gardener asks before deploying its patch.* |
-
-These are from the classic view at `/`; the `/diagram` view shows the same run.
+| ![The guard catches a lie: the mainframe said quarantine_record worked, the read-back shows it didn't, and the board is stamped ACK not equal to APPLIED](docs/screenshots/diagram-lie.png) *The Guard catches a system that lied about a fix.* | ![A worker was killed mid-fix and a nurse took over its job from the MongoDB checkpoint](docs/screenshots/diagram-nurse.png) *A worker is killed mid-fix. A Nurse resumes it from its checkpoint.* |
+| ![Night 2: the scout recalls last night's playbook and goes straight to the mainframe](docs/screenshots/diagram-recall.png) *Night 2: the playbook is recalled, so the fix is faster.* | ![The Gardener asks for approval to deploy its 27-line code fix to the mainframe](docs/screenshots/diagram-gardener.png) *The Gardener asks before it deploys its patch.* |
 
 ## How it works
 
-![Architecture: the swarm, the legacy estate, the Red attackers, the Gardener and the war room, all reading and writing MongoDB](docs/diagrams/architecture-v3.png)
-*Every part talks to the others only through the systems' HTTP API and MongoDB. More diagrams: [`docs/diagrams/`](docs/diagrams/README.md).*
+```mermaid
+flowchart TB
+    subgraph red["RED: ATTACKERS"]
+        chaos["Chaos Monkey<br/>seeded nights"]
+        fleet["Red fleet<br/>optional AI attackers"]
+    end
 
-`run.py` starts four processes: the systems API, the war room, the swarm supervisor and the Gardener. It restarts any of them that crashes.
-The supervisor starts one process per agent and replaces dead agents after 15 s.
-Agents hold work through MongoDB leases with fencing tokens. A killed agent's work is released by the Undertaker and picked up by a Nurse.
+    subgraph hive["BLUE: THE HIVE"]
+        bees["12 agent processes<br/>queen · scouts · workers<br/>guard · sentinel · nurses"]
+    end
+
+    subgraph estate["LEGACY ESTATE · :8701"]
+        direction LR
+        portal["Portal<br/>online banking"] -- needs --> unix["Unix<br/>file transfer"] -- needs --> mainframe["Mainframe<br/>nightly batch"]
+    end
+
+    gardener["Gardener<br/>outside the swarm<br/>patch · test · deploy"]
+
+    subgraph spine["MONGODB: ALL STATE"]
+        direction LR
+        db[("MongoDB")] -- "change stream" --> warroom["War room · :8700<br/>live view"]
+    end
+
+    red -- "faults" --> estate
+    red -- "SIGKILL" --> hive
+    hive -- "checks · fixes" --> estate
+    hive -- "repeat fault" --> gardener
+    gardener -- "hot reload" --> estate
+    estate <--> spine
+    hive <--> spine
+    gardener <--> spine
+
+    classDef box fill:#ffffff,stroke:#333,color:#111
+    class chaos,fleet,portal,unix,mainframe,bees,db,warroom box
+    classDef gard fill:#fff4e0,stroke:#b9770e,color:#111
+    class gardener gard
+    style red fill:#fdecec,stroke:#c0392b,color:#c0392b
+    style hive fill:#eaf1fd,stroke:#2c5fb3,color:#2c5fb3
+    style estate fill:#f3f3f3,stroke:#555,color:#333
+    style spine fill:#e8f6ee,stroke:#1e8449,color:#1e8449
+```
+
+The parts never call each other directly. They only meet through the systems' HTTP API and MongoDB.
+The war room holds no state. Everything on screen comes from one MongoDB change stream.
+
+### One incident, start to finish
+
+1. **Detect.** The Sentinel polls each system's health and opens one incident for the whole failing chain.
+2. **Claim.** A Scout takes the incident with a lease (one atomic MongoDB update).
+3. **Recall.** The Scout searches past fixes with vector search. A good match skips straight to the cause.
+4. **Diagnose.** Otherwise it follows each system's "blames" field: portal → unix → mainframe.
+5. **Approve.** Risky steps, like restarting the batch, wait for you before anything is sent.
+6. **Act.** A Worker sends each fix with a unique id, so a retry never runs it twice.
+7. **Verify.** Only the Guard can mark a step done, and only after reading the real state back.
+8. **Learn.** The incident closes and the fix is saved as a playbook for next time.
+
+If an agent dies at any step, its lease runs out and a Nurse resumes the work from its MongoDB checkpoint.
+`run.py` restarts any of its four processes that crash, and the supervisor replaces dead agents.
 
 ### The agents
 
@@ -104,11 +154,13 @@ Some optional switches add agents (see [docs/configuration.md](docs/configuratio
 
 ### The legacy estate
 
-Three simulated systems, each with its own log style:
+| System | What it is | How it fails |
+|---|---|---|
+| Mainframe | A z/OS-style ledger with a nightly batch job | The batch crashes, but its health still says `up`. The clue is only in its logs and metrics. |
+| Unix | A file-transfer host | Goes `degraded` and blames the mainframe when no batch file arrives. |
+| Portal | Online banking | Goes `degraded` and blames unix, but keeps serving stale balances with HTTP 200. |
 
-- **mainframe**: a z/OS-style ledger with a nightly batch job. When the batch fails, its health still says `up`. The clue is only in its logs and metrics.
-- **unix**: a file-transfer host. It goes `degraded` and blames the mainframe when no batch file arrives.
-- **portal**: online banking. It goes `degraded` and blames unix, but keeps serving stale balances with HTTP 200.
+A more detailed diagram is in [`docs/diagrams/`](docs/diagrams/README.md).
 
 ## Configuration
 
@@ -121,7 +173,7 @@ Everything works with no `.env`. Copy [`.env.example`](.env.example) to `.env` t
 | `SYSTEMS_PORT` | `8701` | Port of the legacy systems API. |
 | `WARROOM_PORT` | `8700` | Port of the war room. |
 | `PACE` | `1.0` | Multiplies every deliberate "thinking" pause. `0` = as fast as possible. |
-| `WARROOM_VIEW` | `classic` | What `/` serves: `classic`, `diagram` or `flow`. |
+| `WARROOM_VIEW` | `diagram` | What `/` serves: `diagram` or `flow`. |
 | `ANTHROPIC_API_KEY` | none | Turns on Claude narration and the optional AI switches. |
 | `LLM_MODEL` | `claude-haiku-5-5` | Claude model used when a key is set. |
 | `VOYAGE_API_KEY` | none | Use Voyage embeddings instead of the built-in local hash embedding. |
@@ -146,7 +198,7 @@ The full list, with timing knobs, is in [docs/configuration.md](docs/configurati
 
 ## Other pages and tools
 
-- War room views: `/` (classic), `/diagram`, `/flow`, `/why` (explainer page).
+- War room views: `/` and `/diagram` (the live diagram), `/flow` (a flowchart), `/why` (explainer page).
 - Health check: `GET http://localhost:8700/healthz`.
 - Chaos from the command line: `.venv/bin/python -m chaos.cli list` (faults and scenarios), `.venv/bin/python -m chaos.cli run bank-night-1`, `.venv/bin/python -m chaos.cli kill worker`.
 - Full rehearsal against a running stack: `.venv/bin/python -m scripts.demo_check`. Exit code 0 means every beat passed. It does a full reset at the start and the end.

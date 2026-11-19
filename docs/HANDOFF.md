@@ -45,7 +45,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 - **Open the war room:** http://100.105.248.23:8700 → buttons: Night 1, Night 2, Night 3 (replay),
   Kill a worker, fault launcher, Reset (Full / Next round), Atlas.
 - **Views:** `/diagram` (the stage view Krish demos: 4 boxes, zoom 1-4, V = Live / How it works, `?` help),
-  `/why` (pitch page), `/flow`, classic on `/`. `WARROOM_VIEW=diagram` makes `/` serve the diagram.
+  `/why` (pitch page), `/flow`. `/` serves the diagram (`WARROOM_VIEW=flow` switches it). The classic view was removed.
 - **Demo order:** Reset ▸ Full → Night 1 → Approve → Kill a worker (button glows when ready) → wait for
   green → Reset ▸ Next round → Night 2 → Approve → Approve (upgrade) → Night 3 → Atlas.
   Full table: README "The 3-minute demo".
@@ -142,7 +142,7 @@ The 15:00 stage pick and its evidence live in `/srv/shared/legacy-siege-mail/res
 - Hive: `SWARM_DYNAMIC` (agents scale), `SWARM_COMMS` (agents talk; also the live roster `swarm.roster`, `GET /api/roster`), `SWARM_RECOVERY` (re-plan failed fixes; its own
   switch, RED_FLEET no longer turns it on), `FAILURE_MEMORY` (learn from failures), `SWARM_LEASE_DEADLINE` (local lease
   deadline; keep off on stage).
-- Stage: `WARROOM_VIEW` (`diagram|flow|classic`, what `/` serves; not a 0/1 switch), `DEMO_AUTOPLAY` (nights run on their own), `SCHEMA_DRIFT_DEMO` (night-3 field rename; off for demo_check).
+- Stage: `WARROOM_VIEW` (`diagram|flow`, what `/` serves; not a 0/1 switch), `DEMO_AUTOPLAY` (nights run on their own), `SCHEMA_DRIFT_DEMO` (night-3 field rename; off for demo_check).
 - Chaos: `CHAOS_OUTCOMES`, `CHAOS_AGENT_LIE`, `CHAOS_AGENT_FREEZE`, `CHAOS_POISON_MEMORY` (defence fires only with
   `SWARM_RECOVERY=1 FAILURE_MEMORY=1`).
 - Red: `RED_FLEET` (stage-safe only tamed: `RED_FLEET_AGENTS=red-assassin RED_FLEET_VICTIMS=worker:step_sent

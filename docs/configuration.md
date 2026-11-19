@@ -18,7 +18,7 @@ Restart `run.py` after changing anything.
 | `SYSTEMS_URL` | `http://127.0.0.1:$SYSTEMS_PORT` | Where agents and the Gardener reach the systems API. |
 | `WARROOM_URL` | `http://127.0.0.1:$WARROOM_PORT` | Where the rehearsal scripts reach the war room. |
 | `PACE` | `1.0` | Multiplier on deliberate "thinking" pauses. `0` in tests. |
-| `WARROOM_VIEW` | `classic` | What `/` serves: `classic`, `diagram` or `flow`. |
+| `WARROOM_VIEW` | `diagram` | What `/` serves: `diagram` or `flow`. |
 
 ## AI (all optional)
 

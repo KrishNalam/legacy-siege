@@ -10,7 +10,7 @@
 <body>
 <!-- Diagram view: the agents and the systems they work on, drawn as one live wiring diagram.
      Same data as every other view: the /ws change stream (js/store.js) + the existing REST API.
-     Classic war room: ?classic=1 · W9's flowchart: ?view=flow -->
+     Flowchart: ?view=flow -->
 <div id="fit">
 <div id="frame">
   <header class="top">
@@ -32,7 +32,6 @@
             <button data-scn="bank-night-3">RUN NIGHT 3</button>
             <hr>
             <button id="btn-details">DETAILS <small>MONGODB, MEMORY SEARCH, NUMBERS</small></button>
-            <a href="./?classic=1">CLASSIC WAR ROOM VIEW</a>
             <a href="./?view=flow">FLOWCHART VIEW</a>
           </div>
         </span>
@@ -122,7 +121,7 @@
         <tr><td>KILL A WORKER · K</td><td>Really kills (SIGKILL) the worker agent that is in the middle of a fix. Glows red when one is mid-job. A nurse agent takes over its job from the saved progress in MongoDB.</td></tr>
         <tr><td>KILL THE QUEEN · Q</td><td>Kills the coordinator; the backup queen notices the silence and takes over.</td></tr>
         <tr><td>NEXT NIGHT · N</td><td>Night 2 = the same attack again: the Bees remember it and fix it faster. Night 3 = the attack after the Gardener's upgrade: nothing breaks.</td></tr>
-        <tr><td>RESET + · R</td><td>RESET THIS NIGHT keeps what the Bees learned. FULL RESET wipes everything back to before Night 1. Also: run any night, DETAILS (MongoDB, memory search, numbers), the classic war room.</td></tr>
+        <tr><td>RESET + · R</td><td>RESET THIS NIGHT keeps what the Bees learned. FULL RESET wipes everything back to before Night 1. Also: run any night, DETAILS (MongoDB, memory search, numbers).</td></tr>
         <tr><td>APPROVE / DENY</td><td>Risky steps and code deploys wait for a human. A yellow form pops up; nothing risky happens until you answer.</td></tr>
         <tr><td>? HELP · ?</td><td>This sheet.</td></tr>
       </table>
