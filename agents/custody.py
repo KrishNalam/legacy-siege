@@ -1,7 +1,7 @@
 """Chain of custody for leased work — built from MongoDB change-stream **pre-images** (MONGO_SPINE=1).
 
 Every lease the Hive takes lives in one document (`tasks` for operators, `incidents` for investigators), and every
-Beekeeper decision in `approvals`. `scripts/setup_db.ensure_spine` turns on
+Approver decision in `approvals`. `scripts/setup_db.ensure_spine` turns on
 `changeStreamPreAndPostImages` for those collections, so each update event carries the document *as it
 was* (`fullDocumentBeforeChange`) next to the stored post-image *as of that event* (`fullDocument:
 "whenAvailable"`, never `updateLookup`, which could show a later state). This watcher turns

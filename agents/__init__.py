@@ -6,6 +6,6 @@
     steps.py        step transitions = one transaction (fence task + incident step + ledger receipt)
     recall.py       $vectorSearch playbook memory    verify.py   postconditions by read-back
     diagnosis.py    deterministic rules per system   policy.py   chain, fix plans, symptom text
-    roles/          monitor (+Undertaker), coordinator, investigator, operator, verifier, recovery, reporter — each a LangGraph
+    roles/          monitor (+reaper), coordinator, investigator, operator, verifier, recovery, reporter — each a LangGraph
                     StateGraph compiled with MongoDBSaver(db=SWARM_DB)
 """

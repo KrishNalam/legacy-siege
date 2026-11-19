@@ -2,7 +2,7 @@
 
 upgrader.pipeline dispatches here once a request carries remediation_kind "tool" (set by the help desk
 for a Monitor #2 repeat, or by pipeline._pick_kind when no code remediation covers the problem but the
-Upgrader has accepted a tool for it). Same statuses, same atomic transitions, same Beekeeper gate:
+Upgrader has accepted a tool for it). Same statuses, same atomic transitions, same approver gate:
 
     plan   re-vet the tool (active, exact whitelist, current system version); the "diff" is its op list
     test   sandbox replay on an isolated copy of the estate: fault active -> tool ops -> fault resolved

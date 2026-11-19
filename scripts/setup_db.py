@@ -100,7 +100,7 @@ APPROVAL_SCHEMA = {
         "properties": {
             "kind": {"enum": ["step", "upgrade"]},
             "status": {"enum": ["pending", "approved", "denied"]},
-            # a decision always names who decided (beekeeper / autoplay / reset)
+            # a decision always names who decided (approver / autoplay / reset)
         },
         "anyOf": [{"properties": {"status": {"enum": ["pending"]}}},
                   {"required": ["decided_by", "decided_at"],

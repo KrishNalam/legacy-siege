@@ -102,7 +102,7 @@ FAULTS: dict[str, Fault] = {f.name: f for f in [
           {}, switch="ADVERSARY"),
     Fault("agent_kill", "agent", ("swarm",), "swarm",
           "SIGKILL a live bee process (by id, or the operator that just sent a step).",
-          "Lease expiry, Undertaker detection, Recovery takeover from a MongoDB checkpoint.",
+          "Lease expiry, Reaper detection, Recovery takeover from a MongoDB checkpoint.",
           {"selector": {"role": "operator", "phase": "step_sent"}, "wait_s": 30}),
     Fault("lie_to_agent", "system", SYSTEM_TARGETS, "mainframe",
           "Plant a vetted prompt-injection line in system logs, leaving actual state unchanged.",

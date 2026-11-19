@@ -12,7 +12,7 @@ MongoDB features used on purpose:
   * conditional findOneAndUpdate for every status transition (no double-advance, no races);
   * a multi-document transaction to create the approval + flip the upgrade to
     awaiting_approval, and again to mark it deployed + write its ledger receipt;
-  * change streams to wait for the Beekeeper's decision and to watch for incidents
+  * change streams to wait for the approver's decision and to watch for incidents
     during the prove window (each with a polling fallback);
   * an aggregation pipeline that summarises the evidence incidents.
 
@@ -306,7 +306,7 @@ def test(upg_id: str) -> dict:
 
 # ------------------------------------------------------------------ 3. gate
 def request_approval(upg_id: str) -> dict:
-    """Create the Beekeeper approval and move to awaiting_approval in ONE transaction."""
+    """Create the approver approval and move to awaiting_approval in ONE transaction."""
     upg = get(upg_id)
     if upg["status"] == "awaiting_approval" and upg.get("approval_id"):
         return upg  # resumed: approval already exists
@@ -338,7 +338,7 @@ def request_approval(upg_id: str) -> dict:
 
     txn(gate)
     set_phase("awaiting_approval", upg_id)
-    say(f"{upg_id}: diff and test results sent to the Beekeeper ({apr_id})", upg["system"])
+    say(f"{upg_id}: diff and test results sent to the approver ({apr_id})", upg["system"])
     return get(upg_id)
 
 
@@ -405,8 +405,8 @@ def gate(upg_id: str, wait: bool = True, timeout: float | None = None) -> str:
     if d is None:
         return "pending"
     if d["status"] == "denied":
-        reject(upg_id, f"denied by {d.get('decided_by') or 'Beekeeper'}", upg["system"])
-    say(f"{upg_id}: approved by {d.get('decided_by') or 'Beekeeper'}", upg["system"])
+        reject(upg_id, f"denied by {d.get('decided_by') or 'Approver'}", upg["system"])
+    say(f"{upg_id}: approved by {d.get('decided_by') or 'Approver'}", upg["system"])
     return "approved"
 
 
@@ -588,7 +588,7 @@ def run(upg_id: str, approval_timeout: float | None = None, prove_window_s: floa
                 test(upg_id)
             st = "testing"
         if st in ("testing", "awaiting_approval"):
-            with stage(3, "approval", "waiting for the Beekeeper", record_it=False):  # a human's pace, not ours
+            with stage(3, "approval", "waiting for the approver", record_it=False):  # a human's pace, not ours
                 decision = gate(upg_id, wait=True, timeout=approval_timeout)
             if decision != "approved":
                 return get(upg_id)

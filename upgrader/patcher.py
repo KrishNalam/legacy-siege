@@ -3,7 +3,7 @@
 The Upgrader never rewrites a file. It locates the target function with the AST,
 swaps the lines of its body (docstring included) and leaves the signature, the
 rest of the module, comments and trailing whitespace untouched. The result is a
-minimal unified diff a human can review in the Beekeeper's approval modal.
+minimal unified diff a human can review in the approver's approval modal.
 """
 from __future__ import annotations
 

@@ -2,7 +2,7 @@
 
 Spawns one OS process per agent (`python -m agents.agent <role> <id>`). It does no hive work itself and
 never touches leases: when a child dies (e.g. Chaos SIGKILL), recovery of its WORK is the hive's job
-(Undertaker + Recovery via MongoDB). The supervisor only refills the bench: after RECOVERY_RESPAWN_S it starts
+(Reaper + Recovery via MongoDB). The supervisor only refills the bench: after RECOVERY_RESPAWN_S it starts
 a fresh recovery standby in the dead bee's place. Singleton roles with no standby (verifier, monitor, reporter)
 and coordinators come back in their own role. SIGTERM/SIGINT stops all children cleanly.
 

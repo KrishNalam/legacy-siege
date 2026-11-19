@@ -14,7 +14,7 @@ CONFIRM_POLLS = int(_f("MONITOR_CONFIRM_POLLS", 2))  # consecutive unhealthy pol
 SETTLE_S = _f("INVESTIGATOR_SETTLE_S", 1.5)            # let the cascade's blast radius settle before recall
 CASCADE_WAIT_S = _f("INVESTIGATOR_CASCADE_WAIT_S", 8)  # ...and give a healthy downstream dependent this long to follow
 VERIFIER_GRACE_S = _f("VERIFIER_GRACE_S", 2.0)        # applied:true but state unchanged for this long => lie
-DEAD_AFTER_S = _f("DEAD_AFTER_S", config.LEASE_S)   # Undertaker: last_seen older than this => dead
+DEAD_AFTER_S = _f("DEAD_AFTER_S", config.LEASE_S)   # Reaper: last_seen older than this => dead
 RECOVERY_POLL_S = _f("RECOVERY_POLL_S", 0.5)
 RECOVERY_PICKUP_S = _f("RECOVERY_PICKUP_S", 2.0)      # open task with no live specialist this long => recovery takes it
 FAILED_COOLDOWN_S = _f("FAILED_COOLDOWN_S", 30)  # after an escalation, don't re-open the same systems at once

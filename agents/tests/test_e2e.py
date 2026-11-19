@@ -59,7 +59,7 @@ def test_round1_cascade_lie_approval_resolve(hive, fake):
     apr = col("approvals").find_one({"_id": s2["approval_id"]})
     assert apr["status"] == "approved" and apr["relayed_by"] in ("coordinator-1", "coordinator-2")
     assert apr["decided_at"] <= col("ledger").find_one({"action_id": s2["action_id"]})["ts"]
-    assert col("ledger").find_one({"action_id": s2["action_id"]})["approver"] == "test-beekeeper"
+    assert col("ledger").find_one({"action_id": s2["action_id"]})["approver"] == "test-approver"
 
     # metrics + learning
     m = inc["metrics"]
@@ -124,7 +124,7 @@ def test_denied_approval_fails_step_and_escalates(hive, fake):
         return col("approvals").find_one({"status": "pending"})
     apr = wait_for(pending, 90, 0.1, "a pending approval")
     col("approvals").update_one({"_id": apr["_id"], "status": "pending"},
-                                {"$set": {"status": "denied", "decided_by": "test-beekeeper", "decided_at": now()}})
+                                {"$set": {"status": "denied", "decided_by": "test-approver", "decided_at": now()}})
     inc = wait_for(lambda: col("incidents").find_one({"_id": apr["incident"], "status": "failed"}), 30, 0.1,
                    "incident to be escalated")
     assert inc["active"] is False and "denied" in inc["failure"]
@@ -133,7 +133,7 @@ def test_denied_approval_fails_step_and_escalates(hive, fake):
     assert col("ledger").count_documents({"step_id": apr["step_id"]}) == 0
     assert col("thoughts").find_one({"incident": inc["_id"], "text": {"$regex": "^Escalating"}})
     assert wait_for(lambda: col("messages").find_one({"body": {"$regex": f"{inc['_id']} escalated"}}), 5)
-    # cooldown: the hive doesn't immediately re-open an incident for the systems the Beekeeper just declined
+    # cooldown: the hive doesn't immediately re-open an incident for the systems the approver just declined
     import time
     deadline = time.monotonic() + 2
     while True:

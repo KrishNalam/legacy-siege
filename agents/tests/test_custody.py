@@ -74,7 +74,7 @@ def test_validators_reject_bad_lease_and_undecided_approval(spine):
     col("approvals").insert_one({"_id": "APR-1", "kind": "step", "status": "pending", "ts": now()})
     with pytest.raises(WriteError):  # a decision must say who decided and when
         col("approvals").update_one({"_id": "APR-1"}, {"$set": {"status": "approved"}})
-    col("approvals").update_one({"_id": "APR-1"}, {"$set": {"status": "approved", "decided_by": "beekeeper",
+    col("approvals").update_one({"_id": "APR-1"}, {"$set": {"status": "approved", "decided_by": "approver",
                                                              "decided_at": now()}})
 
 

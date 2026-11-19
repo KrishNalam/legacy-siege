@@ -110,7 +110,7 @@ def test_approvals_decide_only_pending(app_client):
     r = app_client.post("/api/approvals/APR-0001", json={"decision": "approved"})
     assert r.status_code == 200
     doc = swarm().approvals.find_one({"_id": "APR-0001"})
-    assert doc["status"] == "approved" and doc["decided_by"] == "beekeeper" and doc["decided_at"]
+    assert doc["status"] == "approved" and doc["decided_by"] == "approver" and doc["decided_at"]
     assert app_client.post("/api/approvals/APR-0001", json={"decision": "denied"}).status_code == 409
     assert app_client.post("/api/approvals/APR-9999", json={"decision": "denied"}).status_code == 404
     assert app_client.post("/api/approvals/APR-0001", json={"decision": "maybe"}).status_code == 400

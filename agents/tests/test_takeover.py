@@ -1,4 +1,4 @@
-"""(4) SIGKILL a real operator PROCESS mid-step -> Undertaker marks it dead and releases its lease -> a Recovery
+"""(4) SIGKILL a real operator PROCESS mid-step -> Reaper marks it dead and releases its lease -> a Recovery
 claims the task (generation+1), loads the LangGraph checkpoint from MongoDB, reconciles the 'sent' step
 against /state, resends with the SAME action_id, and finishes. No op is applied twice (fake receipts);
 the handoff is recorded; the supervisor refills the bench with a fresh recovery."""
@@ -39,7 +39,7 @@ def test_sigkill_operator_mid_step_recovery_resumes_without_duplicates(hive, fak
 
     inc = run_until_resolved(1, timeout=120)
 
-    # the Undertaker declared the victim dead; a recovery took over from the checkpoint
+    # the reaper declared the victim dead; a recovery took over from the checkpoint
     assert col("agents").find_one({"_id": victim["_id"]})["status"] == "dead"
     hs = [h for h in inc["handoffs"] if h["from"] == victim["_id"]]
     assert hs, inc["handoffs"]

@@ -42,7 +42,7 @@ def heartbeat(stop: threading.Event) -> None:
             r = col("agents").update_one({"_id": AGENT}, {"$set": {"last_seen": now(), "pid": os.getpid()}})
             if r.matched_count == 0:  # a full demo reset wiped swarm.agents: re-register
                 register()
-            # if the Undertaker misjudged us (e.g. a long GC pause), come back to life
+            # if the reaper misjudged us (e.g. a long GC pause), come back to life
             col("agents").update_one({"_id": AGENT, "status": "dead"}, {"$set": {"status": "idle"}})
         except Exception as e:  # keep beating through transient DB errors
             log.warning("heartbeat failed: %s", e)

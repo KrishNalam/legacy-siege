@@ -135,7 +135,7 @@ class Agent:
             log(self.id, f"agent id now owned by pid {other.get('pid')}; this process is a zombie, exiting")
             os._exit(3)
         if doc.get("status") == "dead":
-            # The Undertaker declared us dead (we stalled). Our leases were released and may already be
+            # The Reaper declared us dead (we stalled). Our leases were released and may already be
             # fenced by a recovery: drop them all and rejoin as a fresh idle bee.
             with self._lock:
                 self._lost.update(self._held)

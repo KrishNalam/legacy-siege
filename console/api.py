@@ -143,13 +143,13 @@ def kill_agent(body: dict = Body(default_factory=dict)) -> dict:
 
 @router.post("/approvals/{approval_id}")
 def decide(approval_id: str, body: dict = Body(...)) -> dict:
-    """The Beekeeper's decision. Conditional on status:"pending" — double clicks and races are no-ops."""
+    """The approver's decision. Conditional on status:"pending" — double clicks and races are no-ops."""
     decision = DECISIONS.get(str(body.get("decision", "")).lower())
     if not decision:
         raise HTTPException(400, "decision must be 'approved' or 'denied'")
     res = swarm().approvals.update_one(
         {"_id": approval_id, "status": "pending"},
-        {"$set": {"status": decision, "decided_by": "beekeeper", "decided_at": now()}})
+        {"$set": {"status": decision, "decided_by": "approver", "decided_at": now()}})
     if res.matched_count == 0:
         doc = swarm().approvals.find_one({"_id": approval_id}, {"status": 1})
         raise HTTPException(404 if doc is None else 409,

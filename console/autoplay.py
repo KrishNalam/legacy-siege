@@ -26,7 +26,7 @@ from common.events import think
 
 log = logging.getLogger("console.autoplay")
 
-AGENT, ROLE = "autoplay", "beekeeper"
+AGENT, ROLE = "autoplay", "approver"
 NEXT = {"bank-night-1": "bank-night-2", "bank-night-2": "bank-night-3"}
 RESET_BEFORE = {"bank-night-2"}  # next_round reset before these (the hive keeps its playbooks)
 
@@ -50,7 +50,7 @@ class Autoplay:
         for apr in s.approvals.find({"status": "pending"}).sort("ts", 1):
             if _age_s(apr.get("ts")) < self.approve_s:
                 continue
-            # the first approval of the demo stays the Beekeeper's own click
+            # the first approval of the demo stays the approver's own click
             if not s.approvals.find_one({"status": "approved", "_id": {"$ne": apr["_id"]}}, {"_id": 1}):
                 continue
             res = s.approvals.update_one({"_id": apr["_id"], "status": "pending"},
@@ -61,7 +61,7 @@ class Autoplay:
             same = apr.get("kind") == "step" and s.approvals.find_one(
                 {"_id": {"$ne": apr["_id"]}, "kind": "step", "status": "approved", "desc": apr.get("desc")}, {"_id": 1})
             why = "same as last time" if same else "demo autoplay"
-            think(AGENT, ROLE, f"Beekeeper: {apr['_id']} auto-approved ({why}) — {apr.get('desc') or apr.get('kind')}.",
+            think(AGENT, ROLE, f"Approver: {apr['_id']} auto-approved ({why}) — {apr.get('desc') or apr.get('kind')}.",
                   incident=apr.get("incident"), system=apr.get("system"), kind="approval")
             log.info("auto-approved %s (%s)", apr["_id"], why)
             done.append(apr["_id"])

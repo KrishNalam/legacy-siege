@@ -8,7 +8,7 @@ without the rest of the stack:
 
   night 1  lying_success + batch_abort → cascade (mainframe → unix → portal) → incident → recall miss
            → diagnosis walk portal → unix → mainframe → plan → Verifier catches the lie (ACK ≠ APPLIED)
-           → Beekeeper approval → agent_kill mid-step → Undertaker → Recovery resumes from checkpoint
+           → approver approval → agent_kill mid-step → Reaper → Recovery resumes from checkpoint
            → resolve → playbook (honey)
   night 2  same fault class → $vectorSearch recall hit → chain walk skipped → resolve fast
   upgrader recurring fault → upgrade request → tests → approval → deploy v2 → night 3 replay → proven
@@ -292,14 +292,14 @@ def night1(T):
     S().incidents.update_one({"_id": inc, "steps.step_id": f"{inc}-s2"}, {"$set": {"status": "awaiting_approval", "steps.$.approval_id": "APR-0001"}})
     agent("coordinator-1", status="working", phase="awaiting_approval", incident=inc)
     agent("operator-mainframe-1", phase="awaiting_approval")
-    think("coordinator-1", "coordinator", "restart_batch is destructive. Asking the Beekeeper before anything is sent.", inc, "mainframe", "approval")
+    think("coordinator-1", "coordinator", "restart_batch is destructive. Asking the approver before anything is sent.", inc, "mainframe", "approval")
     t_req = time.monotonic()
     wait_approval("APR-0001", T.scale(5))
     wait_s = time.monotonic() - t_req
     T.rebase()
     S().incidents.update_one({"_id": inc}, {"$set": {"status": "fixing", "metrics.approval_wait_s": round(wait_s, 1)}})
     agent("coordinator-1", status="idle", phase=None)
-    think("coordinator-1", "coordinator", "Beekeeper approved APR-0001. Go.", inc, "mainframe", "approval")
+    think("coordinator-1", "coordinator", "Approver approved APR-0001. Go.", inc, "mainframe", "approval")
     T(1)
     send(inc, f"{inc}-s2", 2, "operator-mainframe-1", "restart_batch", "mainframe", 1, {"job": "NIGHTBAT"})
     agent("operator-mainframe-1", phase="step_sent")
@@ -313,7 +313,7 @@ def night1(T):
     system("mainframe", {"batch_status": "OK", "last_batch_ok": now()}, status="up", faults_active=[], symptom=None)
     log("mainframe", "INFO", "IEF404I", "NIGHTBAT ENDED RC=0000 (restart)")
     T(8)
-    think("monitor-1", "monitor", "Undertaker: operator-mainframe-1 missed 3 heartbeats. Releasing lease on INC-0001-t3.", inc, "mainframe", "handoff")
+    think("monitor-1", "monitor", "Reaper: operator-mainframe-1 missed 3 heartbeats. Releasing lease on INC-0001-t3.", inc, "mainframe", "handoff")
     S().tasks.update_one({"_id": f"{inc}-t3"}, {"$set": {"owner": None, "lease_until": now() - timedelta(seconds=1)}})
     S().messages.insert_one({"from": "reporter-1", "to": "all", "kind": "handoff", "body": {"task": f"{inc}-t3", "dead": "operator-mainframe-1"}, "ts": now()})
     think("reporter-1", "reporter", "Handoff: INC-0001-t3 is up for grabs (operator-mainframe-1 down).", inc, None, "handoff")

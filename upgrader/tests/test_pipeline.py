@@ -74,14 +74,14 @@ def new_request(upg_id="UPG-0001", system="mainframe"):
 
 
 def decide_later(upg_id, decision, delay=0.3):
-    """Act as the Beekeeper: wait for the approval doc, then decide it (pending-only)."""
+    """Act as the approver: wait for the approval doc, then decide it (pending-only)."""
     def go():
         for _ in range(1200):  # up to 60 s: the sandbox test step is slow on a loaded box
             upg = col("upgrade_requests").find_one({"_id": upg_id}) or {}
             if upg.get("approval_id"):
                 time.sleep(delay)
                 col("approvals").update_one({"_id": upg["approval_id"], "status": "pending"},
-                                            {"$set": {"status": decision, "decided_by": "beekeeper",
+                                            {"$set": {"status": decision, "decided_by": "approver",
                                                       "decided_at": now()}})
                 return
             time.sleep(0.05)
@@ -120,7 +120,7 @@ def test_full_pipeline_approve_deploy_prove(env, monkeypatch):
     apr = col("approvals").find_one({"_id": doc["approval_id"]})
     assert apr["kind"] == "upgrade" and apr["upgrade"] == upg_id and apr["risk"].startswith("low")
     led = col("ledger").find_one({"action_id": f"{upg_id}-deploy"})
-    assert led["status"] == "verified" and led["approver"] == "beekeeper"
+    assert led["status"] == "verified" and led["approver"] == "approver"
     assert led["params"]["diff_sha256"] == patcher.sha256(doc["diff"]) and led["version_after"] == 2
     kinds = {t["kind"] for t in col("thoughts").find({"agent": "upgrader-1"})}
     assert kinds - {"progress"} == {"upgrade"}  # PROGRESS_ETA adds progress lines
@@ -144,7 +144,7 @@ def test_gate_denied_rejects_and_never_writes(env):
     with pytest.raises(pipeline.Rejected):
         pipeline.gate(upg_id, wait=True, timeout=10)
     doc = col("upgrade_requests").find_one({"_id": upg_id})
-    assert doc["status"] == "rejected" and "denied by beekeeper" in doc["reason"]
+    assert doc["status"] == "rejected" and "denied by approver" in doc["reason"]
     assert env["file"].read_text() == original and env["calls"] == []
 
 
@@ -283,7 +283,7 @@ def test_reset_while_awaiting_approval_unblocks_the_upgrader(env):
         time.sleep(0.05)
     assert col("upgrade_requests").find_one({"_id": upg_id})["status"] == "awaiting_approval"
     time.sleep(0.5)
-    assert not done.is_set()  # really waiting for the Beekeeper
+    assert not done.is_set()  # really waiting for the approver
     setup_db.reset()  # the demo's Reset ▸ Full
     assert done.wait(10), "upgrader still blocked on a wiped approval"
     assert col("upgrade_requests").count_documents({}) == 0  # nothing resurrected or marked rejected

@@ -1,17 +1,16 @@
-"""Monitor (SRE / observability) — also the Undertaker.
+"""Monitor (SRE / observability). Also runs the reaper (roles/reaper.py) in the same loop.
 
 Every ~1 s it sweeps /health + /metrics of every system (HTTP only: it never reads faults_active or
 chaos_events) and:
   * detect:     opens an incident for a contiguous unhealthy segment of the chain, or COALESCES into the
                 active incident it touches ($addToSet affected). A unique partial index on
                 correlation_key {active:true} makes "one incident per cascade" a database guarantee.
-  * undertaker: agents whose last_seen is stale -> status dead; their task/incident leases are released
-                (lease_until -> past, owner kept so recovery agents know whose work it was); reporter note to recovery agents.
+  * reaper:     see roles/reaper.py (stale heartbeat -> dead, leases released).
   * staleness:  a system's version went up -> its playbooks are marked stale:true.
   * recurrence: aggregation over resolved incidents; same fault_class on the same root system resolved in
                 >= UPGRADE_AFTER distinct nights and no upgrade request yet -> files swarm.upgrade_requests.
 
-The rare events (detect / reap / upgrade) each run as a small LangGraph graph on an event-scoped thread.
+The rare events (detect / upgrade, and the reaper's reap) each run as a small LangGraph graph on an event-scoped thread.
 """
 from __future__ import annotations
 
@@ -20,7 +19,6 @@ from datetime import timedelta
 from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
-from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
 from common.db import col, next_id, now
@@ -31,6 +29,7 @@ from upgrader import help as upgrader_help
 from .. import leases, policy, recovery, schema, settings
 from ..harness import Agent, checkpointer, log
 from .. import lessons
+from . import reaper
 
 
 class DetectState(TypedDict, total=False):
@@ -39,13 +38,6 @@ class DetectState(TypedDict, total=False):
     symptoms: dict           # system -> canonical symptom line
     incident: str | None
     action: str
-
-
-class ReapState(TypedDict, total=False):
-    agent: str
-    last_seen: str
-    released: dict
-    confirmed: bool
 
 
 class UpgradeState(TypedDict, total=False):
@@ -148,45 +140,7 @@ def build_graphs(agent: Agent):
     g.add_edge("open_or_grow", END)
     detect = g.compile(checkpointer=cp)
 
-    # ------------------------------------------------------------------ undertaker
-    def confirm_dead(state: ReapState, config) -> dict:
-        cutoff = now() - timedelta(seconds=settings.DEAD_AFTER_S)
-        doc = col("agents").find_one_and_update(
-            {"_id": state["agent"], "status": {"$ne": "dead"}, "last_seen": {"$lt": cutoff}},
-            {"$set": {"status": "dead", "died_at": now(), "phase": None}}, return_document=ReturnDocument.AFTER)
-        return {"confirmed": doc is not None}
-
-    def release_leases(state: ReapState, config) -> dict:
-        if not state.get("confirmed"):
-            return {}
-        a = state["agent"]
-        tasks = [t["_id"] for t in col("tasks").find({"owner": a, "status": "claimed"}, {"_id": 1})]
-        incs = [i["_id"] for i in col("incidents").find({"owner": a, "active": True}, {"_id": 1})]
-        col("tasks").update_many({"owner": a, "status": "claimed"}, {"$set": {"lease_until": leases.EPOCH}})
-        col("incidents").update_many({"owner": a, "active": True}, {"$set": {"lease_until": leases.EPOCH}})
-        q = col("stats").update_one({"_id": "coordinator_lease", "owner": a}, {"$set": {"lease_until": leases.EPOCH}})
-        return {"released": {"tasks": tasks, "incidents": incs, "coordinator_lease": bool(q.modified_count)}}
-
-    def notify(state: ReapState, config) -> dict:
-        if not state.get("confirmed"):
-            return {}
-        rel = state.get("released") or {}
-        work = rel.get("tasks", []) + rel.get("incidents", []) + (["the coordinator lease"] if rel.get("coordinator_lease") else [])
-        text = (f"{state['agent']} stopped heartbeating — marked dead; released {', '.join(work)}."
-                if work else f"{state['agent']} stopped heartbeating — marked dead (held no work).")
-        agent.think(text, kind="handoff", incident=(rel.get("incidents") or [None])[0], pause=False)
-        say(agent.id, "recovery", "handoff", {"dead": state["agent"], "released": rel, "text": text})
-        return {}
-
-    g = StateGraph(ReapState)
-    g.add_node("confirm_dead", confirm_dead)
-    g.add_node("release_leases", release_leases)
-    g.add_node("notify", notify)
-    g.add_edge(START, "confirm_dead")
-    g.add_edge("confirm_dead", "release_leases")
-    g.add_edge("release_leases", "notify")
-    g.add_edge("notify", END)
-    reap = g.compile(checkpointer=cp)
+    reap = reaper.build(agent, cp)
 
     # ------------------------------------------------------------------ recurrence -> upgrade request
     def file_request(state: UpgradeState, config) -> dict:
@@ -366,18 +320,12 @@ def run(agent: Agent) -> None:
             if col("incidents").find_one({"status": "failed", "kind": {"$ne": "security"}, "affected": {"$in": seg},
                                           "closed_at": {"$gt": now() - timedelta(seconds=settings.FAILED_COOLDOWN_S)}},
                                          {"_id": 1}):
-                continue  # just escalated to the Beekeeper (e.g. approval denied): don't nag immediately
+                continue  # just escalated to the approver (e.g. approval denied): don't nag immediately
             key = f"{seg[0]}:{int(time.time() * 1000)}"
             detect.invoke({"kind": "chain", "segment": seg, "symptoms": {s: lines[s] for s in seg}},
                           {"configurable": {"thread_id": f"monitor:detect:{key}"}}, durability="exit")
 
-        # Undertaker: stale heartbeats
-        cutoff = now() - timedelta(seconds=settings.DEAD_AFTER_S)
-        for a in col("agents").find({"status": {"$ne": "dead"}, "last_seen": {"$lt": cutoff},
-                                     "_id": {"$ne": agent.id}}, {"_id": 1, "generation": 1}):
-            reap.invoke({"agent": a["_id"]},
-                        {"configurable": {"thread_id": f"undertaker:{a['_id']}:{a.get('generation', 0)}"}},
-                        durability="exit")
+        reaper.sweep(agent, reap)  # stale heartbeats -> dead, leases released
 
         if time.monotonic() - last_scan["at"] > settings.SECURITY_SCAN_S:
             last_scan["at"] = time.monotonic()

@@ -36,22 +36,8 @@ MEMO_FIELD = slice(51, 80)      # free text
 
 
 def validate_record(record: str) -> bool:
-    """Upgrader remediation batch_validation: reject malformed NIGHTBAT records.
-
-    Fixed-width record of RECORD_LEN chars, numeric account, signed numeric amount.
-    A bad record is rejected here instead of ABENDing the batch (S0C7).
-    """
-    if not isinstance(record, str) or len(record) != RECORD_LEN:
-        return False
-    account = record[ACCOUNT_FIELD].strip()
-    amount = record[AMOUNT_FIELD].strip()
-    if not (account.isascii() and account.isdigit()):
-        return False
-    if amount[:1] in ("+", "-"):
-        amount = amount[1:]
-    elif amount[-1:] in ("+", "-"):
-        amount = amount[:-1]
-    return amount.isascii() and amount.isdigit()
+    """Legacy: no validation. Every record is accepted into NIGHTBAT."""
+    return True
 
 
 def format_record(rec_id: str, date: str, debit: str, credit: str, amount: int | str,

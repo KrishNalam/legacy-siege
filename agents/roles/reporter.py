@@ -50,11 +50,11 @@ def interpret(ev: dict) -> list[dict]:
             st = upd["status"]
             if st == "resolved":
                 m = doc.get("metrics") or {}
-                out.append({"to": "beekeeper", "kind": "status",
+                out.append({"to": "approver", "kind": "status",
                             "body": f"{iid} resolved in {m.get('ttr_s', 0):.0f}s — root cause {doc.get('fault_class')} on "
                                     f"{doc.get('root_cause_system')} ({m.get('hops')} hops, {m.get('attempts')} attempts)."})
             elif st == "failed":
-                out.append({"to": "beekeeper", "kind": "status", "body": f"{iid} escalated: {doc.get('failure', 'failed')}."})
+                out.append({"to": "approver", "kind": "status", "body": f"{iid} escalated: {doc.get('failure', 'failed')}."})
             else:
                 out.append({"to": "hive", "kind": "status", "body": f"{iid} → {st} ({doc.get('owner') or 'unclaimed'})."})
         if "affected" in upd or any(k.startswith("affected.") for k in upd):
@@ -82,12 +82,12 @@ def interpret(ev: dict) -> list[dict]:
         st = upd.get("status") if op == "update" else doc.get("status")
         if st == "dead" and doc.get("phase") != "shutdown":
             out.append({"to": "hive", "kind": "handoff",
-                        "body": f"{aid} stopped heartbeating — the Undertaker released its work."})
+                        "body": f"{aid} stopped heartbeating — the reaper released its work."})
         elif op == "insert" and doc.get("standby_for"):
             out.append({"to": "hive", "kind": "status", "body": f"{aid} joined the bench (replacing {doc['standby_for']})."})
         return out
     if coll == "stats" and upd.get("owner"):
-        out.append({"to": "beekeeper", "kind": "handoff", "body": f"{upd['owner']} now holds the coordinator lease."})
+        out.append({"to": "approver", "kind": "handoff", "body": f"{upd['owner']} now holds the coordinator lease."})
     return out
 
 
@@ -224,7 +224,7 @@ def run_prioritiser(agent):
                             lines.append(doc)
                         elif coll == 'approvals':
                             if doc.get('status') == 'pending':
-                                lines.append(dict(to='beekeeper', kind='approval', body='Human approval waiting',
+                                lines.append(dict(to='approver', kind='approval', body='Human approval waiting',
                                                   incident=doc.get('incident'), severity='warning', source='approvals'))
                         else:
                             for m in interpret(ev):

@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> None:
         role.run(agent)
     except (SystemExit, KeyboardInterrupt):
         pass
-    except Exception as e:  # crash: leave the doc as-is so the Undertaker reaps us like any death
+    except Exception as e:  # crash: leave the doc as-is so the reaper reaps us like any death
         log(agent.id, f"crashed: {type(e).__name__}: {e}")
         raise
     agent.shutdown()

@@ -96,7 +96,7 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
     never overwrite the core fields.
 
     Every event says who, what and why, whatever fired it (the Runner is the one door for all chaos):
-    ``source`` ("scenario" | "manual" | "red-fleet"), ``who`` (``scenario:<name>``, ``beekeeper`` or the
+    ``source`` ("scenario" | "manual" | "red-fleet"), ``who`` (``scenario:<name>``, ``approver`` or the
     attacker's id) and ``why`` (the attacker's reason, else what the fault tests).
     """
     f = faults.get(fault)
@@ -112,7 +112,7 @@ def fire(fault: str, target: str | None = None, params: dict | None = None, manu
             return decider.refused(decision, f.name, target, params)
         extra = {**extra, "runner_decision": decision["_id"]}
     source = "red-fleet" if red else ("manual" if manual else "scenario")
-    who = who or extra.get("by") or ("beekeeper" if manual else f"scenario:{(run or {}).get('scenario') or '?'}")
+    who = who or extra.get("by") or ("approver" if manual else f"scenario:{(run or {}).get('scenario') or '?'}")
     why = why or ((extra.get("red") or {}).get("reason") if red else None) or f.tests
     event = {
         "_id": _next_id("CHX"), "fault": f.name, "kind": f.kind, "target": target, "params": params,

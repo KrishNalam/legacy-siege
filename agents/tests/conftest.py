@@ -131,12 +131,12 @@ def start_swarm(env_extra=None, log_name="swarm", agents: int = 12) -> Swarm:
     return s
 
 
-def approve_pending(decided_by: str = "test-beekeeper") -> list[str]:
-    """Play the Beekeeper: approve every pending approval (only pending docs are ever decided)."""
+def approve_pending(decided_by: str = "test-approver") -> list[str]:
+    """Play the approver: approve every pending approval (only pending docs are ever decided)."""
     from common.db import col, now
 
     ids = []
-    # the Beekeeper answers once the coordinator has relayed the request (keeps the relay path observable)
+    # the approver answers once the coordinator has relayed the request (keeps the relay path observable)
     for a in col("approvals").find({"status": "pending", "relayed_by": {"$ne": None}}):
         r = col("approvals").update_one({"_id": a["_id"], "status": "pending"},
                                         {"$set": {"status": "approved", "decided_by": decided_by, "decided_at": now()}})

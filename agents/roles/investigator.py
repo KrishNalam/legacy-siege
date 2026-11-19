@@ -3,7 +3,7 @@
     observe -> recall --usable hit--> confirm --fits--> plan
                  \\                       \\--doesn't fit--\\
                   \\--no hit-----------------------------> diagnose (one hop per run, loops) -> classify -> plan
-    plan -> dispatch <-> approve (LangGraph interrupt until the Beekeeper decides)
+    plan -> dispatch <-> approve (LangGraph interrupt until the approver decides)
             dispatch <-> await_group (operators act, verifier verifies)
             dispatch -> resolve (all steps verified AND all affected systems healthy) -> playbook
 
@@ -113,7 +113,7 @@ def build_graph(agent: Agent):
     def escalate(config, inc_id: str, reason: str) -> dict:
         fenced(config, inc_id, {"$set": {"status": "failed", "active": False, "closed_at": now(),
                                           "failure": reason}})
-        say(inc_id, f"Escalating {inc_id} to the Beekeeper: {reason}", pause=False)
+        say(inc_id, f"Escalating {inc_id} to the approver: {reason}", pause=False)
         bus(agent.id, "coordinator", "escalate", {"incident": inc_id, "reason": reason})
         return {"outcome": "failed"}
 
@@ -304,7 +304,7 @@ def build_graph(agent: Agent):
         if not culprits:
             if recovery.enabled() and path and all((findings.get(s) or {}).get("status") == "up" for s in path):
                 # AGENTS_RECOVERY: a transient blip (another incident's fix landed meanwhile): nothing is wrong
-                # any more, so close it as self-healed instead of handing the Beekeeper a false alarm
+                # any more, so close it as self-healed instead of handing the approver a false alarm
                 fenced(config, inc_id, {"$set": {"status": "resolved", "active": False, "closed_at": now(),
                                                   "resolution": "self_healed", "lease_until": leases.EPOCH}})
                 say(inc_id, f"Walked {' → '.join(path)}: every system reads healthy now, no fault left to fix. "
@@ -581,7 +581,7 @@ def build_graph(agent: Agent):
                    "status": "pending", "decided_by": None, "ts": now(), "decided_at": None}
             col("approvals").insert_one(apr)
             agent.set(phase="awaiting_approval", target="hive")
-            say(inc_id, f"{step['op']} on {step['system']} is destructive — asking the Beekeeper ({apr['_id']}).",
+            say(inc_id, f"{step['op']} on {step['system']} is destructive — asking the approver ({apr['_id']}).",
                 kind="approval", system=step["system"])
         if step.get("approval_id") != apr["_id"]:
             # Link (or repair the link, if we crashed between the insert above and this write):
@@ -591,13 +591,13 @@ def build_graph(agent: Agent):
         decision = interrupt({"approval_id": apr["_id"], "step_id": step["step_id"], "op": step["op"]})
         if decision.get("status") == "approved":
             fenced(config, inc_id, {"$set": {"status": "fixing"}})
-            say(inc_id, f"Beekeeper approved {apr['_id']} ({decision.get('decided_by') or 'beekeeper'}); proceeding.",
+            say(inc_id, f"Approver approved {apr['_id']} ({decision.get('decided_by') or 'approver'}); proceeding.",
                 kind="approval", system=step["system"])
             return {"outcome": "approved"}
         fenced(config, inc_id, {"$set": {"steps.$[s].status": "failed",
                                           "steps.$[s].evidence": f"approval {apr['_id']} denied"}},
                array_filters=[{"s.step_id": step["step_id"]}])
-        return escalate(config, inc_id, f"Beekeeper denied {apr['_id']} ({step['op']} on {step['system']})")
+        return escalate(config, inc_id, f"Approver denied {apr['_id']} ({step['op']} on {step['system']})")
 
     def await_group(state: ScoutState, config) -> dict:
         inc = inc_doc(state["incident"])

@@ -87,8 +87,8 @@ function translate(t) {
   if (k === "reject") { const s = t.system || stepByAction(inc, (x.match(/INC-\S+-a\d+/) || [])[0])?.system; return { text: `Re-checked the ${S(s || "system")} → <b>it LIED</b>: said “done”, nothing changed. Rejected.`, story: true }; }
   if ((m = x.match(/^Verified (\S+-a(\d+))/))) { const st = stepByAction(inc, m[1]); const n = +m[2]; return { text: `${n > 1 ? "Second try is real: " : "Confirmed: "}“${esc(op(st?.op))}” really happened on the ${S(st?.system || t.system || "system")} <span class="g">✓</span>`, story: true }; }
   if ((m = x.match(/^(\w+) on (\w+) is destructive/))) return { text: `“${esc(Op(m[1]))}” is risky. Asking a human first.`, story: true };
-  if (/^Beekeeper approved/.test(x)) return { text: "A human approved. Going ahead.", story: true };
-  if (/^Beekeeper denied|denied APR/.test(x)) return { text: "A human said no. Holding back.", story: true };
+  if (/^Approver approved/.test(x)) return { text: "A human approved. Going ahead.", story: true };
+  if (/^Approver denied|denied APR/.test(x)) return { text: "A human said no. Holding back.", story: true };
   if ((m = x.match(/^(\S+) stopped heartbeating/))) return { text: `${esc(agentName(m[1]))} went silent: marked dead, its job is up for grabs.`, story: true };
   if ((m = x.match(/^Took over (\S+) from (\S+) after (\d+)s/))) return { text: `<span class="g">Took over</span> ${esc(agentName(m[2]))}’s job ${m[3]} s after it died, from its saved progress.`, story: true };
   if (/^Loaded .*checkpoint/.test(x)) return { text: "Loaded the dead bee’s saved progress from MongoDB. Finished steps are not repeated.", story: false };
@@ -99,7 +99,7 @@ function translate(t) {
   if ((m = x.match(/resolved (\d+) times .*filed/))) return { text: `Same failure ${m[1]} times → asked the Beekeeper for a permanent code fix.`, story: true };
   if ((m = x.match(/proposed a (\d+)-line diff/))) return { text: `Wrote a ${m[1]}-line code fix.`, story: true };
   if (/running test_.*replaying/.test(x)) return { text: "Testing the fix in a sandbox, replaying the attack.", story: false };
-  if (/sent to the Beekeeper/.test(x)) return { text: "Tests pass. Waiting for a human OK to deploy.", story: true };
+  if (/sent to the approver/.test(x)) return { text: "Tests pass. Waiting for a human OK to deploy.", story: true };
   if ((m = x.match(/deployed - (\w+) version (\d+) -> (\d+)/))) return { text: `Deployed: ${S(m[1])} upgraded v${m[2]} → v${m[3]}.`, story: true };
   if (/replayed .*watching/.test(x)) return { text: "Replaying the original attack to prove the fix…", story: true };
   if (/proven - /.test(x)) return { text: `<span class="g">Proven:</span> the attack came back and nothing broke.`, story: true };

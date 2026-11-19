@@ -169,7 +169,7 @@ def test_every_event_says_who_what_why(systems):
     assert {(e["source"], e["who"]) for e in seeded} == {("scenario", "scenario:bank-night-1")}
     assert all(e["why"] for e in seeded)
     man = runner.fire("disk_fill")
-    assert (man["source"], man["who"], man["why"]) == ("manual", "beekeeper", faults.get("disk_fill").tests)
+    assert (man["source"], man["who"], man["why"]) == ("manual", "approver", faults.get("disk_fill").tests)
     red = runner.fire("cron_stop", manual=False, extra={"by": "red-saboteur", "red": {"reason": "mid-repair"},
                                                         "who": "spoof", "source": "spoof"})
     assert (red["source"], red["who"], red["why"], red["by"]) == ("red-fleet", "red-saboteur", "mid-repair", "red-saboteur")

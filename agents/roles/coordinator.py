@@ -1,4 +1,4 @@
-"""Coordinator — owns the goal (all systems green, zero open vulns) and talks to the Beekeeper.
+"""Coordinator — owns the goal (all systems green, zero open vulns) and talks to the approver.
 
 Exactly one coordinator acts at a time: the coordinator lease lives in swarm.stats {_id: "coordinator_lease"} and is taken
 with the same atomic claim as any other lease. coordinator-2 sits on the bench and takes the lease (and the
@@ -6,8 +6,8 @@ goal) when coordinator-1 stops heartbeating.
 
 Active coordinator, each tick:
   * new open incident -> per-incident graph (thread "<incident>:coordinator"): triage -> assign an idle investigator
-  * pending approvals  -> relays them to the Beekeeper (narration + reporter message)
-  * status line        -> posts to the Beekeeper when the picture changes
+  * pending approvals  -> relays them to the approver (narration + reporter message)
+  * status line        -> posts to the approver when the picture changes
 """
 from __future__ import annotations
 
@@ -115,7 +115,7 @@ def run(agent: Agent) -> None:
         if prev.get("owner") and prev["owner"] != agent.id:
             agent.think(f"{prev['owner']} went silent — {agent.id} takes the coordinator lease and the goal.",
                         kind="handoff")
-            say(agent.id, "beekeeper", "handoff", f"{prev['owner']} down; {agent.id} is now coordinator.")
+            say(agent.id, "approver", "handoff", f"{prev['owner']} down; {agent.id} is now coordinator.")
         else:
             agent.think("Holding the coordinator lease. Goal: every system green, zero open vulns.", pause=False)
         return True
@@ -153,9 +153,9 @@ def run(agent: Agent) -> None:
             r = col("approvals").update_one({"_id": apr["_id"], "relayed_by": None},
                                             {"$set": {"relayed_by": agent.id, "relayed_at": now()}})
             if r.modified_count:
-                agent.think(f"Beekeeper: {apr.get('incident') or apr.get('upgrade') or 'a change'} needs your approval — {apr['desc']} ({apr['_id']}).",
+                agent.think(f"Approver: {apr.get('incident') or apr.get('upgrade') or 'a change'} needs your approval — {apr['desc']} ({apr['_id']}).",
                             kind="approval", incident=apr["incident"], pause=False)
-                say(agent.id, "beekeeper", "approval", {"approval": apr["_id"], "incident": apr["incident"],
+                say(agent.id, "approver", "approval", {"approval": apr["_id"], "incident": apr["incident"],
                                                         "desc": apr["desc"], "risk": apr.get("risk")})
         active = list(col("incidents").find({"active": True}, {"status": 1, "owner": 1}).sort("_id", 1))
         text = ("All quiet: every system green." if not active else
@@ -163,7 +163,7 @@ def run(agent: Agent) -> None:
                                                       for i in active))
         if text != last_status["text"]:
             last_status["text"] = text
-            say(agent.id, "beekeeper", "status", text)
+            say(agent.id, "approver", "status", text)
 
     def unassigned_by_priority(incs: list[dict]) -> list[dict]:
         """AGENTS_COMMS=1 and several waiting: highest priority first (customer-facing, then the prioritised

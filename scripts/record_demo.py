@@ -285,7 +285,7 @@ def main() -> int:
     ap.add_argument("--base", default=os.environ.get("CONSOLE_URL", f"http://127.0.0.1:{config.CONSOLE_PORT}"))
     ap.add_argument("--out", type=Path, default=MEDIA)
     ap.add_argument("--chrome", default=os.environ.get("RECORD_CHROME") or find_chromium())
-    ap.add_argument("--approve-delay", type=float, default=3.0, help="seconds the Beekeeper modal stays on screen")
+    ap.add_argument("--approve-delay", type=float, default=3.0, help="seconds the approver modal stays on screen")
     ap.add_argument("--night-timeout", type=float, default=240)
     ap.add_argument("--night3-watch", type=float, default=20)
     ap.add_argument("--atlas-s", type=float, default=9, help="seconds on the Atlas view")

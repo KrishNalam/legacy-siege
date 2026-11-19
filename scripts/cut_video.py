@@ -120,7 +120,7 @@ def plan(log: dict, layout: str = "script", cards: list[dict] | None = None) -> 
         "hook": "Chaos Monkey hits a legacy bank. 12 AI agents have to keep it alive.",
         "cascade": "Investigator walks the blame chain portal → unix → mainframe (portal still says 200)",
         "lie": "Op says applied:true. Verifier reads it back: ACK ≠ APPLIED → new attempt",
-        "approval": "Destructive step waits for the Beekeeper's approval before it is sent",
+        "approval": "Destructive step waits for the approver's approval before it is sent",
         "kill": "Real SIGKILL → Recovery resumes from the MongoDB checkpoint",
         "upgrader": "Upgrader turns the repeat fault into a code upgrade: v1 → v2, tested + approved",
         "night3": "Night 3: the same attack. Nothing happens.",

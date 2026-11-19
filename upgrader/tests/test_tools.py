@@ -2,7 +2,7 @@
 
 Switch off: an upgrade with no code remediation is not turned into a tool upgrade. Switch on: a
 Monitor #2 repeat that no code fix covers starts a tool upgrade, which runs the real sandbox replay,
-waits for the Beekeeper, adopts the tool and is proven only by a swarm fix whose tool steps were all
+waits for the approver, adopts the tool and is proven only by a swarm fix whose tool steps were all
 Verifier-verified. Tampered or retired tools are never used. Isolated DBs only.
 """
 from __future__ import annotations

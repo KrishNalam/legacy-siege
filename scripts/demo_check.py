@@ -7,7 +7,7 @@
     .venv/bin/python -m scripts.demo_check --base http://127.0.0.1:8700 --approve-delay 2
 
 The stack must already be running (`.venv/bin/python run.py --reset`). Approvals are auto-approved through
-POST /api/approvals/{id} (like the Beekeeper clicking Approve); the agent kill is fired through POST /api/kill
+POST /api/approvals/{id} (like the approver clicking Approve); the agent kill is fired through POST /api/kill
 right after restart_batch is approved, so the operator dies in phase step_sent. Exit code 0 = every beat PASS.
 
     .venv/bin/python -m scripts.demo_check --drift         # + Statement 3 Q3 rows (opt-in, after night 3)
@@ -326,10 +326,10 @@ class Demo:
             return
         first = (step.get("attempts") or [None])[0]
         led = self.s.ledger.find_one({"action_id": first}) or {}
-        ok = (apr["status"] == "approved" and apr.get("decided_by") == "beekeeper" and led.get("ts") is not None
+        ok = (apr["status"] == "approved" and apr.get("decided_by") == "approver" and led.get("ts") is not None
               and apr["ts"] <= led["ts"] and apr["decided_at"] <= led["ts"]
               and not obs["approvals"].get(apr["_id"], {}).get("ledger_before_approval")
-              and led.get("approver") == "beekeeper")
+              and led.get("approver") == "approver")
         lead = (led["ts"] - apr["decided_at"]).total_seconds() if led.get("ts") and apr.get("decided_at") else None
         self.r.add("c. approval before restart_batch", ok,
                    f"{apr['_id']} pending at {apr['ts']:%H:%M:%S}, approved via API, op sent "
@@ -365,7 +365,7 @@ class Demo:
         died = a.get("died_at")
         dt = (died - killed_at).total_seconds() if died and a.get("status") == "dead" else None
         limit = config.LEASE_S + 2 * config.HEARTBEAT_S + 2
-        self.r.add("d. undertaker marks it dead", dt is not None and dt <= limit,
+        self.r.add("d. reaper marks it dead", dt is not None and dt <= limit,
                    f"{victim} status={a.get('status')} {f'{dt:.1f}s after SIGKILL' if dt is not None else ''} "
                    f"(limit {limit:.0f}s)", dt)
         inc = self.s.incidents.find_one({"_id": inc["_id"]})

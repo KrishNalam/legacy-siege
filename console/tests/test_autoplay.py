@@ -10,7 +10,7 @@ from console.autoplay import Autoplay
 
 def _apr(_id, desc="restart_batch NIGHTBAT on mainframe", status="pending", age=10, kind="step", **kw):
     swarm().approvals.insert_one({"_id": _id, "kind": kind, "desc": desc, "status": status, "ts": now() - timedelta(seconds=age),
-                                  "decided_by": "beekeeper" if status == "approved" else None, **kw})
+                                  "decided_by": "approver" if status == "approved" else None, **kw})
 
 
 def _estate(status="up"):

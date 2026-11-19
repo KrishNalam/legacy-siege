@@ -12,7 +12,7 @@ An accepted tool can be one *step* of an upgrade (remediation_kind "tool", upgra
     plan   -> the tool's ops, re-checked against the whitelist
     test   -> sandbox replay: fire the fault on an isolated copy of the estate, run the tool's ops,
               the system must read back healthy and the fault resolved (upgrader.replay --tool)
-    gate   -> Beekeeper approval, same as a code diff
+    gate   -> approver approval, same as a code diff
     deploy -> adopt the tool as the swarm's standing recovery for that fault (ledger receipt, one txn)
     prove  -> fire the fault again on the estate; proven when the swarm resolves the incident with
               the tool's steps and the Verifier verified every one of them.
