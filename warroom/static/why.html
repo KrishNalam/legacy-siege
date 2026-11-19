@@ -36,7 +36,7 @@
   <ol class="big" style="top:180px">
     <li><b>Self-healing swarm</b><span>12 agents, each its own process. Sentinel spots, Queen triages, Scout fixes.</span></li>
     <li><b class="grn">“Took effect”, not “sent”</b><span>Only the Guard marks a step done, after reading the system back.</span></li>
-    <li><b>Crash? A Nurse takes over</b><span>Kill an agent mid-step. A Nurse claims its lease and resumes. No replay.</span></li>
+    <li><b>Crash? A Reserve bee takes over</b><span>Kill an agent mid-step. A Reserve bee claims its lease and resumes. No replay.</span></li>
     <li><b class="amb">It learns</b><span>Same attack next night: 1 hop instead of 3, about 2× faster.</span></li>
     <li><b class="red">Red team keeps it honest</b><span>A seeded Chaos Monkey attacks live, and kills agents mid-job.</span></li>
   </ol>
@@ -57,7 +57,7 @@
     </div>
     <div class="q">
       <h2><i>2</i>Can it resume after a crash?</h2>
-      <p>A Nurse takes the dead agent’s lease<br>and resumes from the last verified step.</p>
+      <p>A Reserve bee takes the dead agent’s lease<br>and resumes from the last verified step.</p>
       <ul><li>findOneAndUpdate leases + fencing</li><li>MongoDBSaver checkpoints</li><li>change streams + resume tokens</li><li>TTL indexes</li></ul>
     </div>
     <div class="q">

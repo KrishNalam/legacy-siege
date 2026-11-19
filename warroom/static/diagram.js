@@ -4,6 +4,7 @@
 // Data: the /ws change stream (js/store.js) + the existing REST endpoints. No new contracts.
 // The plain-English vocabulary, NOW line, approvals and buttons are shared with W9's flow view (flow.js).
 import { state, on, connect, api, currentRun, pendingApprovals, latestUpgrade, serverNow, ts, prettyTime } from "./js/store.js";
+import { G, ROLE as BEE_NAME } from "./js/glossary.js";
 
 const $ = (s) => document.querySelector(s);
 const XMARK = '<svg viewBox="0 0 16 16" width="0.9em" height="0.9em" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" fill="none"/></svg>';
@@ -40,9 +41,10 @@ const ROLE = {
   nurse: { c: "#ff9ccf", tag: "takes over dead bees’ jobs" }, sentinel: { c: "#7fd8ff", tag: "watches system health" },
   gardener: { c: "#a6f0a0", tag: "writes permanent code fixes" }, waggle: { c: "#6ee7d8", tag: "shares what was learned" },
 };
-const NAMES = { "worker-web-1": "Portal worker", "worker-unix-1": "Unix worker", "worker-mainframe-1": "Mainframe worker",
-  "queen-1": "Queen", "queen-2": "Backup queen", "guard-1": "Guard", "sentinel-1": "Lookout", "gardener-1": "Gardener",
-  "scout-1": "Scout", "nurse-1": "Nurse", "waggle-1": "Messenger" };
+const NAMES = { "worker-web-1": `Portal ${BEE_NAME.worker.toLowerCase()}`, "worker-unix-1": `Unix ${BEE_NAME.worker.toLowerCase()}`,
+  "worker-mainframe-1": `Mainframe ${BEE_NAME.worker.toLowerCase()}`, "queen-1": BEE_NAME.queen, "queen-2": `Backup ${BEE_NAME.queen.toLowerCase()}`,
+  "guard-1": BEE_NAME.guard, "sentinel-1": BEE_NAME.sentinel, "gardener-1": BEE_NAME.gardener, "scout-1": BEE_NAME.scout, "nurse-1": BEE_NAME.nurse,
+  "waggle-1": BEE_NAME.waggle, "platform-1": BEE_NAME.platform };
 function agentName(id) {
   if (!id) return "a bee";
   const a = state.agents.get(id);
@@ -53,8 +55,8 @@ function agentName(id) {
   if (NAMES[id]) return NAMES[id];
   const m = id.match(/^(\w+?)-(?:(\w+)-)?(\d+)$/);
   if (!m) return id;
-  const base = { sentinel: "Lookout", waggle: "Messenger" }[m[1]] || m[1][0].toUpperCase() + m[1].slice(1);
-  return m[2] ? `${sn(m[2] === "web" ? "portal" : m[2])} worker ${m[3]}` : `${base} ${m[3]}`;
+  const base = BEE_NAME[m[1]] || m[1][0].toUpperCase() + m[1].slice(1);
+  return m[2] ? `${sn(m[2] === "web" ? "portal" : m[2])} ${BEE_NAME.worker.toLowerCase()} ${m[3]}` : `${base} ${m[3]}`;
 }
 const roleOf = (id) => state.agents.get(id)?.role || String(id || "").split("-")[0];
 
@@ -94,7 +96,7 @@ function translate(t) {
   if (/resending the SAME action id/.test(x)) return { text: "Re-sending the same action safely (the system ignores duplicates).", story: false };
   if ((m = x.match(/^(\S+) went silent — (\S+) takes the queen lease/))) return { text: `${esc(agentName(m[1]))} went silent. <span class="g">I’m queen now</span> and carry on.`, story: true };
   if ((m = x.match(/^Resolved (INC-\d+) in (\d+)s/))) return { text: `<span class="g">All green.</span> Fixed in ${m[2]} s. Lesson saved for next time.`, story: true };
-  if ((m = x.match(/resolved (\d+) times .*filed/))) return { text: `Same failure ${m[1]} times → asked the Gardener for a permanent code fix.`, story: true };
+  if ((m = x.match(/resolved (\d+) times .*filed/))) return { text: `Same failure ${m[1]} times → asked the Beekeeper for a permanent code fix.`, story: true };
   if ((m = x.match(/proposed a (\d+)-line diff/))) return { text: `Wrote a ${m[1]}-line code fix.`, story: true };
   if (/running test_.*replaying/.test(x)) return { text: "Testing the fix in a sandbox, replaying the attack.", story: false };
   if (/sent to the Beekeeper/.test(x)) return { text: "Tests pass. Waiting for a human OK to deploy.", story: true };
@@ -181,7 +183,7 @@ async function refreshScore() { try { score = await api("GET", "/api/scorecard")
 function nowLine() {
   if (!state.connected) return "Reconnecting to the live feed…";
   const apr = pendingApprovals()[0];
-  if (apr) return apr.kind === "upgrade" ? `Waiting for <span class="a">your OK</span> to deploy the Gardener’s code fix.` : `Waiting for <span class="a">your OK</span>: a risky step needs a human.`;
+  if (apr) return apr.kind === "upgrade" ? `Waiting for <span class="a">your OK</span> to deploy the Beekeeper’s code fix.` : `Waiting for <span class="a">your OK</span>: a risky step needs a human.`;
   const inc = focusIncident();
   const rid = runId();
   const recentReject = [...state.thoughts].reverse().find((t) => isLie(t) && serverNow() - ts(t.ts) < 7000);
@@ -238,7 +240,7 @@ function renderApproval() {
   const step = inc?.steps?.find((s) => s.step_id === a.step_id);
   const upg = a.kind === "upgrade" ? state.upgrades.get(a.upgrade) : null;
   if (a.kind === "upgrade") {
-    $("#ap-t").textContent = `Deploy the Gardener’s code fix to the ${sn(upg?.system || "mainframe")}?`;
+    $("#ap-t").textContent = `Deploy the Beekeeper’s code fix to the ${sn(upg?.system || "mainframe")}?`;
     const tests = upg?.tests ? ((upg.tests.pytest_passed ?? upg.tests.passed) ? "tests passed" : "tests FAILED") : "tests run";
     $("#ap-d").textContent = `${upg?.diff_lines ? `${upg.diff_lines}-line change · ` : ""}${tests} · after deploying, the attack is replayed to prove it.`;
   } else {
@@ -393,7 +395,7 @@ function defenceFor(e, nightIncs) {
     }
     const ho = nightIncs.flatMap((i) => i.handoffs || []).find((h) => h.from === v);
     if (ho) return { c: "ok", t: `${U(agentName(ho.to))} TOOK OVER${ho.takeover_s != null ? ` IN ${Math.round(ho.takeover_s)} S` : ""} · NO STEP REPEATED` };
-    return { c: "wait", t: "A NURSE PICKS UP ITS JOB…" };
+    return { c: "wait", t: "A RESERVE BEE PICKS UP ITS JOB…" };
   }
   if (["lying_success", "slow_apply", "false_log"].includes(e.fault)) {
     const rj = state.thoughts.find((t) => isLie(t) && ts(t.ts) >= t0 && (!t.system || t.system === e.target));
@@ -716,7 +718,7 @@ const BOXR = {
 const FULL = { x: 0, y: 84, w: 1600, h: 760 };
 const ZOOMS = ["overview", "chaos", "legacy", "bees", "gardener"];
 const KEYZ = { 1: "chaos", 2: "legacy", 3: "bees", 4: "gardener" };
-const TITLE = { overview: "", chaos: "EXHIBIT A.1: INSIDE CHAOS MONKEY", legacy: "EXHIBIT A.2: INSIDE THE LEGACY SYSTEMS", bees: "EXHIBIT A.3: INSIDE THE BEES", gardener: "EXHIBIT A.4: INSIDE THE GARDENER" };
+const TITLE = { overview: "", chaos: `EXHIBIT A.1: INSIDE ${G.attackers}`, legacy: `EXHIBIT A.2: INSIDE ${G.hive}`, bees: `EXHIBIT A.3: INSIDE ${G.colony}`, gardener: `EXHIBIT A.4: INSIDE ${G.beekeeper}` };
 let zoom = (() => { try { const z = new URLSearchParams(location.search).get("zoom"); return ZOOMS.includes(z) ? z : "overview"; } catch { return "overview"; } })();
 let zooming = false;
 // transform that maps the FULL exhibit onto box b (and its inverse)
@@ -852,7 +854,7 @@ function renderOverview() {
   const struck = new Set(ds.map((d) => d.who));
   const lastDuel = ds[ds.length - 1];
   const chaos = `<div class="big chaos ${ds.length ? "hot" : ""}" data-zoom="chaos" style="${pos(B.chaos)}">
-    <div class="bh"><span class="bt">CHAOS MONKEY</span><span class="dim">US, ATTACKING</span></div>
+    <div class="bh"><span class="bt">${G.attackers}</span><span class="dim">${G.attackersSub}</span></div>
     <div class="pers">${["SABOTEUR", "LIAR", "ASSASSIN", "HACKER", "DRIFTER", "MEMORY"].map((n) => `<span class="${struck.has(n) ? "on" : ""}">${n}</span>`).join("")}</div>
     <div class="bl-k">ATTACK <span class="ar">→</span> DEFENCE</div>
     ${ds.length ? ds.slice(-2).map((d) => `<div class="duo"><div><span class="pn">${esc(d.who)}</span> ${esc(d.atk)}</div><div class="def ${d.def.c}">↳ ${esc(d.def.t)}</div></div>`).join("") : '<div class="bl dim">—</div>'}
@@ -861,13 +863,13 @@ function renderOverview() {
   // LEGACY SYSTEMS
   const cascade = live ? (live.root_cause_system ? `REAL CAUSE: ${sn(live.root_cause_system)}` : `${sn(live.system)} IN TROUBLE · TRACING…`) : inc?.status === "resolved" ? "ALL GREEN AGAIN" : "ALL UP";
   const legacy = `<div class="big legacy ${live ? "hot" : ""}" data-zoom="legacy" style="${pos(B.legacy)}">
-    <div class="bh"><span class="bt">LEGACY SYSTEMS</span><span class="dim">THE OLD BANK</span></div>
+    <div class="bh"><span class="bt">${G.hive}</span><span class="dim">${G.hiveSub}</span></div>
     <div class="chainL">${legacyChain(inc, lieSys)}</div>
     </div>`; // Krish ledger 62: FIXES + NOW only when zoomed in
 
   // THE BEES
   const bees = `<div class="big bees ${live || working ? "hot" : ""}" data-zoom="bees" style="${pos(B.bees)}">
-    <div class="bh"><span class="bt">THE BEES</span><span class="dim">${agents.length - dead} AI AGENTS</span></div>
+    <div class="bh"><span class="bt">${G.colony}</span><span class="dim">${agents.length - dead} AI AGENTS</span></div>
     <div class="hive">${hiveCells()}</div>
     <div class="cnt"><span class="${rejects.length ? "r" : ""} ${lieFresh ? "flash" : ""}">LIES <b>${rejects.length}</b></span><span class="${dead ? "r" : ""} ${killFresh ? "flash" : ""}">KILLED <b>${dead}</b></span><span class="${hos ? "a" : ""}">TAKEOVERS <b>${hos}</b></span></div>
     <div class="ttf"><span class="dim">FIX TIME</span><span>N1 ${t1 != null ? secs(t1).toUpperCase() : "—"}</span>${t1 != null ? `<i style="width:${bw(t1)}px"></i>` : ""}</div>
@@ -877,7 +879,7 @@ function renderOverview() {
   // THE GARDENER
   const gThought = [...state.thoughts].reverse().find((t) => roleOf(t.agent) === "gardener");
   const gard = `<div class="big gard ${u && !["proven", "rejected"].includes(u.status) ? "hot" : ""}" data-zoom="gardener" style="${pos(B.gardener)}">
-    <div class="bh"><span class="bt">THE GARDENER</span><span class="dim">OUTSIDE THE SWARM</span></div>
+    <div class="bh"><span class="bt">${G.beekeeper}</span><span class="dim">${G.beekeeperSub}</span></div>
     </div>`; // Krish ledger 62: stage steps + NOW only when zoomed in
 
   patch($("#ov-nodes"), [{ k: "chaos", html: chaos }, { k: "legacy", html: legacy }, { k: "bees", html: bees }, { k: "gard", html: gard }]);
@@ -913,15 +915,15 @@ function renderOverview() {
 // n: [id, x, y, w, h, title, sub, kind]  kind: agent | db | sys | ext | ai     e: [from, to, label, cls?, via?]
 const HOW = {
   chaos: {
-    lead: "ATTACKERS PLAN, STRIKE, WATCH THE BEES, AND LEARN.",
+    lead: "ATTACKERS PLAN, STRIKE, WATCH THE COLONY, AND LEARN.",
     n: [
       ["plan", 60, 170, 210, 90, "SCENARIO", "seeded nights 1 · 2 · 3", "ext"],
       ["scouts", 340, 170, 220, 90, "2 SCOUTS", "hive · systems", "agent"],
       ["cmd", 630, 170, 260, 90, "COMMANDER", "observe → think → act → reflect", "ai"],
       ["strikers", 960, 170, 260, 90, "6 STRIKERS", "saboteur · liar · assassin · hacker · drifter · memory", "agent"],
       ["runner", 1290, 170, 250, 90, "RUNNER", "chaos.runner.fire()", "agent"],
-      ["legacy", 1290, 380, 250, 80, "LEGACY SYSTEMS", "faults land here", "sys"],
-      ["bees", 960, 380, 260, 80, "THE BEES", "SIGKILL a real process", "sys"],
+      ["legacy", 1290, 380, 250, 80, G.hive, "faults land here", "sys"],
+      ["bees", 960, 380, 260, 80, G.colony, "SIGKILL a real process", "sys"],
       ["red_agents", 340, 560, 220, 56, "red_agents", "findings board", "db"],
       ["events", 960, 560, 260, 56, "chaos_events", "every strike + result", "db"],
       ["lessons", 630, 560, 260, 56, "lessons", "what worked last time", "db"],
@@ -952,10 +954,10 @@ const HOW = {
       ["sent", 40, 160, 190, 84, "SENTINEL ×2", "watch /health", "agent"],
       ["queen", 270, 160, 190, 84, "QUEEN", "+ backup queen", "agent"],
       ["scouts", 500, 160, 210, 84, "SCOUTS", "trace the cause", "agent"],
-      ["workers", 750, 160, 210, 84, "WORKERS", "send one fix", "agent"],
+      ["workers", 750, 160, 210, 84, "FORAGERS", "send one fix", "agent"],
       ["guard", 1000, 160, 210, 84, "GUARD", "read back: is it true?", "agent"],
-      ["legacy", 1250, 160, 300, 84, "LEGACY SYSTEMS", "/ops · /state", "sys"],
-      ["nurse", 750, 330, 210, 76, "NURSE", "takes over a dead job", "agent"],
+      ["legacy", 1250, 160, 300, 84, G.hive, "/ops · /state", "sys"],
+      ["nurse", 750, 330, 210, 76, "RESERVE", "takes over a dead job", "agent"],
       ["comms", 270, 330, 190, 76, "COMMS", "messages · roster", "agent"],
       ["ai", 500, 330, 210, 76, "CLAUDE", "second opinion", "ai"],
       ["incidents", 40, 520, 190, 56, "incidents", "", "db"], ["agents", 270, 520, 190, 56, "agents", "heartbeats", "db"],
@@ -977,7 +979,7 @@ const HOW = {
       ["test", 790, 180, 200, 84, "TEST", "pytest + replay in a sandbox", "agent"],
       ["ok", 1040, 180, 200, 84, "YOUR OK", "approvals", "ext"],
       ["deploy", 1290, 180, 250, 84, "DEPLOY", "hot reload · version +1", "agent"],
-      ["legacy", 1290, 380, 250, 84, "LEGACY SYSTEMS", "now running v2", "sys"],
+      ["legacy", 1290, 380, 250, 84, G.hive, "now running v2", "sys"],
       ["prove", 790, 380, 250, 84, "PROVE", "chaos replays the attack", "agent"],
       ["stale", 290, 380, 300, 84, "OLD PLAYBOOKS", "marked stale", "db"],
     ],
@@ -1031,7 +1033,7 @@ function renderChaos() {
     <div class="zcol" style="left:60px;top:150px;width:470px">
       <div class="bl-k">THE ATTACKERS · US</div>
       ${PERS.map(([n, d]) => `<div class="pz ${struck.has(n) ? "on" : ""}"><div><span class="pn">${n}</span><span class="pc">${struck.has(n) ? `${struck.get(n)} TONIGHT` : "NOT TONIGHT"}</span></div><div class="pd">${esc(d)}</div></div>`).join("")}
-      <div class="bl-k" style="margin-top:14px">HOW THE BEES DEFEND</div>
+      <div class="bl-k" style="margin-top:14px">HOW THE COLONY DEFENDS</div>
       <div class="pd">Every “done” is re-checked by the Guard, every job is saved in MongoDB so a nurse can take it over, every fix is remembered for next time, and a repeat failure becomes new code.</div>
     </div>
     <div class="zcol" style="left:580px;top:150px;width:980px">
@@ -1089,7 +1091,7 @@ function renderGardener() {
   const u = latestUpgrade();
   const order = ["requested", "planning", "testing", "awaiting_approval", "deploying", "deployed", "proven"];
   const NAMES = ["REQUEST", "WRITE", "TEST", "YOUR OK", "DEPLOY", "PROVE", "FIXED"];
-  const WHY = ["Same failure twice → the Lookout files a request", "Reads the old code, writes a small fix", "Runs the tests and replays the attack in a sandbox", "Nothing ships without a human OK", "Installs the code and bumps the version", "Chaos Monkey replays the original attack", "The attack came back. Nothing broke."];
+  const WHY = ["Same failure twice → the Sentinel files a request", "Reads the old code, writes a small fix", "Runs the tests and replays the attack in a sandbox", "Nothing ships without a human OK", "Installs the code and bumps the version", "Chaos Monkey replays the original attack", "The attack came back. Nothing broke."];
   const at = u ? order.indexOf(u.status) : -1;
   const x0 = 60, wd = 200, gap = 13;
   const stages = NAMES.map((n, i) => { const st = u?.status === "rejected" ? "" : at > i || u?.status === "proven" ? "done" : at === i ? "cur" : ""; return `<div class="gz ${st}" style="left:${x0 + i * (wd + gap)}px;top:160px;width:${wd}px"><div class="gzn"><b>${st === "done" ? "✓" : i + 1}</b> ${n}</div><div class="pd">${WHY[i]}</div></div>`; }).join("");
@@ -1104,7 +1106,7 @@ function renderGardener() {
     <svg class="wires" viewBox="0 0 1600 900" style="position:absolute;left:0;top:0;width:1600px;height:900px"><path class="w ${at >= 0 ? "amb" : ""}" d="M${x0} 214 L${x0 + 7 * (wd + gap) - gap} 214"/></svg>
     ${stages}
     <div class="zcol" style="left:60px;top:330px;width:700px"><div class="bl-k">THE CODE FIX</div>${kv.map(([k, v]) => `<div class="kv"><span class="dim">${k}</span><span>${v}</span></div>`).join("")}</div>
-    <div class="zcol" style="left:820px;top:330px;width:740px"><div class="bl-k">WHAT THE GARDENER IS DOING</div>${thoughts.length ? thoughts.map((t) => `<div class="kv"><span class="dim">${new Date(t.ts).toLocaleTimeString([], { hour12: false })}</span><span>${esc((translate(t)?.text || "").replace(/<[^>]+>/g, ""))}</span></div>`).join("") : '<div class="pd">Waiting: after the same failure is fixed on two nights, the Gardener writes a permanent code fix.</div>'}</div>
+    <div class="zcol" style="left:820px;top:330px;width:740px"><div class="bl-k">WHAT THE BEEKEEPER IS DOING</div>${thoughts.length ? thoughts.map((t) => `<div class="kv"><span class="dim">${new Date(t.ts).toLocaleTimeString([], { hour12: false })}</span><span>${esc((translate(t)?.text || "").replace(/<[^>]+>/g, ""))}</span></div>`).join("") : '<div class="pd">Waiting: after the same failure is fixed on two nights, the Beekeeper writes a permanent code fix.</div>'}</div>
     <div class="eta" data-eta="gardener" style="left:60px;top:640px;width:1500px">${progressPanel("gardener")}</div>
   </div>`;
   const host = $("#gard-body");
@@ -1175,7 +1177,7 @@ function renderTop() {
   const upgBusy = mr === 2 && u && !["proven", "rejected"].includes(u.status);
   next.textContent = mr >= 1 && mr < 3 ? `Next night (${mr + 1})` : "Next night";
   next.disabled = busy.has(next) || mr === 0 || mr >= 3 || busyNight || upgBusy;
-  next.title = upgBusy ? "Wait: the Gardener is still installing and proving its code fix" : "";
+  next.title = upgBusy ? "Wait: the Beekeeper is still installing and proving its code fix" : "";
   next.onclick = () => act(next, async () => {
     if (mr === 1) { await api("POST", "/api/reset", { mode: "next_round" }); return api("POST", "/api/scenario/bank-night-2"); }
     return api("POST", "/api/scenario/bank-night-3");

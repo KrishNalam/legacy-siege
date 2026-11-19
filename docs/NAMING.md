@@ -4,7 +4,7 @@ The product has two vocabularies. The **brand** tells a story: hornets attack th
 beekeeper strengthens it. The **plain names** say exactly what each part does. This file maps one to the other and
 says where each is used.
 
-Status: **agreed direction, not yet applied.** The code still uses the old names (last column).
+Status: **names final.** Step 2 is done: UI labels come from `warroom/static/js/glossary.js`. Code, DB and env vars still use the old names (last column).
 
 ## Where each name is used
 

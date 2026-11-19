@@ -4,6 +4,7 @@
 // Branches appear when they happen: a killed bee and who took over; a renamed field (schema drift).
 // Same data source as the diagram view: the /ws change stream (store.js) + existing REST endpoints.
 import { state, on, connect, api, currentRun, pendingApprovals, latestUpgrade, serverNow, ts, prettyTime } from "./js/store.js";
+import { G, ROLE as BEE_NAME } from "./js/glossary.js";
 
 const $ = (s) => document.querySelector(s);
 const XMARK = '<svg viewBox="0 0 16 16" width="0.9em" height="0.9em" aria-hidden="true"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" fill="none"/></svg>';
@@ -40,9 +41,10 @@ const ROLE = {
   nurse: { c: "#ff9ccf", tag: "takes over dead bees’ jobs" }, sentinel: { c: "#7fd8ff", tag: "watches system health" },
   gardener: { c: "#a6f0a0", tag: "writes permanent code fixes" }, waggle: { c: "#6ee7d8", tag: "shares what was learned" },
 };
-const NAMES = { "worker-web-1": "Portal worker", "worker-unix-1": "Unix worker", "worker-mainframe-1": "Mainframe worker",
-  "queen-1": "Queen", "queen-2": "Backup queen", "guard-1": "Guard", "sentinel-1": "Lookout", "gardener-1": "Gardener",
-  "scout-1": "Scout", "nurse-1": "Nurse", "waggle-1": "Messenger" };
+const NAMES = { "worker-web-1": `Portal ${BEE_NAME.worker.toLowerCase()}`, "worker-unix-1": `Unix ${BEE_NAME.worker.toLowerCase()}`,
+  "worker-mainframe-1": `Mainframe ${BEE_NAME.worker.toLowerCase()}`, "queen-1": BEE_NAME.queen, "queen-2": `Backup ${BEE_NAME.queen.toLowerCase()}`,
+  "guard-1": BEE_NAME.guard, "sentinel-1": BEE_NAME.sentinel, "gardener-1": BEE_NAME.gardener, "scout-1": BEE_NAME.scout, "nurse-1": BEE_NAME.nurse,
+  "waggle-1": BEE_NAME.waggle, "platform-1": BEE_NAME.platform };
 function agentName(id) {
   if (!id) return "a bee";
   const a = state.agents.get(id);
@@ -53,8 +55,8 @@ function agentName(id) {
   if (NAMES[id]) return NAMES[id];
   const m = id.match(/^(\w+?)-(?:(\w+)-)?(\d+)$/);
   if (!m) return id;
-  const base = { sentinel: "Lookout", waggle: "Messenger" }[m[1]] || m[1][0].toUpperCase() + m[1].slice(1);
-  return m[2] ? `${sn(m[2] === "web" ? "portal" : m[2])} worker ${m[3]}` : `${base} ${m[3]}`;
+  const base = BEE_NAME[m[1]] || m[1][0].toUpperCase() + m[1].slice(1);
+  return m[2] ? `${sn(m[2] === "web" ? "portal" : m[2])} ${BEE_NAME.worker.toLowerCase()} ${m[3]}` : `${base} ${m[3]}`;
 }
 const roleOf = (id) => state.agents.get(id)?.role || String(id || "").split("-")[0];
 
@@ -94,7 +96,7 @@ function translate(t) {
   if (/resending the SAME action id/.test(x)) return { text: "Re-sending the same action safely (the system ignores duplicates).", story: false };
   if ((m = x.match(/^(\S+) went silent — (\S+) takes the queen lease/))) return { text: `${esc(agentName(m[1]))} went silent. <span class="g">I’m queen now</span> and carry on.`, story: true };
   if ((m = x.match(/^Resolved (INC-\d+) in (\d+)s/))) return { text: `<span class="g">All green.</span> Fixed in ${m[2]} s. Lesson saved for next time.`, story: true };
-  if ((m = x.match(/resolved (\d+) times .*filed/))) return { text: `Same failure ${m[1]} times → asked the Gardener for a permanent code fix.`, story: true };
+  if ((m = x.match(/resolved (\d+) times .*filed/))) return { text: `Same failure ${m[1]} times → asked the Beekeeper for a permanent code fix.`, story: true };
   if ((m = x.match(/proposed a (\d+)-line diff/))) return { text: `Wrote a ${m[1]}-line code fix.`, story: true };
   if (/running test_.*replaying/.test(x)) return { text: "Testing the fix in a sandbox, replaying the attack.", story: false };
   if (/sent to the Beekeeper/.test(x)) return { text: "Tests pass. Waiting for a human OK to deploy.", story: true };
@@ -181,7 +183,7 @@ async function refreshScore() { try { score = await api("GET", "/api/scorecard")
 function nowLine() {
   if (!state.connected) return "Reconnecting to the live feed…";
   const apr = pendingApprovals()[0];
-  if (apr) return apr.kind === "upgrade" ? `Waiting for <span class="a">your OK</span> to deploy the Gardener’s code fix.` : `Waiting for <span class="a">your OK</span>: a risky step needs a human.`;
+  if (apr) return apr.kind === "upgrade" ? `Waiting for <span class="a">your OK</span> to deploy the Beekeeper’s code fix.` : `Waiting for <span class="a">your OK</span>: a risky step needs a human.`;
   const inc = focusIncident();
   const rid = runId();
   const recentReject = [...state.thoughts].reverse().find((t) => isLie(t) && serverNow() - ts(t.ts) < 7000);
@@ -238,7 +240,7 @@ function renderApproval() {
   const step = inc?.steps?.find((s) => s.step_id === a.step_id);
   const upg = a.kind === "upgrade" ? state.upgrades.get(a.upgrade) : null;
   if (a.kind === "upgrade") {
-    $("#ap-t").textContent = `Deploy the Gardener’s code fix to the ${sn(upg?.system || "mainframe")}?`;
+    $("#ap-t").textContent = `Deploy the Beekeeper’s code fix to the ${sn(upg?.system || "mainframe")}?`;
     const tests = upg?.tests ? ((upg.tests.pytest_passed ?? upg.tests.passed) ? "tests passed" : "tests FAILED") : "tests run";
     $("#ap-d").textContent = `${upg?.diff_lines ? `${upg.diff_lines}-line change · ` : ""}${tests} · after deploying, the attack is replayed to prove it.`;
   } else {
@@ -437,7 +439,7 @@ function model() {
     const H = { requested: "Writing a code fix", planning: "Writing a code fix", testing: "Testing the fix", awaiting_approval: "Waiting for your OK", deploying: "Installing it", deployed: "Proving it", proven: "Fixed for good" };
     node("upgrade", { k: "Permanent fix", c: C.green, state: u.status === "proven" ? "done" : "active",
       html: `<div class="h" style="font-size:24px">${H[u.status] || "Code fix"}</div><div class="b dim" style="font-size:17px">${u.status === "proven" ? `${esc(sn(u.system))} v${u.version_before ?? 1} → v${u.version_after ?? 2}: the attack came back, nothing broke.` : "Same failure twice → new code."}</div>`,
-      who: `${BEE("#a6f0a0")}<span>Gardener bee</span>` });
+      who: `${BEE("#a6f0a0")}<span>Beekeeper</span>` });
   }
   // kill branch: a killed bee, and who took over
   const kills = [...state.chaos.values()].filter((e) => e.fault === "agent_kill" && e.run_id === rid).sort((a, b) => ts(a.ts) - ts(b.ts));
@@ -456,7 +458,7 @@ function model() {
       html: qho ? `<div class="h" style="font-size:24px">Backup queen</div><div class="b" style="font-size:17px">took over and carries on.</div>`
         : ho ? `<div class="h" style="font-size:24px">${esc(agentName(ho.to))}</div><div class="b" style="font-size:17px">took over the job from its saved progress${ho.takeover_s != null ? ` (${Math.round(ho.takeover_s)} s)` : ""}. No step repeated.</div>`
         : victim ? `<div class="h" style="font-size:24px">Coming…</div><div class="b dim" style="font-size:17px">${vrole === "queen" ? "The backup queen notices the silence." : "A nurse picks up the job when its lease runs out."}</div>` : `<div class="b dim">—</div>`,
-      who: `${BEE(C.pink)}<span>${vrole === "queen" ? "Backup queen" : "Nurse bee"}</span>`, toCheck: vrole !== "queen" });
+      who: `${BEE(C.pink)}<span>${vrole === "queen" ? "Backup queen" : "Reserve bee"}</span>`, toCheck: vrole !== "queen" });
   }
   // schema drift branch: only when it fires
   const incs = [...state.incidents.values()];
@@ -578,7 +580,7 @@ function renderTop() {
   const upgBusy = mr === 2 && u && !["proven", "rejected"].includes(u.status);
   next.textContent = mr >= 1 && mr < 3 ? `Next night (${mr + 1})` : "Next night";
   next.disabled = busy.has(next) || mr === 0 || mr >= 3 || busyNight || upgBusy;
-  next.title = upgBusy ? "Wait: the Gardener is still installing and proving its code fix" : "";
+  next.title = upgBusy ? "Wait: the Beekeeper is still installing and proving its code fix" : "";
   next.onclick = () => act(next, async () => {
     if (mr === 1) { await api("POST", "/api/reset", { mode: "next_round" }); return api("POST", "/api/scenario/bank-night-2"); }
     return api("POST", "/api/scenario/bank-night-3");

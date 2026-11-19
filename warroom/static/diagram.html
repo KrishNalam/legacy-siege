@@ -17,7 +17,7 @@
     <div class="l row nonum" style="top:14px"><span><span class="brand">LEGACY SIEGE</span><a class="why" href="./why" title="Why this matters">WHY IT MATTERS →</a></span>
       <nav class="controls">
         <button id="btn-start" class="btn inv" title="S">START</button>
-        <button id="btn-kill" class="btn kill" title="Kill the worker that is in the middle of a job (K)">KILL A WORKER</button>
+        <button id="btn-kill" class="btn kill" title="Kill the worker that is in the middle of a job (K)">KILL A FORAGER</button>
         <button id="btn-queen" class="btn kill" title="Kill the queen, the coordinator; the backup queen takes over (Q)">KILL THE QUEEN</button>
         <button id="btn-next" class="btn" title="N">NEXT NIGHT</button>
         <button id="btn-help" class="btn" title="What every button does (?)">? HELP</button>
@@ -108,19 +108,19 @@
     <div class="det-h"><h2>HOW TO USE THIS SCREEN</h2><button class="x" id="help-x" aria-label="close">×</button></div>
     <div class="det-body">
       <h3>The picture</h3>
-      <p>Four boxes. <b>CHAOS MONKEY</b> is us: we attack the <b>LEGACY SYSTEMS</b> of an old bank on purpose (a website, a Unix file server, a 1987 mainframe). <b>THE BEES</b> are AI agents that watch those systems and fix what broke, live. <b>THE GARDENER</b> is a separate system <i>outside</i> the swarm: it turns a failure that keeps coming back into new, tested code. Its links to the Bees are arrows across the swarm boundary: the Bees ask it for help and hand it repeats, it pauses them while it upgrades, and it pushes tools and known fixes back to the Scouts. Arrows light up as it happens: red = an attack lands, green = a fix is verified, orange = new code deployed. Everything you see is read live from MongoDB.</p>
+      <p>Four boxes. <b>HORNETS</b> is us: we attack <b>THE HIVE</b> of an old bank on purpose (a website, a Unix file server, a 1987 mainframe). <b>THE COLONY</b> are AI agents that watch those systems and fix what broke, live. <b>THE GARDENER</b> is a separate system <i>outside</i> the swarm: it turns a failure that keeps coming back into new, tested code. Its links to the Bees are arrows across the swarm boundary: the Bees ask it for help and hand it repeats, it pauses them while it upgrades, and it pushes tools and known fixes back to the Scouts. Arrows light up as it happens: red = an attack lands, green = a fix is verified, orange = new code deployed. Everything you see is read live from MongoDB.</p>
       <h3>Looking inside</h3>
       <table>
-        <tr><td>Click a box · keys 1 2 3 4</td><td>Zoom in: 1 Chaos Monkey (every attack and the defence that answered it) · 2 Legacy systems (the cascade, what each system claims, the lie) · 3 the Bees (each agent, the system it is working on, its moves on a timeline) · 4 the Gardener (the code fix, step by step).</td></tr>
+        <tr><td>Click a box · keys 1 2 3 4</td><td>Zoom in: 1 Hornets (every attack and the defence that answered it) · 2 The hive (the cascade, what each system claims, the lie) · 3 The colony (each agent, the system it is working on, its moves on a timeline) · 4 The Beekeeper (the code fix, step by step).</td></tr>
         <tr><td>&lt; OVERVIEW · Esc · 0</td><td>Zoom back out.</td></tr>
         <tr><td>LIVE / HOW IT WORKS · V</td><td>Inside a box: what is happening now, or how that part is built (its agents, MongoDB collections and flows).</td></tr>
       </table>
       <h3>Buttons (top right)</h3>
       <table>
         <tr><td>START · S</td><td>Starts Night 1: the attack begins. After a night it reads START OVER (wipes everything, runs Night 1 again).</td></tr>
-        <tr><td>KILL A WORKER · K</td><td>Really kills (SIGKILL) the worker agent that is in the middle of a fix. Glows red when one is mid-job. A nurse agent takes over its job from the saved progress in MongoDB.</td></tr>
+        <tr><td>KILL A FORAGER · K</td><td>Really kills (SIGKILL) the worker agent that is in the middle of a fix. Glows red when one is mid-job. A nurse agent takes over its job from the saved progress in MongoDB.</td></tr>
         <tr><td>KILL THE QUEEN · Q</td><td>Kills the coordinator; the backup queen notices the silence and takes over.</td></tr>
-        <tr><td>NEXT NIGHT · N</td><td>Night 2 = the same attack again: the Bees remember it and fix it faster. Night 3 = the attack after the Gardener's upgrade: nothing breaks.</td></tr>
+        <tr><td>NEXT NIGHT · N</td><td>Night 2 = the same attack again: the colony remembers it and fixes it faster. Night 3 = the attack after the Beekeeper's upgrade: nothing breaks.</td></tr>
         <tr><td>RESET + · R</td><td>RESET THIS NIGHT keeps what the Bees learned. FULL RESET wipes everything back to before Night 1. Also: run any night, DETAILS (MongoDB, memory search, numbers).</td></tr>
         <tr><td>APPROVE / DENY</td><td>Risky steps and code deploys wait for a human. A yellow form pops up; nothing risky happens until you answer.</td></tr>
         <tr><td>? HELP · ?</td><td>This sheet.</td></tr>
