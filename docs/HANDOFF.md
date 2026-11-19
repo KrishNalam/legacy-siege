@@ -25,7 +25,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 | Design doc | `docs/design-doc.pdf` / `docs/design-doc.txt` (text extraction drops letters 'a'/'g') |
 | Interfaces | `CONTRACTS.md` (frozen contracts between the five workstreams; §8 integrator notes) |
 | How to run / demo | `README.md` (architecture, MongoDB feature map with file:line, 3-minute demo script) |
-| Screenshots | `docs/screenshots/01-idle.png` … `16-laptop-1366x768.png` (one per demo beat); `atlas-live-night1.png` = live Atlas run mid-takeover |
+| Screenshots | `docs/screenshots/diagram-*.png` (one per demo beat, from `/diagram`; regenerate with `python -m scripts.shoot DIR`) and `hero-diagram-night1.png` |
 | Containers | `deploy/` (Dockerfile, compose for local + Atlas, fly.toml, README). Image `legacy-siege:dev` built locally (676 MB) |
 
 ## 3. Architecture in 30 seconds
