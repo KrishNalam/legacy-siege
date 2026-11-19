@@ -247,7 +247,13 @@ def ensure() -> None:
         s.tool_runs.create_index([("incident", ASCENDING)])
 
     # Atlas Vector Search over playbooks ("honey"), pre-filterable by system/class/staleness
-    existing = {i["name"] for i in s.playbooks.list_search_indexes()}
+    try:
+        existing = {i["name"] for i in s.playbooks.list_search_indexes()}
+    except OperationFailure as e:
+        if e.code == 31082:  # SearchNotEnabled: a plain mongod
+            sys.exit("setup_db: this MongoDB has no Atlas Search (needed for $vectorSearch). Use Atlas or the "
+                     "mongodb/mongodb-atlas-local image (see README).")
+        raise
     if "playbook_vec" not in existing:
         s.playbooks.create_search_index(SearchIndexModel(name="playbook_vec", type="vectorSearch", definition={
             "fields": [
@@ -272,6 +278,11 @@ def ensure() -> None:
 
 def reset() -> None:
     from chaos import faults
+    try:  # a Gardener patch left on disk would make Night 1 open no incident at "version 1"
+        from gardener import pipeline as gardener_pipeline
+        gardener_pipeline.revert("mainframe")
+    except Exception as e:
+        print(f"WARNING: gardener revert skipped ({e})")
     faults.thaw_overdue(all_=True)
     faults.clear_planted_memory()
     w, s = _setup_dbs()

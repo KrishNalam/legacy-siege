@@ -34,6 +34,10 @@ services:
       # Overrides any MONGODB_URI in ../.env so compose always uses its own mongo.
       MONGODB_URI: mongodb://mongo:27017/?directConnection=true
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      # pinned: the ports below map to these; set WARROOM_HOST_PORT / SYSTEMS_HOST_PORT to move them
+      WARROOM_PORT: "8700"
+      SYSTEMS_PORT: "8701"
+      PORT: "8700"
     ports:
       - "${WARROOM_HOST_PORT:-8700}:8700"
       - "${SYSTEMS_HOST_PORT:-8701}:8701"

@@ -318,8 +318,8 @@ def main() -> int:
         d.monitor = mon
         ok = False
         try:
-            page.goto(a.base + "/", wait_until="domcontentloaded")
-            page.wait_for_function("() => window.__warroom && window.__warroom.state", timeout=30000)
+            page.goto(a.base + "/diagram", wait_until="domcontentloaded")
+            page.wait_for_selector("#ov-nodes > *", timeout=30000)
             clock.event("page_ready")
             mon.start()
             if d.preflight(reset=not a.no_reset):
@@ -333,14 +333,10 @@ def main() -> int:
                             d.drift(a.night_timeout)
             page.wait_for_timeout(1500)
             clock.event("atlas_open")
-            page.click("#btn-atlas")
-            page.wait_for_selector("#atlas-grid .acoll", timeout=20000)
-            page.wait_for_timeout(int(a.atlas_s * 1000 * 0.55))
-            card = page.query_selector('#atlas-grid .acoll[data-coll="incidents"]') or page.query_selector("#atlas-grid .acoll")
-            if card:
-                card.click()
-                clock.event("atlas_doc")
-            page.wait_for_timeout(int(a.atlas_s * 1000 * 0.45))
+            page.click("#btn-more")  # RESET + menu → DETAILS (MongoDB collections, memory search, numbers)
+            page.click("#btn-details")
+            page.wait_for_selector("#det-body > *", timeout=20000)
+            page.wait_for_timeout(int(a.atlas_s * 1000))
             clock.event("atlas_close")
             page.wait_for_timeout(500)
         except KeyboardInterrupt:

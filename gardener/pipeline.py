@@ -597,7 +597,9 @@ def run(upg_id: str, approval_timeout: float | None = None, prove_window_s: floa
             with stage(4, "deploy", "hot reload"):
                 deploy(upg_id)
             st = "deployed"
-        if st == "deployed" and not get(upg_id).get("prove"):
+        prove_doc = get(upg_id).get("prove") or {}
+        # no verdict yet (crashed mid-window, or the replay itself failed): prove (again)
+        if st == "deployed" and prove_doc.get("incident_opened") is None:
             with stage(5, "prove", "replaying the fault"):
                 prove(upg_id, prove_window_s)
     except Rejected:
@@ -619,23 +621,45 @@ def latest_backup(system: str) -> Path | None:
     return files[-1] if files else None
 
 
+def _backup_behind(system: str, current: str) -> Path | None:
+    """The backup whose Gardener patch is exactly `current`, newest first (None if `current` isn't our patch).
+
+    This is what makes revert safe: a file someone edited by hand (or a newer checkout) never matches,
+    so an old backup can't overwrite it.
+    """
+    want = patcher.sha256(current)
+    for backup in sorted(BACKUP_DIR.glob(f"{system}.*.py"), reverse=True):
+        try:
+            if patcher.sha256(build_patch(system, backup.read_text()).patched) == want:
+                return backup
+        except Exception:  # unparsable or already-patched backup: not the one
+            continue
+    return None
+
+
 def revert(system: str = "mainframe", reload: bool = True) -> dict:
-    """Restore systems/<system>.py from the latest Gardener backup and hot-reload (demo reset)."""
-    backup = latest_backup(system)
-    if backup is None:
-        return {"reverted": False, "reason": f"no backup for {system}"}
+    """Undo a Gardener deploy (demo reset): restore systems/<system>.py from the backup it was patched from.
+
+    Only touches the file when it is byte-for-byte the Gardener's patch of a backup; anything else
+    (the legacy code, or a hand edit) is left alone.
+    """
     path = inside_systems(SYSTEMS_DIR / f"{system}.py")
-    original = backup.read_text()
-    changed = not path.exists() or path.read_text() != original
-    if changed:
-        _write_atomic(path, original)
+    current = path.read_text() if path.exists() else ""
+    backup = _backup_behind(system, current)
+    if backup is None:
+        return {"reverted": False, "changed": False,
+                "reason": f"systems/{system}.py is not a Gardener patch; left as is"}
+    _write_atomic(path, backup.read_text())
     resp = None
     if reload:
         try:
             resp = reload_system(system)
         except Exception as e:
             resp = {"error": str(e)}
-    col("upgrade_requests").update_many({"system": system, "status": {"$in": ["deployed", "proven"]}},
-                                        {"$set": {"reverted_at": now()}})
-    say(f"reverted systems/{system}.py from {backup.name}" + ("" if changed else " (already original)"), system)
-    return {"reverted": True, "changed": changed, "backup": str(backup), "reload": resp}
+    try:
+        col("upgrade_requests").update_many({"system": system, "status": {"$in": ["deployed", "proven"]}},
+                                            {"$set": {"reverted_at": now()}})
+        say(f"reverted systems/{system}.py from {backup.name}", system)
+    except Exception as e:  # the file is back either way
+        log.warning("revert bookkeeping failed: %s", e)
+    return {"reverted": True, "changed": True, "backup": str(backup), "reload": resp}

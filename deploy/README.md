@@ -82,7 +82,7 @@ systems API over `127.0.0.1:8701` inside the container.
 | `VOYAGE_API_KEY` | unset | optional; local-hash embeddings without it |
 | `PACE` | `1.0` | demo speed multiplier on deliberate delays |
 | `WARROOM_PORT` / `SYSTEMS_PORT` | `8700` / `8701` | ports inside the container |
-| `PUBLIC_HOST` | `100.105.248.23` | host shown in printed URLs; set it to your public hostname |
+| `PUBLIC_HOST` | `localhost` | unused by the app (kept for compatibility) |
 | `WORLD_DB` / `SWARM_DB` | `world` / `swarm` | DB names; change them to share one cluster between deployments |
 
 ## Notes

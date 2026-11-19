@@ -84,7 +84,11 @@ def run(agent: Agent) -> None:
                                                                      "generation": 0}}, upsert=True)
     started = time.monotonic()
     holding = {"gen": None}
-    handled: set[str] = set()
+    # keyed by (id, opened_at): a full reset restarts ids at INC-0001, and a new INC-0001 must not look handled
+    handled: set[tuple] = set()
+
+    def key(inc: dict) -> tuple:
+        return inc["_id"], inc.get("opened_at")
     last_status = {"text": None}
 
     def hold_crown() -> bool:
@@ -130,7 +134,7 @@ def run(agent: Agent) -> None:
             r = col("incidents").update_one({"_id": inc["_id"], "status": "open", "assigned_to": inc["assigned_to"]},
                                             {"$set": {"assigned_to": None, "assigned_at": None}})
             if r.modified_count:
-                handled.discard(inc["_id"])
+                handled.discard(key(inc))
                 agent.think(f"{inc['assigned_to']} never picked up {inc['_id']}; putting it back in the queue.",
                             incident=inc["_id"], pause=False)
 
@@ -141,8 +145,8 @@ def run(agent: Agent) -> None:
             repair_assignments()
         for inc in unassigned_by_priority([i for i in col("incidents").find({"active": True, "status": "open",
                                                                               "assigned_to": None})
-                                           if i["_id"] not in handled]):
-            handled.add(inc["_id"])
+                                           if key(i) not in handled]):
+            handled.add(key(inc))
             graph.invoke({"incident": inc["_id"]}, {"configurable": {"thread_id": f"{inc['_id']}:queen"}},
                          durability="exit")
         for apr in col("approvals").find({"status": "pending", "relayed_by": None}):

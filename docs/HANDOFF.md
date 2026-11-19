@@ -25,7 +25,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 | Design doc | `docs/design-doc.pdf` / `docs/design-doc.txt` (text extraction drops letters 'a'/'g') |
 | Interfaces | `CONTRACTS.md` (frozen contracts between the five workstreams; §8 integrator notes) |
 | How to run / demo | `README.md` (architecture, MongoDB feature map with file:line, 3-minute demo script) |
-| Screenshots | `docs/screenshots/01-idle.png` … `16-laptop-1366x768.png` (one per demo beat); `atlas-live-night1.png` = live Atlas run mid-takeover |
+| Screenshots | `docs/screenshots/diagram-*.png` (one per demo beat, from `/diagram`; regenerate with `python -m scripts.shoot DIR`) and `hero-diagram-night1.png` |
 | Containers | `deploy/` (Dockerfile, compose for local + Atlas, fly.toml, README). Image `legacy-siege:dev` built locally (676 MB) |
 
 ## 3. Architecture in 30 seconds
@@ -45,7 +45,7 @@ leases, ledger, checkpoints, playbook memory) lives in MongoDB; the processes ar
 - **Open the war room:** http://100.105.248.23:8700 → buttons: Night 1, Night 2, Night 3 (replay),
   Kill a worker, fault launcher, Reset (Full / Next round), Atlas.
 - **Views:** `/diagram` (the stage view Krish demos: 4 boxes, zoom 1-4, V = Live / How it works, `?` help),
-  `/why` (pitch page), `/flow`, classic on `/`. `WARROOM_VIEW=diagram` makes `/` serve the diagram.
+  `/why` (pitch page), `/flow`. `/` serves the diagram (`WARROOM_VIEW=flow` switches it). The classic view was removed.
 - **Demo order:** Reset ▸ Full → Night 1 → Approve → Kill a worker (button glows when ready) → wait for
   green → Reset ▸ Next round → Night 2 → Approve → Approve (upgrade) → Night 3 → Atlas.
   Full table: README "The 3-minute demo".
@@ -142,7 +142,7 @@ The 15:00 stage pick and its evidence live in `/srv/shared/legacy-siege-mail/res
 - Hive: `SWARM_DYNAMIC` (agents scale), `SWARM_COMMS` (agents talk; also the live roster `swarm.roster`, `GET /api/roster`), `SWARM_RECOVERY` (re-plan failed fixes; its own
   switch, RED_FLEET no longer turns it on), `FAILURE_MEMORY` (learn from failures), `SWARM_LEASE_DEADLINE` (local lease
   deadline; keep off on stage).
-- Stage: `WARROOM_VIEW` (`diagram|flow|classic`, what `/` serves; not a 0/1 switch), `DEMO_AUTOPLAY` (nights run on their own), `SCHEMA_DRIFT_DEMO` (night-3 field rename; off for demo_check).
+- Stage: `WARROOM_VIEW` (`diagram|flow`, what `/` serves; not a 0/1 switch), `DEMO_AUTOPLAY` (nights run on their own), `SCHEMA_DRIFT_DEMO` (night-3 field rename; off for demo_check).
 - Chaos: `CHAOS_OUTCOMES`, `CHAOS_AGENT_LIE`, `CHAOS_AGENT_FREEZE`, `CHAOS_POISON_MEMORY` (defence fires only with
   `SWARM_RECOVERY=1 FAILURE_MEMORY=1`).
 - Red: `RED_FLEET` (stage-safe only tamed: `RED_FLEET_AGENTS=red-assassin RED_FLEET_VICTIMS=worker:step_sent

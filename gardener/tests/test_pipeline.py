@@ -177,6 +177,18 @@ def test_revert_restores_original_and_reloads(env, monkeypatch):
     assert pipeline.revert("mainframe")["changed"] is False  # idempotent
 
 
+def test_revert_leaves_hand_edited_file_alone(env, monkeypatch):
+    monkeypatch.setattr(pipeline, "fire_fault", lambda f, t: "test")
+    upg_id = new_request()
+    decide_later(upg_id, "approved", delay=0)
+    pipeline.run(upg_id, approval_timeout=20, prove_window_s=0.5)
+    assert pipeline.revert("mainframe")["changed"]  # back to the legacy code; the backup is still on disk
+    edited = env["file"].read_text() + "\n# someone's newer work\n"
+    env["file"].write_text(edited)
+    res = pipeline.revert("mainframe")
+    assert res["reverted"] is False and env["file"].read_text() == edited
+
+
 def test_reload_failure_restores_original(env, monkeypatch):
     def boom(path, json=None, timeout=15):
         raise RuntimeError("systems down")

@@ -16,6 +16,10 @@ services:
     environment:
       MONGODB_URI: ${MONGODB_URI:?set MONGODB_URI to your Atlas connection string}
       PUBLIC_HOST: ${PUBLIC_HOST:-localhost}
+      # pinned: the ports below map to these; set WARROOM_HOST_PORT / SYSTEMS_HOST_PORT to move them
+      WARROOM_PORT: "8700"
+      SYSTEMS_PORT: "8701"
+      PORT: "8700"
     ports:
       - "${WARROOM_HOST_PORT:-8700}:8700"
       - "${SYSTEMS_HOST_PORT:-8701}:8701"

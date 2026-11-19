@@ -27,9 +27,9 @@ WORLD_DB = os.environ.get("WORLD_DB", "world")
 SWARM_DB = os.environ.get("SWARM_DB", "swarm")
 
 SYSTEMS_PORT = int(os.environ.get("SYSTEMS_PORT", 8701))
-WARROOM_PORT = int(os.environ.get("WARROOM_PORT", 8700))
+WARROOM_PORT = int(os.environ.get("WARROOM_PORT") or os.environ.get("PORT") or 8700)  # PORT: PaaS hosts (Fly)
 SYSTEMS_URL = os.environ.get("SYSTEMS_URL", f"http://127.0.0.1:{SYSTEMS_PORT}")
-PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "100.105.248.23")
+PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "localhost")
 
 HEARTBEAT_S = _f("HEARTBEAT_S", 3)
 LEASE_S = _f("LEASE_S", 10)
