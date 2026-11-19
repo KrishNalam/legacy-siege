@@ -160,7 +160,7 @@ Some optional switches add agents (see [docs/configuration.md](docs/configuratio
 | Unix | A file-transfer host | Goes `degraded` and blames the mainframe when no batch file arrives. |
 | Portal | Online banking | Goes `degraded` and blames unix, but keeps serving stale balances with HTTP 200. |
 
-A more detailed diagram is in [`docs/diagrams/`](docs/diagrams/README.md).
+Each part has its own page with a detailed diagram: [systems](systems/README.md) · [swarm](swarm/README.md) · [chaos](chaos/README.md) · [gardener](gardener/README.md) · [warroom](warroom/README.md).
 
 ## Configuration
 
@@ -216,15 +216,16 @@ The full list, with timing knobs, is in [docs/configuration.md](docs/configurati
 | Path | What is there |
 |---|---|
 | `run.py` | Starts and restarts the whole stack. |
-| `systems/` | The three mock legacy systems (FastAPI, port 8701). |
-| `swarm/` | The agents (LangGraph graphs, leases, recall, policy). |
-| `chaos/` | Fault library, seeded scenarios, optional Red fleet. |
-| `gardener/` | The patch pipeline and its one vetted remediation. |
-| `warroom/` | The live web UI (FastAPI + plain JavaScript, port 8700). |
+| [`systems/`](systems/README.md) | The three mock legacy systems (FastAPI, port 8701). |
+| [`swarm/`](swarm/README.md) | The agents (LangGraph graphs, leases, recall, policy). |
+| [`chaos/`](chaos/README.md) | Fault library, seeded scenarios, optional Red fleet. |
+| [`gardener/`](gardener/README.md) | The patch pipeline and its one vetted remediation. |
+| [`warroom/`](warroom/README.md) | The live web UI (FastAPI + plain JavaScript, port 8700). |
 | `common/` | Config, MongoDB access, embeddings, optional LLM. |
 | `scripts/` | Database setup, rehearsal and recording tools. |
 | `deploy/` | Dockerfile, Compose files, Fly.io config, pinned requirements. |
 
+Each linked folder has its own README with a detailed diagram, key files, tests and switches.
 Interfaces between parts are in [CONTRACTS.md](CONTRACTS.md). Team notes are in [docs/HANDOFF.md](docs/HANDOFF.md).
 
 ## Context and limitations
